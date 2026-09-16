@@ -2,6 +2,7 @@
 
 [![Tests](https://github.com/mosquito/aiohttp-tiny-mcp/actions/workflows/tests.yml/badge.svg)](https://github.com/mosquito/aiohttp-tiny-mcp/actions/workflows/tests.yml)
 [![PyPI version](https://img.shields.io/pypi/v/aiohttp-tiny-mcp.svg)](https://pypi.org/project/aiohttp-tiny-mcp/)
+[![License](https://img.shields.io/pypi/l/aiohttp-tiny-mcp.svg)](https://github.com/mosquito/aiohttp-tiny-mcp/blob/master/LICENSE)
 [![Python versions](https://img.shields.io/pypi/pyversions/aiohttp-tiny-mcp.svg)](https://pypi.org/project/aiohttp-tiny-mcp/)
 [![Documentation](https://img.shields.io/badge/docs-online-blue.svg)](https://mosquito.github.io/aiohttp-tiny-mcp/)
 

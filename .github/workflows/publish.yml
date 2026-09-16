@@ -42,6 +42,6 @@ jobs:
       - uses: pypa/gh-action-pypi-publish@release/v1
 
       - name: Upload artifacts to GitHub Release
-        run: gh release upload "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY"
+        run: gh release upload "$GITHUB_REF_NAME" dist/* README.md --repo "$GITHUB_REPOSITORY"
         env:
           GH_TOKEN: ${{ github.token }}
