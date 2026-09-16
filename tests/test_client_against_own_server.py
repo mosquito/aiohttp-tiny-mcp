@@ -155,7 +155,6 @@ async def test_mrtr_unsupported_on_legacy(real_server_url):
         assert "cannot ask" in content.text
 
 
-
 ASKABLE = [a for a in ADAPTERS if a.can_ask or a.can_push_ask or a.asks_in_arguments]
 
 
