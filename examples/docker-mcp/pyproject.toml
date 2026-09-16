@@ -1,0 +1,55 @@
+[project]
+name = "docker-mcp"
+version = "0.1.0"
+description = "An MCP server for Docker, over aiohttp-tiny-mcp."
+requires-python = ">=3.10"
+dependencies = [
+    "aiodocker>=0.24",
+    # The sessions and events live in one SQLite file; the package brings the
+    # backends for it.
+    "aiohttp-tiny-mcp[sqlite]",
+    "argclass>=1.0",
+]
+
+[project.scripts]
+docker-mcp = "docker_mcp.__main__:main"
+
+[dependency-groups]
+dev = [
+    "markdown-pytest",
+    "pytest",
+    "pytest-asyncio",
+    "ty>=0.0.80",
+]
+
+[build-system]
+requires = ["uv_build>=0.11.32,<0.12"]
+build-backend = "uv_build"
+
+[tool.uv.sources]
+aiohttp-tiny-mcp = { path = "../..", editable = true }
+
+[tool.uv.build-backend]
+module-root = ""
+module-name = "docker_mcp"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+# `tests` on the path, so the fake daemon imports plainly from conftest.
+pythonpath = ["tests"]
+testpaths = ["tests", "README.md"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "TID"]
+
+[tool.ruff.lint.flake8-tidy-imports]
+# Allow sibling-relative imports; require absolute imports across parent packages.
+ban-relative-imports = "parents"
+
+
+[tool.ty.environment]
+root = ["."]

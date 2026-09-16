@@ -1,0 +1,107 @@
+name: tests
+
+on:
+  push:
+  pull_request:
+
+# The published pages are the deployment; one at a time, and a newer commit
+# waits for the running one rather than cancelling it.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+
+    services:
+      # The Redis and PostgreSQL backends are tested against real servers.
+      # `MCP_REQUIRE_BACKENDS` below turns a server that did not start into a
+      # failure, because a skipped test looks exactly like a passing one.
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: mcp
+          POSTGRES_PASSWORD: mcp
+          POSTGRES_DB: mcp
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U mcp"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: ${{ matrix.python }}
+          enable-cache: true
+
+      # The console and the event stream are checked with the runtime that
+      # runs them: a browser's JavaScript, and undici's EventSource.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - run: uv sync --all-groups --all-extras
+
+      - run: uv run ruff format --check .
+      - run: uv run ruff check .
+      - run: uv run ty check src/ examples/
+      - run: uv run pytest -q
+        env:
+          POSTGRES_URL: postgresql://mcp:mcp@127.0.0.1:5432/mcp
+          MCP_REQUIRE_BACKENDS: "1"
+
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.13"
+          enable-cache: true
+
+      - run: uv sync --all-groups --all-extras
+
+      # `-W` because a warning here is a page that renders wrong or a
+      # reference that points nowhere, and both read as fine in a log.
+      - run: uv run sphinx-build -W --keep-going -b html docs docs/_build
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs/_build
+
+  publish:
+    # Only the default branch is published, and only where the tests and the
+    # documentation both came out green.
+    needs: [test, docs]
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en" data-endpoint="{{ENDPOINT}}" data-console="{{BASE}}">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{TITLE}}</title>
+<link rel="stylesheet" href="{{BASE}}/console.css">
+<link rel="icon" href="data:,">
+</head>
+<body>
+
+<header class="bar">
+  <h1>{{TITLE}}</h1>
+  <span class="field">
+    <span>Endpoint</span>
+    <code id="endpoint" class="endpoint"></code>
+  </span>
+  <label class="field">
+    <span>Revision</span>
+    <select id="revision" class="revision"></select>
+  </label>
+  <label class="toggle" title="Answer a question the server asks, instead of refusing it">
+    <input id="answerable" type="checkbox" checked>
+    <span>Can be asked</span>
+  </label>
+  <button id="connect" class="primary">Connect</button>
+  <span id="status" class="status">not connected</span>
+</header>
+
+<main class="layout">
+
+  <nav class="panel catalogue" id="catalogue-panel">
+    <div class="panel-head">
+      <button id="catalogue-toggle" class="disclose" type="button" aria-expanded="true"
+              aria-controls="catalogue" title="Show or hide what this server offers">
+        <svg viewBox="0 0 16 16" width="11" height="11" aria-hidden="true">
+          <path d="M5 3l6 5-6 5" fill="none" stroke="currentColor"
+                stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </button>
+      <h2>Offered</h2>
+      <button id="refresh" class="quiet" disabled>Refresh</button>
+    </div>
+    <div id="catalogue" class="scroll">
+      <p class="empty">Connect to see what this server offers.</p>
+    </div>
+  </nav>
+
+  <section class="panel work">
+    <div class="panel-head">
+      <h2 id="subject">Nothing selected</h2>
+      <button id="invoke" class="primary" type="submit" form="arguments" disabled>Call</button>
+    </div>
+    <div class="scroll">
+      <p id="greeting" class="greeting">{{DESCRIPTION}}</p>
+      <div id="about" class="about"></div>
+      <form id="arguments" class="arguments"></form>
+      <div id="outcome" class="outcome"></div>
+    </div>
+  </section>
+
+  <section class="panel traffic" id="traffic-panel">
+    <div class="panel-head">
+      <button id="traffic-toggle" class="disclose" type="button" aria-expanded="true"
+              aria-controls="traffic" title="Show or hide the traffic">
+        <svg viewBox="0 0 16 16" width="11" height="11" aria-hidden="true">
+          <path d="M5 3l6 5-6 5" fill="none" stroke="currentColor"
+                stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </button>
+      <h2>Traffic</h2>
+      <label class="toggle small">
+        <input id="follow" type="checkbox" checked>
+        <span>Follow</span>
+      </label>
+      <button id="clear" class="quiet">Clear</button>
+    </div>
+    <div id="traffic" class="scroll log">
+      <p class="empty">Every message, as it goes over the wire.</p>
+    </div>
+  </section>
+
+</main>
+
+<dialog id="question" class="question">
+  <form method="dialog" id="answer">
+    <h2>The server is asking</h2>
+    <p id="question-text"></p>
+    <div id="question-fields"></div>
+    <menu>
+      <button value="cancel" class="quiet">Cancel</button>
+      <button value="decline" class="quiet">Decline</button>
+      <button value="accept" class="primary" autofocus>Accept</button>
+    </menu>
+  </form>
+</dialog>
+
+<script src="{{BASE}}/console.js"></script>
+</body>
+</html>
