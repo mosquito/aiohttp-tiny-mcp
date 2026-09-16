@@ -1,15 +1,14 @@
 # aiohttp-tiny-mcp
 
 [![Tests](https://github.com/mosquito/aiohttp-tiny-mcp/actions/workflows/tests.yml/badge.svg)](https://github.com/mosquito/aiohttp-tiny-mcp/actions/workflows/tests.yml)
-[![PyPI version](https://img.shields.io/pypi/v/aiohttp-tiny-mcp.svg)](https://pypi.org/project/aiohttp-tiny-mcp/)
-[![License](https://img.shields.io/pypi/l/aiohttp-tiny-mcp.svg)](https://github.com/mosquito/aiohttp-tiny-mcp/blob/master/LICENSE)
-[![Python versions](https://img.shields.io/pypi/pyversions/aiohttp-tiny-mcp.svg)](https://pypi.org/project/aiohttp-tiny-mcp/)
+[![Latest release](https://img.shields.io/github/v/release/mosquito/aiohttp-tiny-mcp)](https://github.com/mosquito/aiohttp-tiny-mcp/releases)
+[![License](https://img.shields.io/github/license/mosquito/aiohttp-tiny-mcp)](https://github.com/mosquito/aiohttp-tiny-mcp/blob/master/LICENSE)
 [![Documentation](https://img.shields.io/badge/docs-online-blue.svg)](https://mosquito.github.io/aiohttp-tiny-mcp/)
 
 [Documentation](https://mosquito.github.io/aiohttp-tiny-mcp/) ·
 [Repository](https://github.com/mosquito/aiohttp-tiny-mcp) ·
 [Issues](https://github.com/mosquito/aiohttp-tiny-mcp/issues) ·
-[PyPI](https://pypi.org/project/aiohttp-tiny-mcp/)
+[Releases](https://github.com/mosquito/aiohttp-tiny-mcp/releases)
 
 An MCP server and client library for aiohttp, designed for **remote MCP over
 HTTP across multiple processes and servers**.
@@ -51,7 +50,7 @@ app.cleanup_ctx.append(storage.cleanup_ctx)
 ```
 
 For Redis/PostgreSQL setup, backend parameters, cleanup, and deployment
-constraints, see [stores and hubs](docs/deployment/stores.md).
+constraints, see [stores and hubs](https://mosquito.github.io/aiohttp-tiny-mcp/deployment/stores.html).
 
 ## Start a server
 
@@ -61,7 +60,7 @@ Python 3.10+ is required. Runtime dependencies are `aiohttp` and `pydantic`.
 pip install aiohttp-tiny-mcp
 ```
 
-For a first runnable server and client, follow the [quickstart](docs/quickstart.md).
+For a first runnable server and client, follow the [quickstart](https://mosquito.github.io/aiohttp-tiny-mcp/quickstart.html).
 The example below adds a resource and a tool that asks for confirmation. Save
 it as `server.py`. The deployment result is illustrative; replace it with your
 application's operation.
@@ -140,7 +139,7 @@ docstring become its name and description. `ex: Exchange` is supplied by the
 library, so the caller only supplies `service`. `ex.ask` requests a decision
 from the client. Put irreversible work after the final question: some revisions
 restart the handler when the answer arrives. Python locals are not persisted
-automatically. See [Asking the user](docs/guide/asking.md).
+automatically. See [Asking the user](https://mosquito.github.io/aiohttp-tiny-mcp/guide/asking.html).
 
 ## Call it from Python
 
@@ -170,7 +169,7 @@ async with Client(url, adapter, on_ask=answer, log_level="info") as client:
 ```
 
 The subscription loop waits for a resource-change event. The server snippet
-above does not publish changes; see [Notifications](docs/guide/notifications.md)
+above does not publish changes; see [Notifications](https://mosquito.github.io/aiohttp-tiny-mcp/guide/notifications.html)
 for that part, or omit the loop when testing only the tool call.
 `StdioClient` provides the corresponding client over a subprocess's stdin/stdout.
 
@@ -178,25 +177,25 @@ for that part, or omit the loop when testing only the tool call.
 
 The project includes reproducible HTTP and stdio benchmarks against the
 official SDK. Results depend on Python, hardware, and protocol revision; see
-[the benchmark methodology and full results](docs/reference/benchmarks.md)
+[the benchmark methodology and full results](https://mosquito.github.io/aiohttp-tiny-mcp/reference/benchmarks.html)
 instead of treating a README number as a guarantee.
 
 ## Documentation
 
-Start with [the documentation overview](docs/index.md), then follow:
+Start with [the documentation overview](https://mosquito.github.io/aiohttp-tiny-mcp/), then follow:
 
-1. [Tools, resources, and prompts](docs/concepts.md): what to expose and what the client sees.
-2. [Quickstart](docs/quickstart.md): a complete server, launch command, and client call.
-3. [How the server fits together](docs/pieces.md): a conversation across two workers and each object's lifetime.
-4. [Using Exchange](docs/guide/exchange.md): request context, progress, questions, and state.
-5. [Authentication](docs/guide/auth.md): bearer-token verification and OAuth resource metadata.
-6. [Stores and hubs](docs/deployment/stores.md): shared backend contracts and deployment requirements.
+1. [Tools, resources, and prompts](https://mosquito.github.io/aiohttp-tiny-mcp/concepts.html): what to expose and what the client sees.
+2. [Quickstart](https://mosquito.github.io/aiohttp-tiny-mcp/quickstart.html): a complete server, launch command, and client call.
+3. [How the server fits together](https://mosquito.github.io/aiohttp-tiny-mcp/pieces.html): a conversation across two workers and each object's lifetime.
+4. [Using Exchange](https://mosquito.github.io/aiohttp-tiny-mcp/guide/exchange.html): request context, progress, questions, and state.
+5. [Authentication](https://mosquito.github.io/aiohttp-tiny-mcp/guide/auth.html): bearer-token verification and OAuth resource metadata.
+6. [Stores and hubs](https://mosquito.github.io/aiohttp-tiny-mcp/deployment/stores.html): shared backend contracts and deployment requirements.
 
 The server supports `2026-07-28`, `2025-11-25`, `2025-06-18`, `2025-03-26`
 and `2024-11-05`.
 Delivery mechanisms and client support differ; see the
-[compatibility table](docs/reference/parity.md) and
-[implementation coverage](docs/reference/verification.md#not-implemented).
+[compatibility table](https://mosquito.github.io/aiohttp-tiny-mcp/reference/parity.html) and
+[implementation coverage](https://mosquito.github.io/aiohttp-tiny-mcp/reference/verification.html#not-implemented).
 
 Documentation examples are checked by the test suite. From a source checkout:
 
