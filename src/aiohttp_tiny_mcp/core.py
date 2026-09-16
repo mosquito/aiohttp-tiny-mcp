@@ -24,8 +24,8 @@ class StringEnum(str, Enum):
     def __str__(self) -> str:
         return str(self.value)
 
-    def __format__(self, spec: str) -> str:
-        return format(str(self), spec)
+    def __format__(self, format_spec: str) -> str:
+        return format(str(self), format_spec)
 
 
 class Operation(StringEnum):
