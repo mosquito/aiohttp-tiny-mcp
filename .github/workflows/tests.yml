@@ -47,16 +47,16 @@ jobs:
           --health-retries 10
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: astral-sh/setup-uv@v5
+      - uses: astral-sh/setup-uv@v10
         with:
           python-version: ${{ matrix.python }}
           enable-cache: true
 
       # The console and the event stream are checked with the runtime that
       # runs them: a browser's JavaScript, and undici's EventSource.
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: "22"
 
@@ -73,9 +73,9 @@ jobs:
   docs:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: astral-sh/setup-uv@v5
+      - uses: astral-sh/setup-uv@v10
         with:
           python-version: "3.13"
           enable-cache: true
@@ -86,7 +86,7 @@ jobs:
       # reference that points nowhere, and both read as fine in a log.
       - run: uv run sphinx-build -W --keep-going -b html docs docs/_build
 
-      - uses: actions/upload-pages-artifact@v3
+      - uses: actions/upload-pages-artifact@v5
         with:
           path: docs/_build
 
@@ -104,4 +104,4 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5

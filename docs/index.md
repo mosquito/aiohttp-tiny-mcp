@@ -1,5 +1,15 @@
 # aiohttp-tiny-mcp
 
+[![Tests](https://github.com/mosquito/aiohttp-tiny-mcp/actions/workflows/tests.yml/badge.svg)](https://github.com/mosquito/aiohttp-tiny-mcp/actions/workflows/tests.yml)
+[![PyPI version](https://img.shields.io/pypi/v/aiohttp-tiny-mcp.svg)](https://pypi.org/project/aiohttp-tiny-mcp/)
+[![Python versions](https://img.shields.io/pypi/pyversions/aiohttp-tiny-mcp.svg)](https://pypi.org/project/aiohttp-tiny-mcp/)
+[![Documentation](https://img.shields.io/badge/docs-online-blue.svg)](https://mosquito.github.io/aiohttp-tiny-mcp/)
+
+[Documentation](https://mosquito.github.io/aiohttp-tiny-mcp/) ·
+[Repository](https://github.com/mosquito/aiohttp-tiny-mcp) ·
+[Issues](https://github.com/mosquito/aiohttp-tiny-mcp/issues) ·
+[PyPI](https://pypi.org/project/aiohttp-tiny-mcp/)
+
 `aiohttp-tiny-mcp` turns an aiohttp service into a remote MCP server. Declare
 Python handlers as tools, resources, or prompts; the library exposes them over
 Streamable HTTP or stdio.

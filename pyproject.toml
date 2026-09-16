@@ -7,6 +7,11 @@ dependencies = [
     "pydantic>=2.13",
 ]
 
+[project.urls]
+Documentation = "https://mosquito.github.io/aiohttp-tiny-mcp/"
+Repository = "https://github.com/mosquito/aiohttp-tiny-mcp"
+Issues = "https://github.com/mosquito/aiohttp-tiny-mcp/issues"
+
 [project.optional-dependencies]
 # A hub and a session store on one SQLite file: aiohttp_tiny_mcp.sqlite.
 sqlite = ["aiosqlite>=0.20"]

@@ -13,7 +13,22 @@ from pydantic import BaseModel
 from .models import Implementation, Params
 
 
-class Operation(str, Enum):
+class StringEnum(str, Enum):
+    """A string enum that formats as its value on every Python.
+
+    From 3.11 a plain `str, Enum` formats as `Class.MEMBER` where 3.10 gave
+    the value, so a name reaching a message or a wire field would change with
+    the interpreter.
+    """
+
+    def __str__(self) -> str:
+        return str(self.value)
+
+    def __format__(self, spec: str) -> str:
+        return format(str(self), spec)
+
+
+class Operation(StringEnum):
     DESCRIBE = "describe"
     HANDSHAKE_COMPLETE = "handshake_complete"
     PING = "ping"
@@ -62,7 +77,7 @@ class ClientProfile:
     log_level: str | None = None
 
 
-class FailureKind(str, Enum):
+class FailureKind(StringEnum):
     PARSE = "parse"
     MALFORMED = "malformed"
     UNKNOWN_METHOD = "unknown_method"
@@ -252,7 +267,7 @@ def elicit_cancel() -> dict[str, Any]:
     return {"action": "cancel"}
 
 
-class AnswerAction(str, Enum):
+class AnswerAction(StringEnum):
     """What a client did with one input request (`ElicitResult.action`)."""
 
     ACCEPT = "accept"
