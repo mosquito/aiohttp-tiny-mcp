@@ -4,6 +4,10 @@ on:
   push:
   pull_request:
 
+# The log is read by people; the tools only colour a terminal unless told.
+env:
+  FORCE_COLOR: "1"
+
 # The published pages are the deployment; one at a time, and a newer commit
 # waits for the running one rather than cancelling it.
 concurrency:
@@ -65,7 +69,7 @@ jobs:
       - run: uv run ruff format --check .
       - run: uv run ruff check .
       - run: uv run ty check src/ examples/
-      - run: uv run pytest -q
+      - run: uv run pytest -v
         env:
           POSTGRES_URL: postgresql://mcp:mcp@127.0.0.1:5432/mcp
           MCP_REQUIRE_BACKENDS: "1"
