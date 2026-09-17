@@ -77,9 +77,11 @@ build-backend = "uv_build"
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
-# A test gets a second. A hung one then fails and names itself rather than
-# stopping the run. The few that pay for a process start say so with a marker.
-timeout = 1
+# The guard against a hung test, not a measure of how fast the machine is. A
+# loaded runner is an order of magnitude slower than a laptop, so a budget
+# tight enough to catch a wait fails on a slow disk instead. A test that must
+# not wait carries its own marker.
+timeout = 30
 # Calling a deprecated SDK method is deliberate where it happens, and says so
 # with `pytest.warns`. Anywhere else it is a finding, not a log line.
 filterwarnings = ["error::mcp.shared.exceptions.MCPDeprecationWarning"]

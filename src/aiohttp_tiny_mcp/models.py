@@ -80,8 +80,8 @@ ContentBlock = Annotated[
 class ResultModel(Model):
     """resultType is required on 2026-07-28; legacy adapters leave it unset."""
 
-    result_type: Literal["complete"] | None = Field(None, alias="resultType")
-    meta: Meta | None = Field(None, alias="_meta")
+    result_type: Literal["complete"] | None = Field(default=None, alias="resultType")
+    meta: Meta | None = Field(default=None, alias="_meta")
 
 
 class CacheableResult(ResultModel):
@@ -272,15 +272,23 @@ class ErrorResponse(Model):
 class Meta(Model):
     """Wire _meta, aliased because Pydantic treats leading underscores as private."""
 
-    protocol_version: str | None = Field(None, alias="io.modelcontextprotocol/protocolVersion")
-    client_info: Implementation | None = Field(None, alias="io.modelcontextprotocol/clientInfo")
+    protocol_version: str | None = Field(
+        default=None, alias="io.modelcontextprotocol/protocolVersion"
+    )
+    client_info: Implementation | None = Field(
+        default=None, alias="io.modelcontextprotocol/clientInfo"
+    )
     client_capabilities: dict[str, Any] | None = Field(
-        None, alias="io.modelcontextprotocol/clientCapabilities"
+        default=None, alias="io.modelcontextprotocol/clientCapabilities"
     )
     #: 2026-07-28 server identity, included in every result.
-    server_info: Implementation | None = Field(None, alias="io.modelcontextprotocol/serverInfo")
-    progress_token: str | int | None = Field(None, alias="progressToken")
-    log_level: str | None = Field(None, alias="io.modelcontextprotocol/logLevel")  # draft, SEP-2575
+    server_info: Implementation | None = Field(
+        default=None, alias="io.modelcontextprotocol/serverInfo"
+    )
+    progress_token: str | int | None = Field(default=None, alias="progressToken")
+    log_level: str | None = Field(
+        default=None, alias="io.modelcontextprotocol/logLevel"
+    )  # draft, SEP-2575
 
 
 class Params(Model):

@@ -123,14 +123,14 @@ class DiscoverResult(Model):
     instructions: str | None = None
     ttl_ms: int | None = None
     cache_scope: Literal["private", "public"] | None = None
-    meta: Meta | None = Field(None, alias="_meta")
+    meta: Meta | None = Field(default=None, alias="_meta")
 
 
 class InputRequiredResult(Model):
     result_type: Literal["input_required"] = "input_required"
     input_requests: dict[str, Any]
     request_state: str | None = None
-    meta: Meta | None = Field(None, alias="_meta")
+    meta: Meta | None = Field(default=None, alias="_meta")
 
 
 class Adapter2026_07_28(Adapter):  # noqa: N801 -- revision date, greppable against the spec
