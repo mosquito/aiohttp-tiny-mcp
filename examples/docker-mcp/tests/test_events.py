@@ -26,21 +26,29 @@ async def first_change(stream):
     return None
 
 
+async def nudge_until(fake, heard) -> None:
+    """Keep the daemon emitting; the subscriber may not be open for the first one."""
+    while not heard.done():
+        fake.live.put_nowait({"Type": "container", "Action": "start", "Actor": {"ID": "cafe"}})
+        await asyncio.sleep(0.05)
+
+
 @pytest.mark.parametrize("adapter", EVERY_REVISION, ids=lambda a: a.version)
-async def test_a_daemon_event_reaches_a_subscriber(url, registry, client, adapter):
+async def test_a_daemon_event_reaches_a_subscriber(url, registry, client, fake, adapter):
     """Let the relay publish the daemon event through the production notification path."""
     async with Client(url, adapter) as subscriber:
         await subscriber.initialize()
         stream = subscriber.listen(resources=["docker://containers"])
         heard = asyncio.ensure_future(first_change(stream))
-        await asyncio.sleep(0.05)
 
         watching = asyncio.ensure_future(relay(registry, client))
+        nudging = asyncio.ensure_future(nudge_until(fake, heard))
         try:
             change = await asyncio.wait_for(asyncio.shield(heard), 5)
         finally:
-            watching.cancel()
-            await asyncio.gather(watching, return_exceptions=True)
+            for task in (watching, nudging):
+                task.cancel()
+            await asyncio.gather(watching, nudging, return_exceptions=True)
             await stream.aclose()
 
     assert change["method"] == "notifications/resources/updated"

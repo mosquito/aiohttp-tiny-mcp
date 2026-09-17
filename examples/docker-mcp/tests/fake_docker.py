@@ -12,8 +12,6 @@ from typing import Any
 
 from aiohttp import web
 
-HELD: web.AppKey[Any] = web.AppKey("events_held", object)
-
 VERSION = {
     "Version": "27.1.0",
     "ApiVersion": "1.46",
@@ -182,6 +180,8 @@ class FakeDocker:
         self.exec_stderr = b""
         self.exec_exit = 0
         self.exec_delay = 0.0
+        #: Events for an open stream after the history. `None` ends the stream.
+        self.live: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()
         self.events = [
             {
                 "Type": "container",
@@ -497,5 +497,7 @@ class FakeDocker:
         if request.query.get("until"):
             await response.write_eof()
             return response
-        await request.app[HELD].wait()
+        while (event := await self.live.get()) is not None:
+            await response.write(json.dumps(event).encode() + b"\n")
+        self.live.put_nowait(None)
         return response

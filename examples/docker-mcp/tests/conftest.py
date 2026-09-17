@@ -10,7 +10,7 @@ from aiodocker import Docker
 from aiohttp import web
 from aiohttp_tiny_mcp import Endpoint, Registry
 from aiohttp_tiny_mcp.sqlite import SqliteHub, SqliteSessionStore, SqliteStorage
-from fake_docker import HELD, FakeDocker
+from fake_docker import FakeDocker
 
 from docker_mcp.server import build
 
@@ -23,7 +23,6 @@ def fake() -> FakeDocker:
 @pytest.fixture
 async def docker_url(fake: FakeDocker) -> AsyncIterator[str]:
     app = fake.app()
-    app[HELD] = asyncio.Event()
     runner = web.AppRunner(app)
     await runner.setup()
     site = web.TCPSite(runner, "127.0.0.1", 0)
@@ -32,7 +31,7 @@ async def docker_url(fake: FakeDocker) -> AsyncIterator[str]:
     try:
         yield f"http://{host}:{port}"
     finally:
-        app[HELD].set()
+        fake.live.put_nowait(None)
         await runner.cleanup()
 
 
