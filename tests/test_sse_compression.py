@@ -101,8 +101,19 @@ async def test_compression_can_be_turned_off(registry):
 
 async def test_the_notification_stream_is_compressed(registry):
     """The legacy `GET` stream stays open for as long as the client does, so
-    it is the one a proxy is most likely to cut without keep-alives."""
+    it is the one a proxy is most likely to cut without keep-alives.
+
+    The stream is opened at a known id, so the event is published before
+    the server looks and the test does not race it."""
     app = Endpoint(registry).app("/mcp")
+    where = topic(NOTIFICATIONS)
+    anchor = await registry.hub.publish(where, {"jsonrpc": "2.0", "method": "notifications/x"})
+    published = {
+        "jsonrpc": "2.0",
+        "method": "notifications/tools/list_changed",
+        "params": {},
+    }
+    await registry.hub.publish(where, published)
     async with TestClient(TestServer(app)) as client:
         opened = await client.post(
             "/mcp",
@@ -122,19 +133,12 @@ async def test_the_notification_stream_is_compressed(registry):
                 "Accept": "text/event-stream",
                 "Mcp-Session-Id": session,
                 "MCP-Protocol-Version": "2025-11-25",
+                "Last-Event-ID": anchor,
                 **GZIP,
             },
         )
         assert stream.headers["Content-Encoding"] == "gzip"
-
-        reading = read_sse(stream)
-        published = {
-            "jsonrpc": "2.0",
-            "method": "notifications/tools/list_changed",
-            "params": {},
-        }
-        await registry.hub.publish(topic(NOTIFICATIONS), published)
-        event = await reading.__anext__()
+        event = await read_sse(stream).__anext__()
         stream.close()
     assert json.loads(event.data or "")["method"] == "notifications/tools/list_changed"
 

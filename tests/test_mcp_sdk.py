@@ -99,15 +99,25 @@ async def test_a_subscription_reaches_the_real_sdk_client(real_server_url, regis
             assert result.capabilities.resources.subscribe is True
             with pytest.warns(MCPDeprecationWarning, match="resources/subscribe"):
                 await session.subscribe_resource("config://app")
-            await registry.hub.publish(
-                topic(NOTIFICATIONS),
-                {
-                    "jsonrpc": "2.0",
-                    "method": "notifications/resources/updated",
-                    "params": {"uri": "config://app"},
-                },
-            )
-            assert str(await asyncio.wait_for(heard.get(), 5)) == "config://app"
+
+            async def publish_until_heard() -> None:
+                # The SDK opens its GET stream on its own schedule.
+                while heard.empty():
+                    await registry.hub.publish(
+                        topic(NOTIFICATIONS),
+                        {
+                            "jsonrpc": "2.0",
+                            "method": "notifications/resources/updated",
+                            "params": {"uri": "config://app"},
+                        },
+                    )
+                    await asyncio.sleep(0.05)
+
+            publishing = asyncio.create_task(publish_until_heard())
+            try:
+                assert str(await asyncio.wait_for(heard.get(), 5)) == "config://app"
+            finally:
+                publishing.cancel()
 
 
 async def test_logging_reaches_the_real_sdk_client(real_server_url):
