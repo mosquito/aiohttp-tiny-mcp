@@ -19,6 +19,7 @@ dev = [
     "markdown-pytest",
     "pytest",
     "pytest-asyncio",
+    "pytest-cov>=7.1.0",
     "ty>=0.0.80",
 ]
 

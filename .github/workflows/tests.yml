@@ -69,26 +69,78 @@ jobs:
       - run: uv run ruff format --check .
       - run: uv run ruff check .
       - run: uv run ty check src/ examples/
-      - run: uv run pytest -v --cov --cov-report=lcov:coverage.lcov
+      - run: uv run pytest -v --cov
         env:
           POSTGRES_URL: postgresql://mcp:mcp@127.0.0.1:5432/mcp
           MCP_REQUIRE_BACKENDS: "1"
+          COVERAGE_FILE: .coverage.lib-${{ matrix.python }}
 
-      # One report per interpreter; the `coverage` job below closes the set.
+      # Raw coverage data, not a report: the `coverage` job combines every
+      # interpreter and every suite before one number is computed.
+      - uses: actions/upload-artifact@v7
+        with:
+          name: coverage-lib-${{ matrix.python }}
+          path: .coverage.lib-*
+          include-hidden-files: true
+          if-no-files-found: error
+
+  docker-mcp:
+    # The example is a project of its own, with its own lock file, tested the
+    # same way as the library.
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+    defaults:
+      run:
+        working-directory: examples/docker-mcp
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: astral-sh/setup-uv@v7
+        with:
+          python-version: ${{ matrix.python }}
+          enable-cache: true
+
+      - run: uv sync --all-groups
+
+      - run: uv run pytest -v --cov=aiohttp_tiny_mcp --cov=docker_mcp --cov-branch
+        env:
+          COVERAGE_FILE: ${{ github.workspace }}/.coverage.docker-${{ matrix.python }}
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: coverage-docker-${{ matrix.python }}
+          path: .coverage.docker-*
+          include-hidden-files: true
+          if-no-files-found: error
+
+  coverage:
+    needs: [test, docker-mcp]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.13"
+          enable-cache: true
+
+      - run: uv sync --all-groups
+
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: coverage-*
+          merge-multiple: true
+
+      - run: uv run coverage combine
+      - run: uv run coverage report
+      - run: uv run coverage lcov -o coverage.lcov
+
       - uses: coverallsapp/github-action@v2.3.8
         with:
           file: coverage.lcov
-          flag-name: python-${{ matrix.python }}
-          parallel: true
-
-  coverage:
-    needs: test
-    if: always()
-    runs-on: ubuntu-latest
-    steps:
-      - uses: coverallsapp/github-action@v2.3.8
-        with:
-          parallel-finished: true
 
   docs:
     runs-on: ubuntu-latest
@@ -113,7 +165,7 @@ jobs:
   publish:
     # Only the default branch is published, and only where the tests and the
     # documentation both came out green.
-    needs: [test, docs]
+    needs: [test, docker-mcp, docs]
     if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
     runs-on: ubuntu-latest
     permissions:
