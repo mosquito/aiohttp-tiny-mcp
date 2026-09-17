@@ -69,10 +69,26 @@ jobs:
       - run: uv run ruff format --check .
       - run: uv run ruff check .
       - run: uv run ty check src/ examples/
-      - run: uv run pytest -v
+      - run: uv run pytest -v --cov --cov-report=lcov:coverage.lcov
         env:
           POSTGRES_URL: postgresql://mcp:mcp@127.0.0.1:5432/mcp
           MCP_REQUIRE_BACKENDS: "1"
+
+      # One report per interpreter; the `coverage` job below closes the set.
+      - uses: coverallsapp/github-action@v2.3.8
+        with:
+          file: coverage.lcov
+          flag-name: python-${{ matrix.python }}
+          parallel: true
+
+  coverage:
+    needs: test
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: coverallsapp/github-action@v2.3.8
+        with:
+          parallel-finished: true
 
   docs:
     runs-on: ubuntu-latest

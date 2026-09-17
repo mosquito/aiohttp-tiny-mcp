@@ -59,6 +59,7 @@ dev = [
     "psycopg[binary,pool]>=3",
     "pytest",
     "pytest-asyncio",
+    "pytest-cov>=7.1.0",
     "pytest-timeout",
     "redis>=5",
     "ruff",
@@ -74,6 +75,14 @@ source-include = ["src/aiohttp_tiny_mcp/console/*.html", "src/aiohttp_tiny_mcp/c
 [build-system]
 requires = ["uv_build>=0.12,<0.13"]
 build-backend = "uv_build"
+
+[tool.coverage.run]
+source = ["aiohttp_tiny_mcp"]
+branch = true
+
+[tool.coverage.report]
+skip_covered = true
+show_missing = true
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

@@ -1,6 +1,7 @@
 # aiohttp-tiny-mcp
 
 [![Tests](https://github.com/mosquito/aiohttp-tiny-mcp/actions/workflows/tests.yml/badge.svg)](https://github.com/mosquito/aiohttp-tiny-mcp/actions/workflows/tests.yml)
+[![Coverage](https://img.shields.io/coveralls/github/mosquito/aiohttp-tiny-mcp/master)](https://coveralls.io/github/mosquito/aiohttp-tiny-mcp?branch=master)
 [![Latest release](https://img.shields.io/github/v/release/mosquito/aiohttp-tiny-mcp)](https://github.com/mosquito/aiohttp-tiny-mcp/releases)
 [![License](https://img.shields.io/github/license/mosquito/aiohttp-tiny-mcp)](https://github.com/mosquito/aiohttp-tiny-mcp/blob/master/LICENSE)
 [![Documentation](https://img.shields.io/badge/docs-online-blue.svg)](https://mosquito.github.io/aiohttp-tiny-mcp/)
