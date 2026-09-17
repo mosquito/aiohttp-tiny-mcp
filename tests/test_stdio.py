@@ -169,3 +169,40 @@ async def test_streaming_tool_reports_progress_on_every_revision(registry, versi
     assert len(progress) == 3
     assert [m["params"]["progress"] for m in progress] == [0, 1, 2]
     assert outputs[-1]["id"] == 2
+
+
+async def test_a_listing_pages_over_stdio_too(registry):
+    """Paging is the dispatcher's, so a transport without HTTP has it too."""
+    registry.page_size = 1
+    outputs: list[Mapping[str, Any]] = []
+    reader = feed(
+        {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {"protocolVersion": "2025-11-25"},
+        },
+        {"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}},
+    )
+    await serve_stdio(registry, reader, outputs.append)
+
+    first = outputs[1]["result"]
+    assert len(first["tools"]) == 1
+    cursor = first["nextCursor"]
+    assert cursor
+
+    outputs.clear()
+    reader = feed(
+        {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {"protocolVersion": "2025-11-25"},
+        },
+        {"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {"cursor": cursor}},
+    )
+    await serve_stdio(registry, reader, outputs.append)
+
+    second = outputs[1]["result"]
+    assert len(second["tools"]) == 1
+    assert second["tools"][0]["name"] > first["tools"][0]["name"], "the page after, in order"

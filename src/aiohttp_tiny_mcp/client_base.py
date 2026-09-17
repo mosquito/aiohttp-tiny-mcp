@@ -104,7 +104,9 @@ class BaseClient(ABC):
     async def reply(self, envelope: dict[str, Any]) -> None:
         """Answer a request the server made. Carries no reply of its own."""
 
-    def stream_notifications(self) -> AsyncIterator[dict[str, Any]]:
+    def stream_notifications(
+        self, *, last_event_id: str | None = None
+    ) -> AsyncIterator[dict[str, Any]]:
         """Open a separate legacy notification channel, if the transport supports one."""
         raise NotImplementedError(
             f"{type(self).__name__} has no separate stream to read notifications on"
@@ -183,9 +185,20 @@ class BaseClient(ABC):
             await self.request(Operation.SET_LOG_LEVEL, SetLevelParams(level=level))
         self.log_level = level
 
+    async def pages(self, operation: Operation) -> AsyncIterator[dict[str, Any]]:
+        """Every page of a listing, following `nextCursor` to the end."""
+        cursor: str | None = None
+        while True:
+            result = await self.request(operation, ListParams(cursor=cursor))
+            yield result
+            cursor = result.get("nextCursor")
+            if not cursor:
+                return
+
     async def list_tools(self) -> list[ToolDef]:
-        result = await self.request(Operation.LIST_TOOLS, ListParams())
-        tools = ListToolsResult.model_validate(result).tools
+        tools: list[ToolDef] = []
+        async for result in self.pages(Operation.LIST_TOOLS):
+            tools += ListToolsResult.model_validate(result).tools
         self.tool_definitions = {tool.name: tool for tool in tools}
         return tools
 
@@ -272,16 +285,20 @@ class BaseClient(ABC):
                 yield frame
 
     async def list_resources(self) -> list[ResourceDef]:
-        result = await self.request(Operation.LIST_RESOURCES, ListParams())
-        return ListResourcesResult.model_validate(result).resources
+        found: list[ResourceDef] = []
+        async for result in self.pages(Operation.LIST_RESOURCES):
+            found += ListResourcesResult.model_validate(result).resources
+        return found
 
     async def read_resource(self, uri: str) -> ReadResourceResult:
         result = await self.request(Operation.READ_RESOURCE, ReadResourceParams(uri=uri), name=uri)
         return ReadResourceResult.model_validate(result)
 
     async def list_prompts(self) -> list[PromptDef]:
-        result = await self.request(Operation.LIST_PROMPTS, ListParams())
-        return ListPromptsResult.model_validate(result).prompts
+        found: list[PromptDef] = []
+        async for result in self.pages(Operation.LIST_PROMPTS):
+            found += ListPromptsResult.model_validate(result).prompts
+        return found
 
     async def get_prompt(self, name: str, arguments: dict[str, str]) -> GetPromptResult:
         result = await self.request(

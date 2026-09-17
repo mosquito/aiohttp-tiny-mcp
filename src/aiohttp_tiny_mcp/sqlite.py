@@ -10,7 +10,7 @@ from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
-from .hub import START, Cursor, Hub
+from .hub import START, Cursor, Event, Hub
 from .sessions import SessionRecord, SessionStore
 
 try:
@@ -181,12 +181,13 @@ class SqliteHub(Hub):
         if look_again is not None:
             self.look_again = look_again
 
-    async def publish(self, topic: str, message: Mapping[str, Any]) -> None:
+    async def publish(self, topic: str, message: Mapping[str, Any]) -> Cursor:
         connection = await self.storage.open()
-        await connection.execute(
+        async with connection.execute(
             f"INSERT INTO mcp_events (topic, message, created_at) VALUES (?, ?, {NOW})",
             (topic, json.dumps(message)),
-        )
+        ) as inserted:
+            return str(inserted.lastrowid)
 
     async def position(self, topic: str) -> Cursor:
         connection = await self.storage.open()
@@ -196,30 +197,26 @@ class SqliteHub(Hub):
             row = await cursor.fetchone()
         return str(row[0]) if row is not None and row[0] is not None else START
 
-    async def after(self, topic: str, cursor: Cursor) -> tuple[list[Mapping[str, Any]], Cursor]:
-        """Everything published after `cursor`, and where to continue from."""
+    async def after(self, topic: str, cursor: Cursor) -> list[Event]:
+        """Events after `cursor`. The row id is the event id."""
         connection = await self.storage.open()
         async with connection.execute(
             "SELECT id, message FROM mcp_events WHERE topic = ? AND id > ? ORDER BY id",
             (topic, int(cursor) if cursor else 0),
         ) as rows:
-            found = list(await rows.fetchall())
-        if not found:
-            return [], cursor
-        return [json.loads(row[1]) for row in found], str(found[-1][0])
+            found = await rows.fetchall()
+        return [Event(str(row[0]), json.loads(row[1])) for row in found]
 
-    async def poll(
-        self, topic: str, cursor: Cursor, *, timeout: float
-    ) -> tuple[Sequence[Mapping[str, Any]], Cursor]:
+    async def poll(self, topic: str, cursor: Cursor, *, timeout: float) -> Sequence[Event]:
         loop = asyncio.get_running_loop()
         deadline = loop.time() + timeout
         while True:
-            messages, cursor = await self.after(topic, cursor)
-            if messages:
-                return messages, cursor
+            found = await self.after(topic, cursor)
+            if found:
+                return found
             left = deadline - loop.time()
             if left <= 0:
-                return [], cursor
+                return []
             await asyncio.sleep(min(self.look_again, left))
 
     async def delete(self, topic: str) -> None:

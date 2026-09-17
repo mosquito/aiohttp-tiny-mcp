@@ -163,22 +163,19 @@ async def test_published_messages_are_read_in_order(hub, mine):
     cursor = await hub.position(mine)
     for n in range(3):
         await hub.publish(mine, {"n": n})
-    messages, cursor = await hub.poll(mine, cursor, timeout=1)
-    assert [message["n"] for message in messages] == [0, 1, 2]
+    events = await hub.poll(mine, cursor, timeout=1)
+    assert [event.message["n"] for event in events] == [0, 1, 2]
 
-    messages, cursor = await hub.poll(mine, cursor, timeout=0.05)
-    assert messages == []
+    assert await hub.poll(mine, events[-1].id, timeout=0.05) == []
 
 
 async def test_an_empty_poll_keeps_the_readers_place(hub, mine):
     cursor = await hub.position(mine)
-    messages, after = await hub.poll(mine, cursor, timeout=0.05)
-    assert messages == []
-    assert after == cursor
+    assert await hub.poll(mine, cursor, timeout=0.05) == []
 
     await hub.publish(mine, {"n": 1})
-    messages, _ = await hub.poll(mine, after, timeout=1)
-    assert [message["n"] for message in messages] == [1]
+    events = await hub.poll(mine, cursor, timeout=1)
+    assert [event.message["n"] for event in events] == [1]
 
 
 async def test_a_message_published_before_the_first_poll_is_not_missed(hub, mine):
@@ -186,8 +183,8 @@ async def test_a_message_published_before_the_first_poll_is_not_missed(hub, mine
     question-and-answer round trip free of a lost wake-up."""
     cursor = await hub.position(mine)
     await hub.publish(mine, {"n": 1})
-    messages, _ = await hub.poll(mine, cursor, timeout=1)
-    assert [message["n"] for message in messages] == [1]
+    events = await hub.poll(mine, cursor, timeout=1)
+    assert [event.message["n"] for event in events] == [1]
 
 
 async def test_a_waiting_reader_gets_what_arrives_late(hub, mine):
@@ -199,9 +196,9 @@ async def test_a_waiting_reader_gets_what_arrives_late(hub, mine):
         await hub.publish(mine, {"n": 1})
 
     publishing = asyncio.ensure_future(publish_soon())
-    messages, _ = await hub.poll(mine, cursor, timeout=30)
+    events = await hub.poll(mine, cursor, timeout=30)
     await publishing
-    assert [message["n"] for message in messages] == [1]
+    assert [event.message["n"] for event in events] == [1]
 
 
 async def test_reading_does_not_consume(hub, mine):
@@ -209,14 +206,14 @@ async def test_reading_does_not_consume(hub, mine):
     first = await hub.position(mine)
     second = await hub.position(mine)
     await hub.publish(mine, {"n": 1})
-    assert (await hub.poll(mine, first, timeout=1))[0] == [{"n": 1}]
-    assert (await hub.poll(mine, second, timeout=1))[0] == [{"n": 1}]
+    assert [event.message for event in await hub.poll(mine, first, timeout=1)] == [{"n": 1}]
+    assert [event.message for event in await hub.poll(mine, second, timeout=1)] == [{"n": 1}]
 
 
 async def test_topics_do_not_leak_into_each_other(hub, mine):
     cursor = await hub.position(f"{mine}-one")
     await hub.publish(f"{mine}-two", {"n": 1})
-    assert (await hub.poll(f"{mine}-one", cursor, timeout=0.05))[0] == []
+    assert await hub.poll(f"{mine}-one", cursor, timeout=0.05) == []
 
 
 async def test_a_deleted_topic_is_forgotten(hub, mine):
@@ -229,8 +226,8 @@ async def test_an_event_published_here_is_read_there(storage, elsewhere, mine):
     reader = PostgresHub(elsewhere)
     cursor = await reader.position(mine)
     await PostgresHub(storage).publish(mine, {"n": 1})
-    messages, _ = await reader.poll(mine, cursor, timeout=5)
-    assert [message["n"] for message in messages] == [1]
+    events = await reader.poll(mine, cursor, timeout=5)
+    assert [event.message["n"] for event in events] == [1]
 
 
 async def test_concurrent_publishers_lose_nothing_to_the_cursor(storage, mine):
@@ -244,10 +241,11 @@ async def test_concurrent_publishers_lose_nothing_to_the_cursor(storage, mine):
 
     seen: list[int] = []
     while len(seen) < 40:
-        messages, cursor = await hub.poll(mine, cursor, timeout=5)
-        if not messages:
+        events = await hub.poll(mine, cursor, timeout=5)
+        if not events:
             break
-        seen += [message["n"] for message in messages]
+        cursor = events[-1].id
+        seen += [event.message["n"] for event in events]
     assert sorted(seen) == list(range(40))
 
 

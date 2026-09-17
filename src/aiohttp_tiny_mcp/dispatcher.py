@@ -4,7 +4,8 @@ about HTTP, headers or protocol versions.
 
 from __future__ import annotations
 
-from typing import Any
+from collections.abc import Callable
+from typing import Any, TypeVar
 
 from pydantic import ValidationError
 
@@ -26,6 +27,7 @@ from .models import (
     Completion,
     EmptyResult,
     GetPromptResult,
+    ListParams,
     ListPromptsResult,
     ListResourcesResult,
     ListResourceTemplatesResult,
@@ -77,6 +79,8 @@ def refusal(spec: ToolSpec, principal: Principal | None) -> str | None:
 
 
 PUSH_ASK_ROUNDS = 8
+
+Entry = TypeVar("Entry")
 
 
 class Dispatcher:
@@ -222,6 +226,25 @@ class Dispatcher:
     async def ping(self, ex: Exchange) -> Outcome:
         return Value(result=EmptyResult())
 
+    def paged(
+        self, ex: Exchange, entries: list[Entry], key: Callable[[Entry], str]
+    ) -> tuple[list[Entry], str | None] | Failure:
+        """One page of `entries`, sorted by `key`, and the cursor for the next.
+
+        The cursor is the key of the last entry shown. One that names no entry is
+        -32602: a silent first page would send a paging client round in a circle.
+        """
+        cursor = ex.call.params.cursor if isinstance(ex.call.params, ListParams) else None
+        if cursor is not None:
+            if all(key(entry) != cursor for entry in entries):
+                return Failure(FailureKind.INVALID_PARAMS, f"unknown cursor: {cursor}")
+            entries = [entry for entry in entries if key(entry) > cursor]
+        size = self.registry.page_size
+        if size is None or len(entries) <= size:
+            return entries, None
+        shown = entries[:size]
+        return shown, key(shown[-1])
+
     async def list_tools(self, ex: Exchange) -> Outcome:
         tools: list[ToolDef] = [
             d
@@ -229,7 +252,11 @@ class Dispatcher:
             if (d := ex.adapter.describe_tool(spec)) is not None
         ]
         tools.sort(key=lambda item: item.name)
-        return Value(result=ListToolsResult(tools=tools))
+        found = self.paged(ex, tools, lambda item: item.name)
+        if isinstance(found, Failure):
+            return found
+        shown, next_cursor = found
+        return Value(result=ListToolsResult(tools=shown, next_cursor=next_cursor))
 
     async def call_tool(self, ex: Exchange) -> Outcome:
         spec = self.registry.tools.get(ex.call.target or "")
@@ -254,7 +281,11 @@ class Dispatcher:
             if isinstance(d := ex.adapter.describe_resource(spec), ResourceDef)
         ]
         defs.sort(key=lambda item: item.uri)
-        return Value(result=ListResourcesResult(resources=defs))
+        found = self.paged(ex, defs, lambda item: item.uri)
+        if isinstance(found, Failure):
+            return found
+        shown, next_cursor = found
+        return Value(result=ListResourcesResult(resources=shown, next_cursor=next_cursor))
 
     async def list_resource_templates(self, ex: Exchange) -> Outcome:
         defs: list[ResourceTemplateDef] = [
@@ -263,7 +294,13 @@ class Dispatcher:
             if isinstance(d := ex.adapter.describe_resource(spec), ResourceTemplateDef)
         ]
         defs.sort(key=lambda item: item.uri_template)
-        return Value(result=ListResourceTemplatesResult(resource_templates=defs))
+        found = self.paged(ex, defs, lambda item: item.uri_template)
+        if isinstance(found, Failure):
+            return found
+        shown, next_cursor = found
+        return Value(
+            result=ListResourceTemplatesResult(resource_templates=shown, next_cursor=next_cursor)
+        )
 
     async def read_resource(self, ex: Exchange) -> Outcome:
         uri = ex.call.target or ""
@@ -286,7 +323,11 @@ class Dispatcher:
             if (d := ex.adapter.describe_prompt(spec)) is not None
         ]
         prompts.sort(key=lambda item: item.name)
-        return Value(result=ListPromptsResult(prompts=prompts))
+        found = self.paged(ex, prompts, lambda item: item.name)
+        if isinstance(found, Failure):
+            return found
+        shown, next_cursor = found
+        return Value(result=ListPromptsResult(prompts=shown, next_cursor=next_cursor))
 
     async def get_prompt(self, ex: Exchange) -> Outcome:
         spec = self.registry.prompts.get(ex.call.target or "")

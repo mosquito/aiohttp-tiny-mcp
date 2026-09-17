@@ -87,12 +87,10 @@ uv run sphinx-build -b html docs docs/_build
 
 ## Not implemented
 
-**Pagination.** Every listing returns everything. Cursors are accepted and
-ignored. If pagination arrives, cacheability has to be re-derived along with it.
-
-**Resumption of a dropped stream.** `2025-03-26` onward lets a client reconnect
-with `Last-Event-ID` and receive what it missed. Streams here are not replayable:
-a client that loses one re-sends the request. The SDK implements this behind its
+**Resumption of a response stream.** The `GET` notification stream resumes
+with `Last-Event-ID`; see [Transports](../deployment/transports.md#resuming-a-stream).
+The stream a `POST` opens for one request does not: it carries no ids, and a
+client that loses one re-sends the request. The SDK replays those behind its
 `EventStore`.
 
 **Batching over stdio.** `2025-03-26` permits JSON-RPC batch arrays and the HTTP

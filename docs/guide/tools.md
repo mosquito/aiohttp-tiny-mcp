@@ -271,3 +271,30 @@ Some degradation happens without being asked for. A schema an older revision
 cannot represent is simplified where that is lossless, and the tool is hidden
 where it is not -- one decision, in the adapter, rather than a condition in
 every handler. See [What varies](../reference/revisions.md#degradation-that-is-not-a-choice).
+
+## How many a listing answers with
+
+A listing answers with everything it has. `Registry(page_size=...)` cuts
+`tools/list`, `resources/list`, `resources/templates/list` and `prompts/list`
+into pages of that many instead; the client is told there is more by
+`nextCursor` and sends it back to continue.
+
+Leave it off, which is the default, when the registry is a handful of tools
+written by hand. That is most servers: one response holds the whole list, a
+client that does not page sees all of it, and `curl` shows it in one go.
+
+Turn it on when the registry is generated and large -- a tool per table of a
+database, a resource per file of a tree, a prompt per template in a catalogue
+-- and one response would be too big for something on the way: a gateway with
+a body limit, a client that shows the list as it arrives, or a client that
+puts every tool description into a model's context and would rather stop
+after a page. A page of 100 is a reasonable start; the spec leaves the number
+to the server.
+
+A client that ignores `nextCursor` sees only the first page, which is the
+reason to leave paging off until a listing is actually large.
+
+The cursor names the last entry of the page, not its position, so a
+registration between two pages neither repeats nor hides an entry. A cursor
+this server did not write is answered with `-32602`, because a paging client
+that silently got the first page again would read the same entries forever.

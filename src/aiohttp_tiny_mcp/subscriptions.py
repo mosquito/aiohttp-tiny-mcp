@@ -69,14 +69,12 @@ async def listen(ex: Exchange) -> EmptyResult:
         await ex.emit(ack)
         return EmptyResult(meta=Meta.model_validate({SUBSCRIPTION_ID: ex.id}))
 
-    topic = hubs.topic(hubs.NOTIFICATIONS)
-    cursor = await hub.position(topic)
+    events = await hub.subscribe(hubs.topic(hubs.NOTIFICATIONS), wait=ex.registry.hub_poll_seconds)
     await ex.emit(ack)
     while not ex.cancelled.is_set():
-        messages, cursor = await hub.poll(topic, cursor, timeout=ex.registry.hub_poll_seconds)
-        for payload in messages:
-            if relays(payload, accepted):
-                await ex.emit(tag(payload, ex.id))
+        for event in await events.poll():
+            if relays(event.message, accepted):
+                await ex.emit(tag(event.message, ex.id))
     return EmptyResult(meta=Meta.model_validate({SUBSCRIPTION_ID: ex.id}))
 
 

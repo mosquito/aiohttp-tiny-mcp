@@ -28,7 +28,7 @@ from .core import (
 )
 from .dispatcher import Dispatcher
 from .exchange import Exchange, is_reply, relay_reply
-from .hub import NOTIFICATIONS, topic
+from .hub import NOTIFICATIONS, Subscription, topic
 from .namespaces import current, namespace, scoped
 from .protocol.selection import AdapterSet
 from .registry import Registry
@@ -405,23 +405,33 @@ class Endpoint:
     async def relay_notifications(
         self, request: web.Request, response: SSEResponse, adapter: Adapter
     ) -> None:
-        """Relay changes, re-reading subscriptions each pass so updates reach an open stream."""
+        """Relay changes with their hub ids, re-reading subscriptions each pass."""
         capabilities = adapter.capabilities(self.registry)
-        hub = self.registry.hub
-        where = topic(NOTIFICATIONS)
-        cursor = await hub.position(where)
+        events = await self.resumed(request, topic(NOTIFICATIONS))
         while True:
-            messages, cursor = await hub.poll(where, cursor, timeout=self.registry.hub_poll_seconds)
-            if not messages:
+            found = await events.poll()
+            if not found:
                 continue
             accepted = wanted(
                 capabilities, self.open_values(request, await self.load_session(request))
             )
-            for payload in messages:
-                if relays(payload, accepted):
-                    text = json.dumps(payload, ensure_ascii=False)
-                    log.debug("-> [%s] %s", adapter.version, text)
-                    await response.send(text)
+            for event in found:
+                if relays(event.message, accepted):
+                    text = json.dumps(event.message, ensure_ascii=False)
+                    log.debug("-> [%s] %s %s", adapter.version, event.id, text)
+                    await response.send(text, id=event.id)
+
+    async def resumed(self, request: web.Request, where: str) -> Subscription:
+        """Subscribe from `Last-Event-ID`, or from now when it is absent or unknown."""
+        hub = self.registry.hub
+        wait = self.registry.hub_poll_seconds
+        last = request.headers.get("Last-Event-ID")
+        if last:
+            try:
+                return await hub.subscribe(where, after=last, wait=wait)
+            except ValueError:
+                log.debug("ignoring Last-Event-ID %r: not from this hub", last)
+        return await hub.subscribe(where, wait=wait)
 
     def owns(self, record: SessionRecord | None, principal: Any) -> bool:
         """Whether this caller may use this session.

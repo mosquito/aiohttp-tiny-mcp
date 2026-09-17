@@ -6,7 +6,7 @@ import json
 from collections.abc import AsyncIterator, Mapping, Sequence
 from typing import Any
 
-from .hub import START, Cursor, Hub
+from .hub import START, Cursor, Event, Hub
 from .sessions import SessionRecord, SessionStore
 
 try:
@@ -156,29 +156,37 @@ class RedisHub(Hub):
     def key(self, topic: str) -> str:
         return f"{self.prefix}:topic:{topic}"
 
-    async def publish(self, topic: str, message: Mapping[str, Any]) -> None:
+    async def publish(self, topic: str, message: Mapping[str, Any]) -> Cursor:
         client = await self.storage.open()
         key = self.key(topic)
-        await client.xadd(key, {"message": json.dumps(message)}, maxlen=self.keep, approximate=True)
+        added: Any = await client.xadd(
+            key, {"message": json.dumps(message)}, maxlen=self.keep, approximate=True
+        )
         await client.expire(key, self.ttl_seconds)
+        return text(added)
 
     async def position(self, topic: str) -> Cursor:
         client = await self.storage.open()
         last: Any = await client.xrevrange(self.key(topic), count=1)
         return text(last[0][0]) if last else START
 
-    async def poll(
-        self, topic: str, cursor: Cursor, *, timeout: float
-    ) -> tuple[Sequence[Mapping[str, Any]], Cursor]:
+    async def poll(self, topic: str, cursor: Cursor, *, timeout: float) -> Sequence[Event]:
+        """The stream id is the event id. Redis refuses a malformed one."""
+        from redis.exceptions import ResponseError
+
         client = await self.storage.open()
-        found: Any = await client.xread(
-            {self.key(topic): cursor or BEGINNING}, block=max(1, int(timeout * 1000))
-        )
+        try:
+            found: Any = await client.xread(
+                {self.key(topic): cursor or BEGINNING}, block=max(1, int(timeout * 1000))
+            )
+        except ResponseError as e:
+            raise ValueError(f"not a stream id: {cursor!r}") from e
         if not found:
-            return [], cursor
-        entries = found[0][1]
-        messages = [json.loads(next(iter(fields.values()))) for _, fields in entries]
-        return messages, text(entries[-1][0])
+            return []
+        return [
+            Event(text(entry_id), json.loads(next(iter(fields.values()))))
+            for entry_id, fields in found[0][1]
+        ]
 
     async def delete(self, topic: str) -> None:
         client = await self.storage.open()

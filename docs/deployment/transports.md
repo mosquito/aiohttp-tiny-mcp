@@ -73,6 +73,24 @@ that already carries `Content-Encoding` alone.
 `Endpoint(registry, compress=False)` turns it off, and `SseEndpoint` takes the
 same argument.
 
+### Resuming a stream
+
+`2025-03-26` through `2025-11-25` let a server number its SSE events and a
+client that lost the connection ask, with `Last-Event-ID`, for what followed.
+The `GET` stream does this. Each event carries the id the hub gave it, so the
+replay is a poll from that exact id and works on whichever worker takes the
+reconnect. An id the hub never issued is ignored and the stream starts from
+now. How far back a replay can reach is the hub's retention: `MemoryHub(keep=)`
+counts events, the storage backends keep theirs until they expire.
+
+The bundled client remembers the latest id in `client.last_event_id` and passes
+one back with `stream_notifications(last_event_id=...)`.
+
+The stream a `POST` opens for one request carries no ids. Its events are the
+request's own progress and its result, and a client that loses it re-sends the
+request; the answer is the same. `2026-07-28` has no `GET` stream and says to
+ignore the header, which is what its `405` does.
+
 The class is exported, and takes events the way `WebSocketResponse` takes
 messages, so an application can use it for its own streams:
 

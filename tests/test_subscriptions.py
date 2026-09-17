@@ -8,6 +8,8 @@ from aiohttp.test_utils import TestClient, TestServer
 from pydantic import BaseModel
 
 from aiohttp_tiny_mcp import Endpoint, Exchange
+from aiohttp_tiny_mcp.hub import Event
+from aiohttp_tiny_mcp.hub import Hub as HubProtocol
 from aiohttp_tiny_mcp.stdio import serve_stdio
 from aiohttp_tiny_mcp.subscriptions import SUBSCRIPTION_ID
 
@@ -19,7 +21,7 @@ class Nothing(BaseModel):
     pass
 
 
-class Hub:
+class Hub(HubProtocol):
     """Cursor-based test hub with synchronous publish to exercise events arriving before the first
     poll.
     """
@@ -55,17 +57,17 @@ class Hub:
         deadline = loop.time() + timeout
         least = int(cursor) if cursor else 0
         while True:
-            found = [row for row in self.rows.get(topic, []) if row[0] > least]
+            found = [Event(str(n), message) for n, message in self.rows.get(topic, []) if n > least]
             if found:
-                return [message for _, message in found], str(found[-1][0])
+                return found
             left = deadline - loop.time()
             if left <= 0:
-                return [], cursor
+                return []
             self.arrived.clear()
             try:
                 await asyncio.wait_for(self.arrived.wait(), left)
             except asyncio.TimeoutError:
-                return [], cursor
+                return []
 
     async def delete(self, topic):
         self.rows.pop(topic, None)

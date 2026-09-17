@@ -141,22 +141,19 @@ async def test_published_messages_are_read_in_order(hub):
     cursor = await hub.position("demo")
     for n in range(3):
         await hub.publish("demo", {"n": n})
-    messages, cursor = await hub.poll("demo", cursor, timeout=1)
-    assert [message["n"] for message in messages] == [0, 1, 2]
+    events = await hub.poll("demo", cursor, timeout=1)
+    assert [event.message["n"] for event in events] == [0, 1, 2]
 
-    messages, cursor = await hub.poll("demo", cursor, timeout=0.05)
-    assert messages == []
+    assert await hub.poll("demo", events[-1].id, timeout=0.05) == []
 
 
 async def test_an_empty_poll_keeps_the_readers_place(hub):
     cursor = await hub.position("demo")
-    messages, after = await hub.poll("demo", cursor, timeout=0.05)
-    assert messages == []
-    assert after == cursor
+    assert await hub.poll("demo", cursor, timeout=0.05) == []
 
     await hub.publish("demo", {"n": 1})
-    messages, _ = await hub.poll("demo", after, timeout=1)
-    assert [message["n"] for message in messages] == [1]
+    events = await hub.poll("demo", cursor, timeout=1)
+    assert [event.message["n"] for event in events] == [1]
 
 
 async def test_a_message_published_before_the_first_poll_is_not_missed(hub):
@@ -164,8 +161,8 @@ async def test_a_message_published_before_the_first_poll_is_not_missed(hub):
     question-and-answer round trip free of a lost wake-up."""
     cursor = await hub.position("demo")
     await hub.publish("demo", {"n": 1})
-    messages, _ = await hub.poll("demo", cursor, timeout=1)
-    assert [message["n"] for message in messages] == [1]
+    events = await hub.poll("demo", cursor, timeout=1)
+    assert [event.message["n"] for event in events] == [1]
 
 
 async def test_a_waiting_reader_is_woken_rather_than_polled(hub):
@@ -177,9 +174,9 @@ async def test_a_waiting_reader_is_woken_rather_than_polled(hub):
         await hub.publish("demo", {"n": 1})
 
     publishing = asyncio.ensure_future(publish_soon())
-    messages, _ = await hub.poll("demo", cursor, timeout=30)
+    events = await hub.poll("demo", cursor, timeout=30)
     await publishing
-    assert [message["n"] for message in messages] == [1]
+    assert [event.message["n"] for event in events] == [1]
 
 
 async def test_reading_does_not_consume(hub):
@@ -187,14 +184,14 @@ async def test_reading_does_not_consume(hub):
     first = await hub.position("demo")
     second = await hub.position("demo")
     await hub.publish("demo", {"n": 1})
-    assert (await hub.poll("demo", first, timeout=1))[0] == [{"n": 1}]
-    assert (await hub.poll("demo", second, timeout=1))[0] == [{"n": 1}]
+    assert [event.message for event in await hub.poll("demo", first, timeout=1)] == [{"n": 1}]
+    assert [event.message for event in await hub.poll("demo", second, timeout=1)] == [{"n": 1}]
 
 
 async def test_topics_do_not_leak_into_each_other(hub):
     cursor = await hub.position("one")
     await hub.publish("two", {"n": 1})
-    assert (await hub.poll("one", cursor, timeout=0.05))[0] == []
+    assert await hub.poll("one", cursor, timeout=0.05) == []
 
 
 async def test_a_deleted_topic_is_forgotten(hub):
@@ -207,8 +204,8 @@ async def test_an_event_published_here_is_read_there(storage, elsewhere, prefix)
     reader = RedisHub(elsewhere, prefix=prefix)
     cursor = await reader.position("demo")
     await RedisHub(storage, prefix=prefix).publish("demo", {"n": 1})
-    messages, _ = await reader.poll("demo", cursor, timeout=5)
-    assert [message["n"] for message in messages] == [1]
+    events = await reader.poll("demo", cursor, timeout=5)
+    assert [event.message["n"] for event in events] == [1]
 
 
 async def test_a_topic_is_trimmed_to_what_it_keeps(storage, prefix):

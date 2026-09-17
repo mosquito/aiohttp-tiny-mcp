@@ -65,6 +65,11 @@
 .. autoclass:: aiohttp_tiny_mcp.hub.Hub
    :members:
 
+.. autoclass:: aiohttp_tiny_mcp.hub.Event
+
+.. autoclass:: aiohttp_tiny_mcp.hub.Subscription
+   :members:
+
 .. autoclass:: aiohttp_tiny_mcp.MemoryHub
 
 .. autofunction:: aiohttp_tiny_mcp.hub.topic

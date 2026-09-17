@@ -52,6 +52,8 @@ class Client(BaseClient):
         self.base_url = base_url
         self.session = session
         self.owns_session = session is None
+        #: The id of the last event read from the notification stream.
+        self.last_event_id: str | None = None
         self.session_id: str | None = None
 
     async def __aenter__(self) -> Client:
@@ -93,15 +95,22 @@ class Client(BaseClient):
         async with self.session.post(self.base_url, json=envelope, headers=headers) as resp:
             await resp.read()
 
-    async def stream_notifications(self) -> AsyncIterator[dict[str, Any]]:
-        """Open the legacy notification stream with GET; keep it open until cancelled."""
+    async def stream_notifications(
+        self, *, last_event_id: str | None = None
+    ) -> AsyncIterator[dict[str, Any]]:
+        """Read the legacy GET stream until cancelled. `last_event_id` asks for a replay."""
         assert self.session is not None, "use 'async with Client(...) as client:'"
         headers = self.headers(NOTIFICATIONS_METHOD)
         headers["Accept"] = "text/event-stream"
+        if last_event_id is not None:
+            headers["Last-Event-ID"] = last_event_id
         async with self.session.get(self.base_url, headers=headers) as resp:
             resp.raise_for_status()
-            async for frame in frames(resp):
-                yield frame
+            async for event in read_sse(resp):
+                if event.id is not None:
+                    self.last_event_id = event.id
+                if event.data:
+                    yield json.loads(event.data)
 
     async def reply(self, envelope: dict[str, Any]) -> None:
         """Send a bare JSON-RPC response. The hub routes it to the node waiting for the answer."""

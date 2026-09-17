@@ -49,15 +49,15 @@ async def test_a_daemon_event_reaches_a_subscriber(url, registry, client, adapte
 
 async def test_the_relay_names_the_container_that_changed(registry, client):
     where = topic(NOTIFICATIONS)
-    cursor = await registry.hub.position(where)
+    changes = await registry.hub.subscribe(where)
     watching = asyncio.ensure_future(relay(registry, client))
     try:
-        messages, _ = await registry.hub.poll(where, cursor, timeout=5)
+        events = await changes.poll(timeout=5)
     finally:
         watching.cancel()
         await asyncio.gather(watching, return_exceptions=True)
 
-    uris = {message["params"]["uri"] for message in messages}
+    uris = {event.message["params"]["uri"] for event in events}
     assert "docker://containers" in uris
     assert "docker://containers/333333333333" in uris
 

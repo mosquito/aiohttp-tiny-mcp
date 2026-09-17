@@ -9,7 +9,7 @@ from collections.abc import AsyncIterator, Mapping, Sequence
 from functools import cached_property
 from typing import Any
 
-from .hub import START, Cursor, Hub
+from .hub import START, Cursor, Event, Hub
 from .sessions import SessionRecord, SessionStore
 
 try:
@@ -365,7 +365,7 @@ class PostgresHub(Hub):
             [
                 sql.SQL("INSERT INTO "),
                 self.storage.events_table,
-                sql.SQL(" (topic, message) VALUES (%s, %s)"),
+                sql.SQL(" (topic, message) VALUES (%s, %s) RETURNING id"),
             ]
         )
 
@@ -399,12 +399,17 @@ class PostgresHub(Hub):
             ]
         )
 
-    async def publish(self, topic: str, message: Mapping[str, Any]) -> None:
+    async def publish(self, topic: str, message: Mapping[str, Any]) -> Cursor:
         pool = await self.storage.open()
         async with pool.connection() as connection:
             async with connection.transaction():
                 await connection.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", (topic,))
-                await connection.execute(self._query_publish, (topic, json.dumps(message)))
+                inserted = await connection.execute(
+                    self._query_publish, (topic, json.dumps(message))
+                )
+                row = await inserted.fetchone()
+        assert row is not None
+        return str(row[0])
 
     async def position(self, topic: str) -> Cursor:
         pool = await self.storage.open()
@@ -413,30 +418,26 @@ class PostgresHub(Hub):
             row = await found.fetchone()
         return str(row[0]) if row is not None and row[0] is not None else START
 
-    async def after(self, topic: str, cursor: Cursor) -> tuple[list[Mapping[str, Any]], Cursor]:
-        """Everything published after `cursor`, and where to continue from."""
+    async def after(self, topic: str, cursor: Cursor) -> list[Event]:
+        """Events after `cursor`. The row id is the event id."""
         pool = await self.storage.open()
         async with pool.connection() as connection:
             found = await connection.execute(
                 self._query_after, (topic, int(cursor) if cursor else 0)
             )
             rows = await found.fetchall()
-        if not rows:
-            return [], cursor
-        return [row[1] for row in rows], str(rows[-1][0])
+        return [Event(str(row[0]), row[1]) for row in rows]
 
-    async def poll(
-        self, topic: str, cursor: Cursor, *, timeout: float
-    ) -> tuple[Sequence[Mapping[str, Any]], Cursor]:
+    async def poll(self, topic: str, cursor: Cursor, *, timeout: float) -> Sequence[Event]:
         loop = asyncio.get_running_loop()
         deadline = loop.time() + timeout
         while True:
-            messages, cursor = await self.after(topic, cursor)
-            if messages:
-                return messages, cursor
+            found = await self.after(topic, cursor)
+            if found:
+                return found
             left = deadline - loop.time()
             if left <= 0:
-                return [], cursor
+                return []
             await asyncio.sleep(min(self.look_again, left))
 
     async def delete(self, topic: str) -> None:

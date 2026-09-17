@@ -82,13 +82,10 @@ class SqlSubscriptionBus:
             self.reader = asyncio.ensure_future(self.read())
 
     async def read(self) -> None:
-        cursor = await self.hub.position(BUS_TOPIC)
-        while True:
-            messages, cursor = await self.hub.poll(BUS_TOPIC, cursor, timeout=3600)
-            for message in messages:
-                event = row_to_event(message)
-                for listener in list(self.listeners.values()):
-                    listener(event)
+        async for found in await self.hub.subscribe(BUS_TOPIC, wait=3600):
+            event = row_to_event(found.message)
+            for listener in list(self.listeners.values()):
+                listener(event)
 
     async def stop(self) -> None:
         if self.reader is not None:
@@ -107,8 +104,8 @@ class SqlEventStore:
     async def store_event(self, stream_id: str, message: Any) -> str:
         topic = f"sdk-stream/{stream_id}"
         body = message.model_dump(by_alias=True, mode="json") if message is not None else None
-        await self.hub.publish(topic, {"stream": stream_id, "message": body})
-        return f"{stream_id}@{await self.hub.position(topic)}"
+        event_id = await self.hub.publish(topic, {"stream": stream_id, "message": body})
+        return f"{stream_id}@{event_id}"
 
     async def replay_events_after(self, last_event_id: str, send_callback: Any) -> str | None:
         from mcp.server.streamable_http import EventMessage
@@ -116,11 +113,10 @@ class SqlEventStore:
 
         stream_id, _, cursor = last_event_id.rpartition("@")
         topic = f"sdk-stream/{stream_id}"
-        messages, _ = await self.hub.after(topic, cursor)
-        for row in messages:
-            if row["message"] is None:
+        for event in await self.hub.after(topic, cursor):
+            if event.message["message"] is None:
                 continue
-            parsed = JSONRPCMessage.model_validate(row["message"])
+            parsed = JSONRPCMessage.model_validate(event.message["message"])
             await send_callback(EventMessage(parsed, None))
         return stream_id or None
 

@@ -41,6 +41,7 @@ class Registry:
         request_state_ttl_seconds: int = STATE_TTL_SECONDS,
         hub_poll_seconds: float = 30.0,
         ask_timeout_seconds: float = 120.0,
+        page_size: int | None = None,
     ) -> None:
         self.info = Implementation(name=name, version=version)
         self.instructions = instructions
@@ -48,6 +49,8 @@ class Registry:
         self.session_store = session_store if session_store is not None else MemorySessionStore()
         self.auth = auth
         self.session_ttl_seconds = session_ttl_seconds
+        #: Most entries per listing page. `None`, the default, answers with all of them.
+        self.page_size = page_size
         self.request_state = RequestStates(self.session_store, request_state_ttl_seconds)
         self.hub_poll_seconds = hub_poll_seconds
         self.ask_timeout_seconds = ask_timeout_seconds

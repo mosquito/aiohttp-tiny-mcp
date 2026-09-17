@@ -288,3 +288,39 @@ async def test_a_message_posted_to_another_worker_is_still_answered(offered):
             await runner.cleanup()
 
     assert message["result"]["content"][0]["text"] == "42"
+
+
+async def test_a_listing_pages_over_this_transport_too(offered):
+    """Paging is the dispatcher's, so the oldest transport has it too."""
+    offered.page_size = 1
+    app = web.Application()
+    SseEndpoint(offered).setup(app)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    try:
+        site = web.TCPSite(runner, "127.0.0.1", 0)
+        await site.start()
+        host, port = runner.addresses[0]
+        client = OldClient(f"http://{host}:{port}")
+        await client.open()
+        try:
+            seen: list[str] = []
+            cursor = None
+            pages = 0
+            while True:
+                params = {"cursor": cursor} if cursor else {}
+                answered = await client.call("tools/list", params, request_id=100 + pages)
+                result = answered["result"]
+                seen += [tool["name"] for tool in result["tools"]]
+                pages += 1
+                cursor = result.get("nextCursor")
+                if not cursor:
+                    break
+        finally:
+            await client.close()
+    finally:
+        await runner.cleanup()
+
+    assert seen == sorted(seen)
+    assert len(seen) == len(set(seen)), "no entry arrived twice"
+    assert pages == len(seen), "one at a time, as the page size says"

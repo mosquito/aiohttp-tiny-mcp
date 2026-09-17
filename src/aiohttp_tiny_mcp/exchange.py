@@ -78,7 +78,7 @@ class Exchange:
         self.principal: Principal | None = None
         self.keep_log_level: Callable[[str], None] | None = None
         self.sse: SSEResponse | None = None
-        self.send: Callable[[Mapping[str, Any]], Awaitable[None]] | None = None
+        self.send: Callable[[Mapping[str, Any]], Awaitable[Any]] | None = None
         self.stack = AsyncExitStack()
         self.resolved: dict[type, Any] = {}
         self.cancelled = asyncio.Event()
@@ -182,13 +182,13 @@ class Exchange:
     async def push_ask(self, key: str, request: InputRequest) -> Answer:
         """Send a question on the active stream and wait through the hub.
 
-        The reply may reach another node. Capture the cursor before sending so fast replies are
-        not missed.
+        The reply may reach another node. Subscribe before sending so fast replies are not
+        missed.
         """
         hub = self.registry.hub
         wire_id = new_id()
         where = topic(ASK, wire_id)
-        cursor = await hub.position(where)
+        replies = await hub.subscribe(where, wait=self.registry.hub_poll_seconds)
         await self.emit({"jsonrpc": "2.0", "id": wire_id, **request})
         loop = asyncio.get_running_loop()
         deadline = loop.time() + self.registry.ask_timeout_seconds
@@ -197,11 +197,8 @@ class Exchange:
                 left = deadline - loop.time()
                 if left <= 0:
                     return Answer(action=AnswerAction.CANCEL)
-                messages, cursor = await hub.poll(
-                    where, cursor, timeout=min(left, self.registry.hub_poll_seconds)
-                )
-                for message in messages:
-                    reply = message.get("reply")
+                for event in await replies.poll(timeout=min(left, replies.wait)):
+                    reply = event.message.get("reply")
                     if isinstance(reply, Mapping):
                         return answer_of(reply)
             return Answer(action=AnswerAction.CANCEL)

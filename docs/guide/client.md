@@ -41,6 +41,27 @@ assert [tool.name for tool in tools] == ["add"]
 assert result.structured_content == {"total": 5}
 ```
 
+`list_tools`, `list_resources` and `list_prompts` read every page: a server
+answers a listing in chunks of its own choosing, and these follow `nextCursor`
+until it stops. Use `client.pages(...)` where the pages themselves matter -- a
+listing large enough to show as it arrives.
+
+<!-- name: async test_client_pages; fixtures: serve, registry -->
+```python
+from aiohttp_tiny_mcp import Client
+from aiohttp_tiny_mcp.core import Operation
+from aiohttp_tiny_mcp.protocol.selection import AdapterSet
+
+url = await serve(registry)
+async with Client(url, AdapterSet.default().by_version["2026-07-28"]) as client:
+    await client.initialize()
+    names = [
+        tool["name"] async for page in client.pages(Operation.LIST_TOOLS) for tool in page["tools"]
+    ]
+
+assert names == sorted(names), "one page follows the last, in order"
+```
+
 `initialize` must come first. On a revision with a handshake it is the
 handshake; on `2026-07-28` it is `server/discover`, and the client sends what
 that revision expects instead.

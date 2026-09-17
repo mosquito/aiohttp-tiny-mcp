@@ -434,33 +434,45 @@ backend can implement it with database records and optional wake-up signals.
 ```python
 from collections.abc import Sequence
 
-from aiohttp_tiny_mcp.hub import START, Cursor
+from aiohttp_tiny_mcp.hub import START, Cursor, Event
 
 
 class HubProtocol(Protocol):
-    async def publish(self, topic: str, message: Mapping[str, Any]) -> None:
-        """Append one message to a topic."""
+    async def publish(self, topic: str, message: Mapping[str, Any]) -> Cursor:
+        """Append one message to a topic and return the id it got."""
 
     async def position(self, topic: str) -> Cursor:
         """Where the topic stands now."""
 
-    async def poll(
-        self, topic: str, cursor: Cursor, *, timeout: float
-    ) -> tuple[Sequence[Mapping[str, Any]], Cursor]:
-        """Messages after the cursor, and where to continue from."""
+    async def poll(self, topic: str, cursor: Cursor, *, timeout: float) -> Sequence[Event]:
+        """Events after the cursor, each with the id the hub gave it."""
 
     async def delete(self, topic: str) -> None:
         """Forget a topic, once whatever it served is over."""
 
 
 assert START == ""
+assert Event("7", {"n": 1}).id == "7"
 ```
 
-A `Cursor` is an opaque string. `START` is the empty string. `position` returns
-the current end of the topic; `poll` returns events strictly after its cursor,
-in order, together with a position from which reading can continue. An empty
-poll must preserve the reader's position. It must wait no longer than `timeout`
+These four are the storage contract. A `Cursor` is an opaque string and
+`START` is the empty string. `position` returns the current end of the topic;
+`poll` returns the events strictly after its cursor, in order. Each `Event`
+carries the `id` the hub gave it, and that id is the cursor after it: a poll
+from an event's exact id returns what followed it, on any worker. A cursor the
+hub did not issue raises `ValueError`. `poll` must wait no longer than `timeout`
 and should return promptly when events arrive.
+
+Readers do not call these. They call `subscribe`, which `Hub` provides on top
+of them: it fixes where the topic stands and hands back a `Subscription` that
+keeps its own place, so no caller ever holds a cursor. `subscribe(after=id)`
+starts from an exact event instead, and refuses an id the hub never issued
+right there. A backend may override `subscribe` to fix the starting point in
+its own way.
+
+The ids are what let a dropped notification stream resume: the server writes
+each event's id on the wire, and a client that reconnects with `Last-Event-ID`
+is replayed from there. See [Transports](transports.md#resuming-a-stream).
 
 Keep topic names and cursors stable across workers. The library already scopes
 its topic and session keys with the deployment's
@@ -477,9 +489,9 @@ each other. A question pushed to a client on worker A is answered by a request
 that lands on worker B; B publishes the answer, A reads it, and neither has any
 idea the other exists. The same shape carries subscriptions.
 
-The waiting worker calls `position` before sending its question. It then calls
-`poll` with that cursor. If the reply arrives before the first poll, the event
-is already in storage after the captured cursor and the poll returns it.
+The waiting worker subscribes before sending its question. If the reply
+arrives before the first poll, the event is already in storage after the
+position the subscription took, and the poll returns it.
 
 ### How `poll` waits is yours
 
@@ -494,18 +506,27 @@ cannot may sleep and look again. Neither is visible from here.
 import asyncio
 
 from aiohttp_tiny_mcp import MemoryHub
+from aiohttp_tiny_mcp.hub import START
 
 hub = MemoryHub()
-cursor = await hub.position("demo")
+changes = await hub.subscribe("demo")
 
 # Nothing yet, and `poll` returns empty at the deadline rather than blocking.
-messages, cursor = await hub.poll("demo", cursor, timeout=0.01)
-assert messages == []
+assert await changes.poll(timeout=0.01) == []
 
 await hub.publish("demo", {"jsonrpc": "2.0", "method": "notifications/tools/list_changed"})
-messages, cursor = await hub.poll("demo", cursor, timeout=1)
-assert [message["method"] for message in messages] == ["notifications/tools/list_changed"]
+events = await changes.poll(timeout=1)
+assert [event.message["method"] for event in events] == ["notifications/tools/list_changed"]
+
+# From an exact id, one event at a time; `wait` bounds each look at the backend.
+async for event in await hub.subscribe("demo", after=START, wait=0.1):
+    assert event.id == events[-1].id
+    break
 ```
+
+`MemoryHub` keeps the last `keep` events of a topic, 1000 by default, which is
+how far back a reconnecting client can be replayed. The storage backends keep
+theirs until they expire.
 
 `Registry(hub_poll_seconds=...)` sets how long one `poll` may wait. It is a
 deadline, not an interval.
@@ -522,8 +543,8 @@ CREATE TABLE mcp_events (
 CREATE INDEX ON mcp_events (topic, id);
 ```
 
-The read shape is `WHERE topic = $1 AND id > $2 ORDER BY id`, with the last
-returned ID as the next cursor. An empty topic uses `START`. However, a sequence
+The read shape is `WHERE topic = $1 AND id > $2 ORDER BY id`, and the row id
+is the event id. An empty topic uses `START`. However, a sequence
 ID alone does not guarantee publication order: concurrent transactions can
 allocate IDs in one order and commit in another. If a reader advances past an
 uncommitted lower ID, it will miss that event. A backend must serialize

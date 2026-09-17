@@ -24,7 +24,7 @@ from .core import (
 from .dispatcher import Dispatcher
 from .endpoint import Endpoint
 from .exchange import Exchange
-from .hub import topic
+from .hub import Subscription, topic
 from .namespaces import scoped
 from .protocol.selection import AdapterSet
 from .registry import Registry
@@ -103,7 +103,7 @@ class SseEndpoint:
         session_id = await self.open_session()
         where = topic(STREAM, session_id)
         hub = self.registry.hub
-        cursor = await hub.position(where)
+        events = await hub.subscribe(where, wait=self.registry.hub_poll_seconds)
 
         response = SSEResponse(compress=self.compress)
         await response.prepare(request)
@@ -111,7 +111,7 @@ class SseEndpoint:
         await self.write(response, "endpoint", f"{posting}?session_id={session_id}")
 
         try:
-            await self.relay_until_disconnect(request, response, where, cursor)
+            await self.relay_until_disconnect(request, response, events)
         finally:
             await hub.delete(where)
             await self.registry.session_store.delete(scoped(session_id))
@@ -128,10 +128,10 @@ class SseEndpoint:
         return session_id
 
     async def relay_until_disconnect(
-        self, request: web.Request, response: SSEResponse, where: str, cursor: str
+        self, request: web.Request, response: SSEResponse, events: Subscription
     ) -> None:
         """Run a relay until its client disconnects, then always join it."""
-        relay = asyncio.create_task(self.relay(response, where, cursor))
+        relay = asyncio.create_task(self.relay(response, events))
         try:
             while not relay.done():
                 await asyncio.wait({relay}, timeout=0.05)
@@ -143,13 +143,10 @@ class SseEndpoint:
             with suppress(asyncio.CancelledError, ConnectionError):
                 await relay
 
-    async def relay(self, response: SSEResponse, where: str, cursor: str) -> None:
+    async def relay(self, response: SSEResponse, events: Subscription) -> None:
         """Write everything published for this connection, until cancelled."""
-        hub = self.registry.hub
-        while True:
-            messages, cursor = await hub.poll(where, cursor, timeout=self.registry.hub_poll_seconds)
-            for payload in messages:
-                await self.write(response, "message", json.dumps(payload, ensure_ascii=False))
+        async for event in events:
+            await self.write(response, "message", json.dumps(event.message, ensure_ascii=False))
 
     async def write(self, response: SSEResponse, event: str, data: str) -> None:
         log.debug("-> [%s] %s %s", VERSION, event, data)
