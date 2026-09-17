@@ -19,14 +19,17 @@ from .http_sse import SseEndpoint
 from .hub import Hub, MemoryHub
 from .models import (
     AudioContent,
+    BlobResourceContents,
     CallToolResult,
     Completion,
+    EmbeddedResource,
     GetPromptResult,
     Hint,
     ImageContent,
     PromptMessage,
     ResourceLink,
     TextContent,
+    TextResourceContents,
 )
 from .namespaces import namespace
 from .protocol.selection import AdapterSet
@@ -42,11 +45,13 @@ __all__ = [
     "Answer",
     "AnswerAction",
     "AudioContent",
+    "BlobResourceContents",
     "CallToolResult",
     "Client",
     "ClientError",
     "Elicitor",
     "Completion",
+    "EmbeddedResource",
     "Endpoint",
     "SSEResponse",
     "Exchange",
@@ -67,6 +72,7 @@ __all__ = [
     "SessionStore",
     "StdioClient",
     "TextContent",
+    "TextResourceContents",
     "elicit",
     "elicit_accept",
     "elicit_cancel",

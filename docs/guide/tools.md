@@ -113,7 +113,10 @@ async def health(args: Nothing) -> str:
 | a `CallToolResult` | itself, unchanged |
 
 Build a `CallToolResult` where a tool needs several content blocks, or content
-that is not text.
+that is not text. A block is `TextContent`, `ImageContent`, `AudioContent`,
+`EmbeddedResource`, which carries the resource contents themselves, or
+`ResourceLink`, which names a resource to read later. `ResourceLink` arrived in
+`2025-06-18`, and the older revisions drop it from the result.
 
 ## Failures are results, not errors
 

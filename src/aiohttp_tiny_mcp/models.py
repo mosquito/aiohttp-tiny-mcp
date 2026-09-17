@@ -52,8 +52,27 @@ class ResourceLink(Model):
     mime_type: str | None = None
 
 
+class TextResourceContents(Model):
+    uri: str
+    text: str
+    mime_type: str | None = None
+
+
+class BlobResourceContents(Model):
+    uri: str
+    blob: str
+    mime_type: str | None = None
+
+
+class EmbeddedResource(Model):
+    """Resource contents carried in the result, instead of a link to read later."""
+
+    type: Literal["resource"] = "resource"
+    resource: TextResourceContents | BlobResourceContents
+
+
 ContentBlock = Annotated[
-    TextContent | ImageContent | AudioContent | ResourceLink,
+    TextContent | ImageContent | AudioContent | ResourceLink | EmbeddedResource,
     Field(discriminator="type"),
 ]
 
@@ -107,7 +126,8 @@ class Hint(Enum):
 class ToolDef(Model):
     name: str
     title: str | None = None
-    description: str
+    # A server may omit the description, so a tool list stays readable without one.
+    description: str = ""
     input_schema: dict[str, Any]
     output_schema: dict[str, Any] | None = None
     annotations: dict[str, Any] | None = None
@@ -160,18 +180,6 @@ class ResourceTemplateDef(Model):
     name: str
     title: str | None = None
     description: str | None = None
-    mime_type: str | None = None
-
-
-class TextResourceContents(Model):
-    uri: str
-    text: str
-    mime_type: str | None = None
-
-
-class BlobResourceContents(Model):
-    uri: str
-    blob: str
     mime_type: str | None = None
 
 
