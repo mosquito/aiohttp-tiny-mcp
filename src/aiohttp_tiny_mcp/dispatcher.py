@@ -4,10 +4,10 @@ about HTTP, headers or protocol versions.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from typing import Any, TypeVar
 
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 
 from .auth import Principal
 from .core import (
@@ -18,6 +18,7 @@ from .core import (
     NeedsInput,
     Operation,
     Outcome,
+    Rejected,
     Value,
 )
 from .exchange import Exchange
@@ -37,6 +38,7 @@ from .models import (
     ReadResourceResult,
     ResourceDef,
     ResourceTemplateDef,
+    ResultModel,
     SetLevelParams,
     SubscribeParams,
     TextContent,
@@ -103,6 +105,8 @@ class Dispatcher:
             outcome = await self.dispatch(operation, ex)
         except NeedInput as e:
             outcome = await self.resolve_need_input(ex, e)
+        except Rejected as e:
+            outcome = e.failure
         except Exception as e:  # noqa: BLE001 -- last resort, see the per-operation handlers
             outcome = Failure(FailureKind.INTERNAL, f"{type(e).__name__}: {e}")
 
@@ -185,6 +189,31 @@ class Dispatcher:
                 return await self.subscribe(ex, wanted=True)
             case Operation.UNSUBSCRIBE:
                 return await self.subscribe(ex, wanted=False)
+            case Operation.EXTENSION:
+                return await self.call_extension(ex)
+
+    async def call_extension(self, ex: Exchange) -> Outcome:
+        method = ex.call.target or ""
+        for extension in self.registry.extensions.values():
+            bound = extension.methods.get(method)
+            if (
+                bound is None
+                or not ex.adapter.supports_extensions
+                or extension.min_revision > ex.adapter.version
+            ):
+                continue
+            try:
+                value = await bound.call(dict(ex.call.arguments), ex)
+            except ValidationError as e:
+                return Failure(FailureKind.INVALID_PARAMS, str(e))
+            if isinstance(value, ResultModel):
+                return Value(result=value)
+            if isinstance(value, BaseModel):
+                value = value.model_dump(mode="json", by_alias=True)
+            if not isinstance(value, Mapping):
+                raise TypeError(f"{method}: extension handler must return a result object")
+            return Value(result=ResultModel.model_validate(dict(value)))
+        return Failure(FailureKind.UNKNOWN_METHOD, f"unknown method: {method}")
 
     async def set_log_level(self, ex: Exchange) -> Outcome:
         """Persist the log level in the session for subsequent requests on any node."""
@@ -212,8 +241,13 @@ class Dispatcher:
                 FailureKind.INVALID_PARAMS,
                 "resources/subscribe needs the session the handshake issued",
             )
-        if wanted and self.registry.match_resource(uri) is None:
-            return Failure(FailureKind.RESOURCE_NOT_FOUND, f"no resource matches {uri}")
+        if wanted:
+            found = self.registry.match_resource(uri)
+            definition = ex.adapter.describe_resource(found[0]) if found is not None else None
+            if definition is None or (
+                isinstance(definition, ResourceDef) and definition.uri != uri
+            ):
+                return Failure(FailureKind.RESOURCE_NOT_FOUND, f"no resource matches {uri}")
         await (subscribe if wanted else unsubscribe)(ex.session, uri)
         return Value(result=EmptyResult())
 
@@ -308,7 +342,8 @@ class Dispatcher:
         if found is None:
             return Failure(FailureKind.RESOURCE_NOT_FOUND, f"resource not found: {uri}")
         spec, variables = found
-        if ex.adapter.describe_resource(spec) is None:
+        definition = ex.adapter.describe_resource(spec)
+        if definition is None or (isinstance(definition, ResourceDef) and definition.uri != uri):
             return Failure(FailureKind.RESOURCE_NOT_FOUND, f"resource not found: {uri}")
         try:
             value = await spec.bound.call(variables, ex)

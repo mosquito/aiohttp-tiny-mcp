@@ -148,9 +148,9 @@ the same client the two servers are 6773 and 1870.
   Real work would swamp every difference on this page, which is the honest
   thing to say about it: if a tool call spends 50 ms in a database, none of
   this matters.
-- **Not a feature comparison.** The SDK has sampling, roots, middleware and an
-  extension mechanism; this package has bearer-token verification for an OAuth
-  protected resource. See
+- **Not a feature comparison.** This package provides extensions, Skills,
+  aiohttp middleware, and bearer-token verification. It has no built-in sampling
+  or roots API. See
   [how this compares with the official SDK](../concepts.md#official-python-sdk)
   for what each one does and does not do.
 - **Not a distributed-system benchmark.** Every server and driver runs on one

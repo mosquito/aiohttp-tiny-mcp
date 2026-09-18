@@ -144,6 +144,22 @@ class BaseClient(ABC):
         method = self.adapter.method_for(operation)
         if method is None:
             raise ValueError(f"{self.adapter.version} does not expose {operation}")
+        return await self.request_method(method, params, name=name)
+
+    async def request_method(
+        self,
+        method: str,
+        params: Params | Mapping[str, Any] | None = None,
+        *,
+        name: str | None = None,
+    ) -> dict[str, Any]:
+        """Call a named method, including extensions, with protocol metadata and headers.
+
+        Check server discovery for the extension before using its methods.
+        Results are returned as wire dictionaries; RPC errors raise ClientError.
+        """
+        if not isinstance(params, Params):
+            params = Params.model_validate(dict(params or {}))
         params = self.adapter.client_decorate_params(params, self.profile)
         envelope = {
             "jsonrpc": "2.0",

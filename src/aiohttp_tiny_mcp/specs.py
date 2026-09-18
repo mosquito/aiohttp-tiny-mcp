@@ -152,6 +152,8 @@ class ResourceSpec(Model):
     mime_type: str | None = None
     cache_ttl_ms: int | None = None
     cache_scope: Literal["public", "private"] | None = None
+    legacy_uri: str | None = None
+    legacy_only: bool = False
 
     VAR: ClassVar[re.Pattern] = re.compile(r"\{([A-Za-z_][A-Za-z0-9_]*)\}")
 
@@ -205,6 +207,8 @@ class ResourceSpec(Model):
     def contents(self, uri: str, value: Any) -> list[Any]:
         match value:
             case TextResourceContents() | BlobResourceContents():
+                if self.legacy_uri is not None:
+                    return [value.model_copy(update={"uri": uri})]
                 return [value]
             case bytes():
                 return [

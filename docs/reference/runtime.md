@@ -28,6 +28,7 @@ assert Operation.CALL_TOOL.value == "call_tool"
 | `LISTEN` | `subscriptions/listen`, on `2026-07-28` only |
 | `SUBSCRIBE`, `UNSUBSCRIBE` | `resources/subscribe` and its opposite, on the older revisions only |
 | `SET_LOG_LEVEL` | `logging/setLevel`, on the older revisions only |
+| `EXTENSION` | A registered extension request on `2026-07-28`; `Call.target` holds its method name |
 
 An adapter may decline to expose an operation, and may map two method names onto
 one operation.
@@ -113,14 +114,16 @@ A reply is streamed when the call has something to send before its result: a
 tool declared `streaming=True`, a `subscriptions/listen` that runs until the
 client goes away, or a question this revision would have to push.
 
-`GET` is the notification stream for the revisions that read one. `DELETE` is
-not defined -- nothing here ends a session on demand; one ends when it expires.
+`GET` is the notification stream for the revisions that read one. This endpoint
+returns `405` for `DELETE`; its sessions end by expiration.
 
 ## Caching
 
-List results depend on the registry and the revision, not on the call, so they
-are rendered once per adapter and reused. `Registry` invalidates the cache when
-something is declared.
+The dispatcher builds each listing from the current registry, projects it for
+the selected revision, sorts it, and applies the requested cursor. It does not
+cache serialized lists. New registrations therefore appear on the next request.
 
-This is why `Value` is a model rather than bytes: the adapter renders, the
-registry caches what was rendered, and the two stay separable.
+On `2026-07-28`, cacheable results carry freshness hints. The default is
+`ttlMs: 0` with `cacheScope: "private"`. Resource declarations can override
+these values, and extension handlers can return `CacheableResult` subclasses.
+These hints describe client caching; they do not cache server handler results.

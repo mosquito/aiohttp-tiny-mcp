@@ -280,7 +280,7 @@ class Endpoint:
         log.debug("<- [%s] %s", adapter.version, raw.decode("utf-8", "replace"))
 
         try:
-            items = adapter.decode(pre)
+            items = adapter.decode(pre, self.registry)
             adapter.check_http(pre, request.headers, self.registry)
         except Rejected as e:
             return self.render_failure(adapter, e.failure)

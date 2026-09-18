@@ -20,6 +20,8 @@ This page is that claim, stated precisely.
 | Cache hints on results | yes | no | no | no | no |
 | Batching | no | no | no | yes | no |
 | Header mirroring | yes | no | no | no | no |
+| Extension methods and discovery | yes | resources only | resources only | resources only | resources only |
+| Skill files | `skill://...` | `mcp-extensions/io.modelcontextprotocol/skills/...` | same | same | same |
 
 Rows in bold are the ones where the mechanism differs but the application code
 does not. Everything else is either present everywhere or a property of the
@@ -27,8 +29,7 @@ revision that no amount of work can add.
 
 ## What is genuinely lost
 
-Three things, and each is a property of the older revision rather than a gap
-here.
+The following differences affect what an older client receives.
 
 **Structured output.** A tool returning a bare list gets `structuredContent` on
 `2026-07-28` and text on `2025-11-25` and `2025-06-18`, which require an object
@@ -42,6 +43,10 @@ is not. Declaring `min_revision` says so explicitly; the rest is decided in one
 place, by the adapter.
 
 **Cache hints.** `ttlMs` and `cacheScope` exist only on `2026-07-28`.
+
+**Extension methods.** Older clients can list and read extension files and a
+manifest under `mcp-extensions/{name}/...`. They cannot call the extension's
+custom methods. See [Extensions and skills](../guide/extensions.md).
 
 ## What costs something
 
@@ -65,19 +70,12 @@ question asked by one is answered through another.
 
 ## Client compatibility
 
-A snapshot from 2026-08-19, kept because the next person should not have to
-re-derive it before proposing to narrow revision support.
+Client defaults depend on the installed version and configuration. Inspect the
+actual discovery or initialization exchange instead of assuming support from a
+product name. The bundled console can select each supported revision and show
+the wire messages.
 
-| Client | Speaks 2026-07-28 | Default |
-| --- | --- | --- |
-| Claude, Claude Code | announced day-of-release | rollout in progress; negotiated 2025-11-25 in a live test |
-| Codex CLI | shipped August 2026 | opt-in (`CODEX_MCP_PROTOCOL_VERSION`); legacy unless set |
-| pi.dev | can be pinned | `"legacy"` -- classic `initialize` |
-| OpenCode (`mcp-go`) | library supports it | negotiates down unless the server opts into `Stateless=true` |
-| LangChain MCP adapters | Python SDK v2 lands it | migration incomplete |
-| Gemini CLI | unconfirmed | struggling even with 2025-11-25 |
-| Official SDKs | yes, v2.0.0+ | and still serve every 2025-era client from one server |
-
-The last row is the point: the implementations with the most resources chose to
-keep serving the older revisions rather than force a cutover, using the same
-shape as here -- one adapter per revision over a normalized core.
+For Skills, both the protocol revision and the extension declaration matter.
+On `2026-07-28`, check `capabilities.extensions` before calling `skills/list`
+or `skills/get`. On older revisions, use the resource fallback. A client that
+can read a skill file does not necessarily support automatic skill loading.

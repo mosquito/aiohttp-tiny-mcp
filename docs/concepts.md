@@ -34,6 +34,7 @@ The server's public surface consists of a registry and its handlers:
 | Tool function, model, and docstring | Name, description, input schema, and result |
 | Resource URI and handler | A readable URI or URI template |
 | Prompt function and model | A named prompt and its arguments |
+| `registry.extension(extension)` | Extension capabilities and methods, with resources for older clients |
 
 `Exchange`, database clients, the store, and the hub are server-side objects.
 They are never tool arguments and are not visible in a tool listing.
@@ -111,8 +112,9 @@ claims; see [What it costs](reference/benchmarks.md).
 
 ### Choose deliberately
 
-Choose the SDK when sampling, roots, middleware, or extensions matter, or when
-Starlette/ASGI is a fixed constraint. This library provides bearer-token
+Choose the SDK when its sampling or roots APIs are required, or when
+Starlette/ASGI is a fixed constraint. This library supports aiohttp middleware,
+[custom extensions and skill directories](guide/extensions.md), and bearer-token
 verification for an OAuth protected resource; see [Authentication](guide/auth.md).
 Choose it for aiohttp and for legacy session-based MCP behind a load balancer.
 The distributed claims are exercised in `tests/test_cluster.py`.

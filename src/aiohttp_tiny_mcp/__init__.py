@@ -15,6 +15,7 @@ from .core import (
 )
 from .endpoint import Endpoint
 from .exchange import Exchange
+from .extensions import Extension
 from .http_sse import SseEndpoint
 from .hub import Hub, MemoryHub
 from .models import (
@@ -55,6 +56,7 @@ __all__ = [
     "Endpoint",
     "SSEResponse",
     "Exchange",
+    "Extension",
     "GetPromptResult",
     "Hint",
     "Hub",

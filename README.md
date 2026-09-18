@@ -191,6 +191,7 @@ Start with [the documentation overview](https://mosquito.github.io/aiohttp-tiny-
 4. [Using Exchange](https://mosquito.github.io/aiohttp-tiny-mcp/guide/exchange.html): request context, progress, questions, and state.
 5. [Authentication](https://mosquito.github.io/aiohttp-tiny-mcp/guide/auth.html): bearer-token verification and OAuth resource metadata.
 6. [Stores and hubs](https://mosquito.github.io/aiohttp-tiny-mcp/deployment/stores.html): shared backend contracts and deployment requirements.
+7. [Extensions and skills](https://mosquito.github.io/aiohttp-tiny-mcp/guide/extensions.html): custom methods, skill directories, and resources for older clients.
 
 The server supports `2026-07-28`, `2025-11-25`, `2025-06-18`, `2025-03-26`
 and `2024-11-05`.
@@ -201,6 +202,7 @@ Delivery mechanisms and client support differ; see the
 Documentation examples are checked by the test suite. From a source checkout:
 
 ```bash
+uv sync --all-groups --all-extras
 uv run pytest docs README.md
-uv run --group docs sphinx-build -W -b html docs docs/_build
+uv run sphinx-build -W -b html docs docs/_build
 ```

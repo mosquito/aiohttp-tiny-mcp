@@ -11,6 +11,7 @@ const REVISIONS = {
     versionHeader: true,
     methodHeader: true,     // Mcp-Method, and Mcp-Name where it applies
     ask: "result",          // the question comes back as the result
+    extensions: true,
   },
   "2025-11-25": {
     describe: "initialize",
@@ -58,6 +59,7 @@ const ANSWERS_KEY = "mcpAnswers";
 const STATE_KEY = "mcpState";
 
 const CLIENT = { name: "aiohttp-tiny-mcp-console", version: "0.1.0" };
+const SKILLS_EXTENSION = "io.modelcontextprotocol/skills";
 
 const DRIVEN = new Set([ANSWERS_KEY, STATE_KEY]);
 
@@ -75,6 +77,7 @@ class Client {
     this.sessionId = null;
     this.counter = 0;
     this.tools = new Map();
+    this.serverCapabilities = {};
   }
 
   get capabilities() {
@@ -227,33 +230,68 @@ class Client {
       ? { protocolVersion: this.version, clientInfo: CLIENT, capabilities: this.capabilities }
       : {};
     const result = await this.request(this.rules.describe, params);
+    this.serverCapabilities = result.capabilities || {};
     if (this.rules.handshake) await this.notify("notifications/initialized", {});
     return result;
   }
 
+  get extensions() {
+    return this.rules.extensions ? this.serverCapabilities.extensions || {} : {};
+  }
+
+  async pages(method, key) {
+    const items = [];
+    const seen = new Set();
+    let cursor;
+    do {
+      const result = await this.request(method, cursor === undefined ? {} : { cursor });
+      items.push(...(result[key] || []));
+      cursor = result.nextCursor;
+      if (cursor !== undefined && cursor !== null) {
+        if (typeof cursor !== "string" || seen.has(cursor)) {
+          throw new Error(`${method} returned an invalid or repeated cursor`);
+        }
+        seen.add(cursor);
+      }
+    } while (cursor !== undefined && cursor !== null);
+    return items;
+  }
+
   async listTools() {
-    const result = await this.request("tools/list", {});
-    this.tools = new Map((result.tools || []).map((tool) => [tool.name, tool]));
-    return result.tools || [];
+    const tools = await this.pages("tools/list", "tools");
+    this.tools = new Map(tools.map((tool) => [tool.name, tool]));
+    return tools;
   }
 
   async listResources() {
-    const fixed = await this.request("resources/list", {});
-    let templated = { resourceTemplates: [] };
+    const resources = await this.pages("resources/list", "resources");
+    let templates = [];
     try {
-      templated = await this.request("resources/templates/list", {});
+      templates = await this.pages("resources/templates/list", "resourceTemplates");
     } catch (error) {
       /* A server with no templates may not expose the method. */
     }
-    return {
-      resources: fixed.resources || [],
-      templates: templated.resourceTemplates || [],
-    };
+    return { resources, templates };
   }
 
   async listPrompts() {
-    const result = await this.request("prompts/list", {});
-    return result.prompts || [];
+    return this.pages("prompts/list", "prompts");
+  }
+
+  async listSkills() {
+    if (!Object.hasOwn(this.extensions, SKILLS_EXTENSION)) return [];
+    return this.pages("skills/list", "skills");
+  }
+
+  async getSkill(uri) {
+    if (!Object.hasOwn(this.extensions, SKILLS_EXTENSION)) {
+      throw new Error("This server has not declared the Skills extension for this revision.");
+    }
+    const result = await this.request("skills/get", { uri });
+    if (!result.skill || result.skill.uri !== uri) {
+      throw new Error("skills/get returned a different skill URI");
+    }
+    return result.skill;
   }
 
   async readResource(uri) {
@@ -751,6 +789,25 @@ async function loadCatalogue() {
     note: (prompt) => firstLine(prompt.description),
   }, (prompt) => choose({ kind: "prompt", item: prompt }));
 
+  const extensions = Object.entries(client.extensions).map(([name, capabilities]) => ({ name, capabilities }));
+  show(extensions, `Extensions (${extensions.length})`, into, {
+    label: (extension) => extension.name,
+    note: () => "Capabilities and custom requests",
+  }, (extension) => choose({ kind: "extension", item: extension }));
+
+  if (Object.hasOwn(client.extensions, SKILLS_EXTENSION)) {
+    try {
+      const skills = await client.listSkills();
+      show(skills, `Skills (${skills.length})`, into, {
+        label: (skill) => (skill.frontmatter || {}).name || skill.uri,
+        note: (skill) => `${skill.uri} — ${firstLine((skill.frontmatter || {}).description)}`,
+      }, (skill) => choose({ kind: "skill", item: skill }));
+      if (!skills.length) into.append(element("p", "empty", "No skills listed. Use skills/get with a known URI."));
+    } catch (error) {
+      into.append(element("p", "empty", `Could not list skills: ${error.message}`));
+    }
+  }
+
   if (!into.childNodes.length) {
     page.catalogue.append(element("p", "empty", "This server offers nothing."));
   } else {
@@ -787,6 +844,25 @@ function choose(what) {
     };
     chosen.fields = buildFields(schema, page.args);
     page.invoke.textContent = "Get";
+  } else if (what.kind === "extension") {
+    page.subject.textContent = what.item.name;
+    page.about.textContent = "Enter a method and its JSON parameters from the extension documentation.";
+    reportValue("Capabilities", what.item.capabilities);
+    chosen.fields = buildFields({
+      properties: {
+        method: { type: "string", default: what.item.name === SKILLS_EXTENSION ? "skills/list" : "" },
+        params: { type: "object", default: {} },
+      },
+      required: ["method"],
+    }, page.args);
+    page.invoke.textContent = "Send";
+  } else if (what.kind === "skill") {
+    page.subject.textContent = (what.item.frontmatter || {}).name || what.item.uri;
+    prose((what.item.frontmatter || {}).description, page.about);
+    page.about.append(element("p", "hint", what.item.uri));
+    chosen.fields = [];
+    page.invoke.textContent = "Inspect";
+    reportValue("Frontmatter", what.item.frontmatter);
   } else if (what.kind === "resource") {
     page.subject.textContent = what.item.uri;
     prose(what.item.description, page.about);
@@ -1048,6 +1124,72 @@ function report(title, body, failed) {
   page.outcome.append(card);
 }
 
+function reportContents(result) {
+  (result.contents || []).forEach((part) => {
+    if (part.text === undefined) {
+      reportValue(part.mimeType || "contents", part);
+      return;
+    }
+    const held = parsed(part.text);
+    if (held === undefined || typeof held !== "object") {
+      report(part.mimeType || "contents", part.text);
+    } else {
+      reportValue(part.mimeType || "contents", held);
+    }
+  });
+}
+
+async function verifiedSkillFile(result, file) {
+  const parts = result.contents || [];
+  if (parts.length !== 1 || parts[0].uri !== file.uri) {
+    throw new Error("The resource response does not match the requested file.");
+  }
+  const part = parts[0];
+  let bytes;
+  if (typeof part.text === "string") bytes = new TextEncoder().encode(part.text);
+  else if (typeof part.blob === "string") bytes = Uint8Array.from(atob(part.blob), (char) => char.charCodeAt(0));
+  else throw new Error("The resource response has no file content.");
+  if (bytes.length !== file.size) throw new Error("The file size differs from its manifest. Inspect the skill again.");
+  if (!globalThis.crypto || !globalThis.crypto.subtle) {
+    throw new Error("File verification requires HTTPS or localhost.");
+  }
+  const digest = new Uint8Array(await globalThis.crypto.subtle.digest("SHA-256", bytes));
+  const hex = Array.from(digest, (byte) => byte.toString(16).padStart(2, "0")).join("");
+  if (`sha256:${hex}` !== file.digest) throw new Error("The file digest differs from its manifest. Inspect the skill again.");
+  return result;
+}
+
+function reportSkill(skill) {
+  reportValue("Frontmatter", skill.frontmatter);
+  if (skill.resources === "dynamic") {
+    report("Files", "This skill has a dynamic manifest. Read its files by URI in Resources.");
+    return;
+  }
+  if (!Array.isArray(skill.resources)) throw new Error("The skill has no file manifest.");
+  reportValue("File manifest", skill.resources);
+  const files = element("div", "group");
+  files.append(element("h4", null, "Read a file"));
+  const selected = chosen;
+  const source = client;
+  skill.resources.forEach((file) => {
+    const button = element("button", "item", `${file.uri} (${file.size} bytes)`);
+    button.type = "button";
+    button.onclick = async () => {
+      button.disabled = true;
+      try {
+        const result = await verifiedSkillFile(await source.readResource(file.uri), file);
+        if (chosen === selected && client === source) reportContents(result);
+      } catch (error) {
+        if (chosen === selected && client === source) report("Could not read file", error.message, true);
+      } finally {
+        button.disabled = false;
+      }
+    };
+    files.append(button);
+  });
+  page.outcome.append(files);
+}
+
 async function invoke() {
   if (!chosen || !client) return;
   page.invoke.disabled = true;
@@ -1079,6 +1221,15 @@ async function invoke() {
       if (views.text === null && views.value === undefined) {
         reportValue("Result", result, failed);
       }
+    } else if (chosen.kind === "skill") {
+      reportSkill(await client.getSkill(chosen.item.uri));
+    } else if (chosen.kind === "extension") {
+      const params = values.params === undefined ? {} : values.params;
+      if (params === null || typeof params !== "object" || Array.isArray(params)) {
+        throw new Error("params must be a JSON object");
+      }
+      result = await client.request(values.method, params);
+      reportValue("Result", result);
     } else if (chosen.kind === "prompt") {
       result = await client.getPrompt(chosen.item.name, values);
       (result.messages || []).forEach((message) => {
@@ -1093,18 +1244,7 @@ async function invoke() {
               values[name] === undefined ? whole : encodeURIComponent(values[name])
             );
       result = await client.readResource(uri);
-      (result.contents || []).forEach((part) => {
-        if (part.text === undefined) {
-          reportValue(part.mimeType || "contents", part);
-          return;
-        }
-        const held = parsed(part.text);
-        if (held === undefined || typeof held !== "object") {
-          report(part.mimeType || "contents", part.text);
-        } else {
-          reportValue(part.mimeType || "contents", held);
-        }
-      });
+      reportContents(result);
     }
   } catch (error) {
     const detail = error.code !== undefined ? ` (${error.code})` : "";
@@ -1248,7 +1388,14 @@ function start() {
   page.endpoint.textContent = endpointUrl.pathname;
 
   page.connect.onclick = () => (client ? disconnect() : connect());
-  page.refresh.onclick = () => loadCatalogue().catch((error) => say(error.message, "off"));
+  page.refresh.onclick = async () => {
+    try {
+      if (client.rules.extensions) await client.initialize();
+      await loadCatalogue();
+    } catch (error) {
+      say(error.message, "off");
+    }
+  };
   // Call is the form's submit button, though it sits outside the form -- the
   // `form` attribute says which form it belongs to. That is what makes Enter
   // in a field call the tool: a form with several fields and no submit button

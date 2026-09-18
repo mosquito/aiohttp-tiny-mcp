@@ -151,7 +151,7 @@ button.quiet { color: var(--ink-soft); }
 @media (max-width: 900px) {
   /* Avoid auto rows distributing spare height to collapsed panels. */
   .layout {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
     grid-template-rows: auto minmax(0, 1fr) auto;
   }
   .layout > .panel { min-height: 0; }
@@ -164,6 +164,8 @@ button.quiet { color: var(--ink-soft); }
   display: flex;
   flex-direction: column;
   min-height: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .panel-head {
@@ -183,12 +185,14 @@ button.quiet { color: var(--ink-soft); }
   color: var(--ink-soft);
   margin: 0;
   flex: 1;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .work .panel-head h2 { text-transform: none; letter-spacing: 0; font-size: 14px; color: var(--ink); font-family: var(--mono); }
+.panel-head > button { flex-shrink: 0; }
 
 .scroll { flex: 1; overflow: auto; padding: 12px 14px; min-height: 0; }
 
@@ -246,6 +250,8 @@ button.quiet { color: var(--ink-soft); }
 .item {
   display: block;
   width: 100%;
+  min-width: 0;
+  overflow-wrap: anywhere;
   text-align: left;
   border: 1px solid transparent;
   background: transparent;
@@ -301,7 +307,7 @@ button.quiet { color: var(--ink-soft); }
   border: 1px solid var(--line);
   border-radius: 4px;
   padding: 1px 4px;
-  white-space: nowrap;
+  white-space: normal;
 }
 
 .about pre {
@@ -371,10 +377,10 @@ button.quiet { color: var(--ink-soft); }
 button.tiny { font-size: 11px; padding: 1px 7px; }
 
 
-/* minmax(0, ...) prevents long keys from consuming the value column. */
+/* Cap long keys so values and copy controls keep usable space. */
 .fields {
   display: grid;
-  grid-template-columns: minmax(0, auto) minmax(0, 1fr);
+  grid-template-columns: fit-content(35%) minmax(0, 1fr);
   gap: 3px 14px;
   align-items: baseline;
 }
@@ -385,7 +391,8 @@ button.tiny { font-size: 11px; padding: 1px 7px; }
 .field-name {
   color: var(--ink-soft);
   font-size: 12px;
-  white-space: nowrap;
+  min-width: 0;
+  white-space: normal;
   overflow-wrap: anywhere;
 }
 

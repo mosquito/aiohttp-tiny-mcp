@@ -82,6 +82,8 @@ whether it is willing to be asked. Connect and Disconnect are the same button.
 
 **Offered** lists the tools, resources, resource templates and prompts, with
 what each says about itself. A tool that declared `destructiveHint` is marked.
+On `2026-07-28`, it also lists declared extensions and skills. Listings follow
+pagination cursors, including skill catalogs.
 
 **The middle** renders the description as the markdown it is -- headings,
 lists, code spans and blocks, links -- and builds a form from the selected
@@ -120,6 +122,27 @@ the same server, seen the way that revision sees it.
 
 That is the console's real use. A tool that behaves on `2026-07-28` and not on
 `2025-03-26` shows it here in two clicks, with the traffic beside it.
+
+## Extensions and skills
+
+Select an extension to inspect its capability settings and send a custom
+method with JSON parameters. The console supplies protocol metadata and headers;
+the extension documentation defines method names and argument shapes.
+
+When discovery declares `io.modelcontextprotocol/skills`, the console lists
+skills by name and URI. Select one and click **Inspect** to fetch its current
+frontmatter and file manifest through `skills/get`. Click a file to read it;
+the console checks its byte size and SHA-256 digest before displaying content.
+Digest verification requires HTTPS or localhost. Scripts are displayed as
+content and are never executed.
+
+The viewer does not activate skills in an agent. For a dynamic manifest,
+read files by URI through the resource view; there are no published digests
+to verify. A failed skill listing leaves the rest of the catalog available.
+
+On older revisions, extension files and manifests appear in **Resources**
+under `mcp-extensions/{name}/...`. The extension request view is only available
+on `2026-07-28`. See [Extensions and skills](extensions.md) for server setup.
 
 ## Questions
 

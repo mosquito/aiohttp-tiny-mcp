@@ -39,6 +39,7 @@ Repository = "https://github.com/mosquito/aiohttp-tiny-mcp"
 Issues = "https://github.com/mosquito/aiohttp-tiny-mcp/issues"
 
 [project.optional-dependencies]
+skills = ["PyYAML>=6"]
 # A hub and a session store on one SQLite file: aiohttp_tiny_mcp.sqlite.
 sqlite = ["aiosqlite>=0.20"]
 redis = [
@@ -50,6 +51,7 @@ postgres = [
 
 [dependency-groups]
 dev = [
+    "PyYAML>=6",
     "PyJWT>=2.13",
     "aiosqlite>=0.20",
     "furo>=2025.12.19",

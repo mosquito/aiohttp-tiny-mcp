@@ -118,7 +118,7 @@ async def serve_stdio(
 
             try:
                 selected = adapter or adapters.select(pre)
-                calls = selected.decode(pre)
+                calls = selected.decode(pre, registry)
             except Rejected as e:
                 fallback = adapters.fallback()
                 send(fallback.version, fallback.encode_failure(None, e.failure))

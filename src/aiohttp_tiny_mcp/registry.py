@@ -1,4 +1,4 @@
-"""Public API: declare tools, resources and prompts once, revision-free."""
+"""Public API: register tools, resources, prompts, and extensions."""
 
 from __future__ import annotations
 
@@ -7,6 +7,7 @@ from typing import Any
 
 from .auth import Authorization, Principal
 from .exchange import Exchange, Instance
+from .extensions import Extension, ExtensionSpec
 from .hub import Hub, MemoryHub
 from .models import Implementation
 from .request_state import DEFAULT_TTL_SECONDS as STATE_TTL_SECONDS
@@ -60,6 +61,52 @@ class Registry:
         self.prompts: dict[str, PromptSpec] = {}
         self.completer: Bound | None = None
         self.providers: dict[type, Any] = {}
+        self.extensions: dict[str, ExtensionSpec] = {}
+        self.resource_aliases: dict[str, ResourceSpec] = {}
+
+    def extension(self, extension: Extension) -> None:
+        """Install an extension and its resources after checking all declarations.
+
+        Register dependency providers first. Duplicate identifiers, methods,
+        resources, and attempts to replace base protocol methods are rejected.
+        """
+        from .protocol.selection import AdapterSet
+
+        if extension.name in self.extensions:
+            raise ValueError(f"duplicate extension: {extension.name}")
+        adapters = AdapterSet.default().adapters
+        for name, bound in extension.methods.items():
+            if (
+                name.startswith("notifications/")
+                or name in {"sampling/createMessage", "roots/list", "elicitation/create"}
+                or any(adapter.operation_for(name) is not None for adapter in adapters)
+            ):
+                raise ValueError(f"extension cannot replace protocol method: {name}")
+            if any(name in spec.methods for spec in self.extensions.values()):
+                raise ValueError(f"duplicate extension method: {name}")
+            self.check(name, bound)
+        manifest = extension.manifest_resource()
+        assert manifest.definition is not None
+        resources = {**extension.resources, manifest.definition.uri: manifest}
+        claimed: set[str] = set()
+        for uri, resource in resources.items():
+            for address in {uri, resource.legacy_uri}:
+                if address is None:
+                    continue
+                if (
+                    address in claimed
+                    or address in self.resources_fixed
+                    or address in self.resource_aliases
+                ):
+                    raise ValueError(f"duplicate resource: {address}")
+                claimed.add(address)
+            self.check(uri, resource.bound)
+        self.extensions[extension.name] = extension.snapshot()
+        for uri, resource in resources.items():
+            resource = resource.model_copy(deep=True)
+            self.resources_fixed[uri] = resource
+            if resource.legacy_uri is not None:
+                self.resource_aliases[resource.legacy_uri] = resource
 
     def provide(self, kind: type, source: Any) -> None:
         """Bind a type to where it comes from. Call before registering
@@ -120,7 +167,10 @@ class Registry:
             spec = ResourceSpec.build(uri, fn, **kw)
             self.check(uri, spec.bound)
             if spec.definition is not None:
-                if spec.definition.uri in self.resources_fixed:
+                if (
+                    spec.definition.uri in self.resources_fixed
+                    or spec.definition.uri in self.resource_aliases
+                ):
                     raise ValueError(f"duplicate resource: {spec.definition.uri}")
                 self.resources_fixed[spec.definition.uri] = spec
             else:
@@ -155,7 +205,7 @@ class Registry:
         return fn
 
     def match_resource(self, uri: str) -> tuple[ResourceSpec, dict[str, str]] | None:
-        fixed = self.resources_fixed.get(uri)
+        fixed = self.resources_fixed.get(uri) or self.resource_aliases.get(uri)
         if fixed is not None:
             return fixed, {}
         for spec in self.resources_templated:

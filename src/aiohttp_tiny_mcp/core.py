@@ -44,6 +44,7 @@ class Operation(StringEnum):
     SUBSCRIBE = "subscribe"
     UNSUBSCRIBE = "unsubscribe"
     SET_LOG_LEVEL = "set_log_level"
+    EXTENSION = "extension"
 
 
 LOG_LEVELS: tuple[str, ...] = (

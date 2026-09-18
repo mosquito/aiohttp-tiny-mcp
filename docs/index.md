@@ -46,6 +46,7 @@ pieces
 
 guide/tools
 guide/resources
+guide/extensions
 guide/prompts
 guide/completion
 guide/exchange

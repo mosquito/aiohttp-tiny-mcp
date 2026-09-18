@@ -48,9 +48,10 @@ flowchart TB
     Adapter -.-> A26 & A25c & A25b & A25a
 ```
 
-Arrows point downward or inward only. `Registry`, the specs, `Call`, `Operation`
-and `Outcome` never import an adapter, and no adapter imports `Endpoint`. That
-rule is what makes a new revision an additive change.
+Adapters translate protocol messages into normalized calls, and no adapter
+imports `Endpoint`. Extension registration checks method names against the
+built-in adapter maps to prevent collisions. Extension dispatch still uses
+`Operation`, `Call`, and the same dependency resolver as built-in handlers.
 
 ## Design goals
 
@@ -113,14 +114,20 @@ assert flags == {
 }
 ```
 
-`carries_state` is derived: handler state leaves the server and comes back on
-whichever revision does not push, so it is `can_ask or asks_in_arguments`.
+`carries_state` is `can_ask or asks_in_arguments`. These revisions return an
+opaque request-state handle for the client to send back. The handler's state
+remains in the server's store; it is not sent to the client.
 
 <!-- name: test_adapters -->
 ```python
 carries = {a.version for a in AdapterSet.default().adapters if a.carries_state}
 assert carries == {"2026-07-28", "2025-03-26", "2024-11-05"}
 ```
+
+`supports_extensions` is true on `2026-07-28`. It enables extension method
+dispatch and discovery; other adapters expose bundled resources under their
+legacy URI prefixes. Decoding receives the registry to resolve extension
+methods without storing application handlers on a shared adapter.
 
 ## The surface
 

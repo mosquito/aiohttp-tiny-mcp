@@ -30,6 +30,7 @@ against a real implementation where it was not obvious.
 | `resource_link` content | yes | yes | no |
 | Logging | per-request `_meta` key | `logging/setLevel`, kept for the session | same |
 | Cancellation | close the response stream | `notifications/cancelled` | same |
+| Extensions | declared in `server/discover`; custom methods callable | files and manifest through resources | same |
 
 2024-11-05 (HTTP+SSE) is a different transport shape entirely -- two endpoints
 and an `endpoint` event as the first message -- so it is implemented by the
@@ -58,7 +59,7 @@ the declaration rather than on a version string.
   - 2025-11-25, 2025-06-18
 * - `asks_in_arguments`
   - The question rides in the tool call itself.
-  - 2025-03-26
+  - 2025-03-26, 2024-11-05
 ```
 
 ### MRTR, on 2026-07-28

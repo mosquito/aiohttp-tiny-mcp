@@ -26,6 +26,7 @@ from .core import (
     answer_actions,
     decode_failure_target,
 )
+from .extensions import ExtensionSpec
 from .hub import Hub
 from .models import (
     CallToolParams,
@@ -72,6 +73,8 @@ class RegistryProtocol(Protocol):
     def prompts(self) -> Mapping[str, PromptSpec]: ...
     @property
     def completer(self) -> Bound | None: ...
+    @property
+    def extensions(self) -> Mapping[str, ExtensionSpec]: ...
     def match_resource(self, uri: str) -> tuple[ResourceSpec, dict[str, str]] | None: ...
 
 
@@ -113,7 +116,9 @@ class Adapter(ABC):
         """Raise `Rejected` on a revision-specific HTTP binding violation."""
         return None  # noqa: B027 -- concrete default, most revisions check nothing
 
-    def decode(self, pre: Preamble) -> Sequence[Call | DecodeFailure]:
+    def decode(
+        self, pre: Preamble, registry: RegistryProtocol | None = None
+    ) -> Sequence[Call | DecodeFailure]:
         """Decode messages independently; one invalid item does not abort the batch."""
         if pre.parse_error:
             raise Rejected(Failure(FailureKind.PARSE, "invalid JSON body"))
@@ -122,10 +127,12 @@ class Adapter(ABC):
                 raise Rejected(Failure(FailureKind.MALFORMED, "batching not supported"))
             if not pre.body:  # `is_batch` already means the body is a list
                 raise Rejected(Failure(FailureKind.MALFORMED, "empty batch"))
-            return [self.decode_item(item) for item in pre.body]
-        return [self.decode_item(pre.body)]
+            return [self.decode_item(item, registry) for item in pre.body]
+        return [self.decode_item(pre.body, registry)]
 
-    def decode_item(self, item: object) -> Call | DecodeFailure:
+    def decode_item(
+        self, item: object, registry: RegistryProtocol | None = None
+    ) -> Call | DecodeFailure:
         """Preserve the request id on failure without aborting sibling batch items."""
         if not isinstance(item, dict):
             return DecodeFailure(
@@ -135,12 +142,12 @@ class Adapter(ABC):
             )
         body = cast(dict[str, Any], item)
         try:
-            return self.decode_one(body)
+            return self.decode_one(body, registry)
         except Rejected as e:
             call_id, must_respond = decode_failure_target(body)
             return DecodeFailure(id=call_id, failure=e.failure, must_respond=must_respond)
 
-    def decode_one(self, body: dict[str, Any]) -> Call:
+    def decode_one(self, body: dict[str, Any], registry: RegistryProtocol | None = None) -> Call:
         if "id" in body and body["id"] is None:
             raise Rejected(Failure(FailureKind.MALFORMED, "id must not be null"))
         try:
@@ -148,6 +155,12 @@ class Adapter(ABC):
         except ValidationError as e:
             raise Rejected(Failure(FailureKind.MALFORMED, str(e))) from None
         operation = self.operation_for(msg.method)
+        if operation is None and registry is not None and self.supports_extensions:
+            if any(
+                msg.method in spec.methods and spec.min_revision <= self.version
+                for spec in registry.extensions.values()
+            ):
+                operation = Operation.EXTENSION
         if operation is None:
             raise Rejected(Failure(FailureKind.UNKNOWN_METHOD, f"unknown method: {msg.method}"))
         self.check_message(operation, msg)
@@ -156,7 +169,17 @@ class Adapter(ABC):
         except ValidationError as e:
             raise Rejected(Failure(FailureKind.INVALID_PARAMS, str(e))) from None
         self.check_params(params)
-        return self.build_call(operation, msg, params)
+        call = self.build_call(operation, msg, params)
+        if operation is Operation.EXTENSION:
+            if msg.is_notification:
+                raise Rejected(Failure(FailureKind.MALFORMED, "extension requests require an id"))
+            call.target = msg.method
+            call.arguments = {
+                key: value
+                for key, value in msg.params.items()
+                if key not in {"_meta", "inputResponses", "requestState"}
+            }
+        return call
 
     def build_call(self, operation: Operation, msg: Incoming, params: Params) -> Call:
         target: str | None = None
@@ -283,7 +306,10 @@ class Adapter(ABC):
         caps: dict[str, Any] = {}
         if registry.tools:
             caps["tools"] = {"listChanged": True}
-        if registry.resources_fixed or registry.resources_templated:
+        if any(
+            self.describe_resource(spec) is not None
+            for spec in (*registry.resources_fixed.values(), *registry.resources_templated)
+        ):
             caps["resources"] = {"listChanged": True, "subscribe": True}
         if registry.prompts:
             caps["prompts"] = {"listChanged": True}
@@ -300,7 +326,11 @@ class Adapter(ABC):
     def describe_tool(self, spec: ToolSpec) -> ToolDef | None: ...
 
     def describe_resource(self, spec: ResourceSpec) -> ResourceDef | ResourceTemplateDef | None:
-        """Resource definitions are shared across revisions."""
+        """Project extension resources onto the URI understood by this revision."""
+        if spec.legacy_only and self.supports_extensions:
+            return None
+        if spec.definition is not None and spec.legacy_uri and not self.supports_extensions:
+            return spec.definition.model_copy(update={"uri": spec.legacy_uri})
         return spec.definition if spec.definition is not None else spec.template
 
     def describe_prompt(self, spec: PromptSpec) -> PromptDef | None:
@@ -319,3 +349,4 @@ class Adapter(ABC):
     allows_batch: ClassVar[bool] = False
     #: Negotiate once via initialize; retain the revision and capabilities in a session.
     has_handshake: ClassVar[bool] = False
+    supports_extensions: ClassVar[bool] = False

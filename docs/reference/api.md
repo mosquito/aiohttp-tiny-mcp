@@ -7,6 +7,19 @@
    :members:
 ```
 
+## Extensions and skills
+
+```{eval-rst}
+.. autoclass:: aiohttp_tiny_mcp.Extension
+   :members: method, resource
+
+.. autoclass:: aiohttp_tiny_mcp.skills.Skills
+   :members: from_directory
+```
+
+See [Extensions and skills](../guide/extensions.md) for registration and legacy
+resource URIs. Loading directories requires `aiohttp-tiny-mcp[skills]`.
+
 ## Serving it
 
 ```{eval-rst}
@@ -154,7 +167,7 @@ Both backends on a PostgreSQL server. Needs `psycopg`: install
 ```{eval-rst}
 .. autoclass:: aiohttp_tiny_mcp.Client
    :members: initialize, list_tools, call_tool, list_resources, read_resource,
-             list_prompts, get_prompt, complete, listen, set_log_level
+             list_prompts, get_prompt, complete, listen, set_log_level, request_method
 
 .. autoclass:: aiohttp_tiny_mcp.stdio_client.StdioClient
    :members: spawn

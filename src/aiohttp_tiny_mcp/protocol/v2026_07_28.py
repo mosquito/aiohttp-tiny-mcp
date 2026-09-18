@@ -136,6 +136,7 @@ class InputRequiredResult(Model):
 class Adapter2026_07_28(Adapter):  # noqa: N801 -- revision date, greppable against the spec
     version: ClassVar[str] = "2026-07-28"
     can_ask: ClassVar[bool] = True
+    supports_extensions: ClassVar[bool] = True
 
     FAILURE_MAP: ClassVar[Mapping[FailureKind, tuple[int, int]]] = MappingProxyType(
         {
@@ -319,6 +320,17 @@ class Adapter2026_07_28(Adapter):  # noqa: N801 -- revision date, greppable agai
             capabilities=self.capabilities(registry),
             instructions=registry.instructions,
         )
+
+    def capabilities(self, registry: RegistryProtocol) -> dict[str, Any]:
+        caps = dict(super().capabilities(registry))
+        extensions = {
+            name: dict(spec.capabilities)
+            for name, spec in registry.extensions.items()
+            if spec.min_revision <= self.version
+        }
+        if extensions:
+            caps["extensions"] = extensions
+        return caps
 
     def describe_tool(self, spec: ToolSpec) -> ToolDef | None:
         if spec.min_revision is not None and spec.min_revision > self.version:

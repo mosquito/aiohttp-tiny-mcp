@@ -1,7 +1,7 @@
 # How this is verified
 
-A package that claims parity across five revisions has to show it rather than
-assert it. Four things do that, and each catches something the others cannot.
+The checks below cover protocol revisions, transports, shared state, and
+extensions. Executable documentation examples run in the same test suite.
 
 ## The parametrized suite
 
@@ -18,8 +18,8 @@ requests; each adapter supplies its expectations.
   specified, and encoded values are decoded before comparison.
 - **Selection.** Each adapter is reachable, and the choice is stable under
   irrelevant header noise.
-- **Caching.** Two identical cacheable requests produce byte-identical results,
-  and a registration between them changes the output.
+- **Listings and cache hints.** Listings reflect current declarations. Cacheable
+  results carry revision-specific freshness fields.
 
 Cross-adapter, the same registry called through every revision produces
 semantically equivalent results, and batch input is accepted by exactly the
@@ -79,10 +79,12 @@ that yielded one extra message on `2026-07-28` and nothing equivalent elsewhere.
 ## Running it
 
 ```bash
+uv sync --all-groups --all-extras
 uv run pytest          # tests, documentation and README
+uv run ruff format --check .
 uv run ruff check .
 uv run ty check src/ examples/
-uv run sphinx-build -b html docs docs/_build
+uv run sphinx-build -W --keep-going -b html docs docs/_build
 ```
 
 ## Not implemented
@@ -93,7 +95,23 @@ The stream a `POST` opens for one request does not: it carries no ids, and a
 client that loses one re-sends the request. The SDK replays those behind its
 `EventStore`.
 
-**Batching over stdio.** `2025-03-26` permits JSON-RPC batch arrays and the HTTP
-transport accepts them. stdio does not.
+**Batch response envelopes over stdio.** `2025-03-26` batch input is decoded,
+but stdio emits individual response lines rather than one response array.
+Use individual requests over stdio. Streamable HTTP supports batch envelopes
+for that revision.
 
-**The `Tasks` and `MCP Apps` extensions.**
+**Built-in Tasks and MCP Apps implementations.** The generic extension API and
+Skills loader are available; see [Extensions and skills](../guide/extensions.md).
+That API does not implement Tasks lifecycle rules or MCP Apps rendering.
+
+**Sampling and roots APIs.** These do not have built-in server handler APIs.
+
+## Extension coverage
+
+`tests/test_extensions.py` checks method dispatch over HTTP and stdio,
+dependency cleanup, metadata checks, registration conflicts, and resource
+fallback on all four older revisions. `tests/test_skills.py` checks file bytes
+against manifests, nested skills, pagination, startup validation, and snapshots.
+
+The optional directory-reading feature of Skills is not implemented or
+advertised. Skills use `skills/list`, `skills/get`, and `resources/read`.

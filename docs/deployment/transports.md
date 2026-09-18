@@ -303,8 +303,9 @@ client for its whole life, so its capabilities and log level need no session to
 be remembered in.
 
 What stdio does not have is a second channel. A revision that reads
-notifications on a separate stream cannot do so here, and `StdioClient` says so
-rather than pretending. Batching is not implemented either.
+notifications on a separate stream cannot do so here. Use individual requests:
+the stdio server decodes `2025-03-26` batch input but emits separate response
+lines, not a batch response array.
 
 Cancellation differs too: HTTP closes the response stream, stdio sends
 `notifications/cancelled`.

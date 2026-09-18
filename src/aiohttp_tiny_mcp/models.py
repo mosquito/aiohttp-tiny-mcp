@@ -291,6 +291,11 @@ class Meta(Model):
     )  # draft, SEP-2575
 
 
+# Resolve Meta before applications subclass these result bases in other modules.
+ResultModel.model_rebuild()
+CacheableResult.model_rebuild()
+
+
 class Params(Model):
     meta: Meta = Field(default_factory=Meta, alias="_meta")
     # MRTR (SEP-2322).
