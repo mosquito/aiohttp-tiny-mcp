@@ -137,22 +137,35 @@ Digest verification requires HTTPS or localhost. Scripts are displayed as
 content and are never executed.
 
 The viewer does not activate skills in an agent. For a dynamic manifest,
-read files by URI through the resource view; there are no published digests
-to verify. A failed skill listing leaves the rest of the catalog available.
+click the instruction URI to read its current content; there are no published
+digests to verify. A failed skill listing leaves the rest of the catalog available.
 
-On older revisions, extension files and manifests appear in **Resources**
-under `mcp-extenstion://{name}/...`. The extension request view is only available
-on `2026-07-28`. To find skills, select
-`mcp-extenstion://io.modelcontextprotocol/skills/manifest.json` under **Resources**
-and click **Read**. Its `resources` array lists file URIs; entries ending in
-`/SKILL.md` are the skill entry points published by the directory loader.
-Select one of those resources and click **Read** to view its instructions.
+On older revisions, the console shows ordinary **Resources** and **Resource templates**.
+There is no **Extensions** or **Skills** group. Compatibility routes use the
+`mcp-extensions://{name}/...` namespace and the standard resource API.
 
-The console fetches every page of `resources/list`, so all registered skill files
-appear in **Resources**. It does not call `skills/list` on older revisions.
-See [listing skills on older MCP revisions](extensions.md#list-skills-on-older-mcp-revisions)
-for the equivalent client code, and [Dynamic skills](dynamic-skills.md) for
-instructions generated at request time.
+To list skills on `2025-11-25` or another older revision:
+
+1. Under **Resources**, select
+   `mcp-extensions://io.modelcontextprotocol/skills/skills/list` and click **Read**.
+2. Inspect the JSON catalogue. Click a file URI under **Read a resource** to open it.
+3. For skill details, select the resource template
+   `mcp-extensions://io.modelcontextprotocol/skills/skills/get?params={params}`.
+   Enter `{"uri":"<skill-uri>"}` in `params` and click **Read**.
+   The viewer percent-encodes the JSON for you.
+4. If the listing returns `nextCursor`, select the `skills/list?params={params}`
+   template and enter `{"cursor":"<nextCursor>"}` to read the next page.
+
+The viewer does not call native `skills/list` or `skills/get` on older revisions.
+Every registered method has a resource route automatically. Custom handlers
+use `extension.method()`; their files belong to `extension.resource()`.
+Install the extension after declaring its methods and files. Restart the server
+and reload the viewer after changing declarations, including with an editable install.
+
+The manifest remains an ordinary JSON resource that describes the available
+routes. It does not declare protocol extension support. See
+[Extension compatibility through resources](extension-compatibility.md) and
+[Dynamic skills](dynamic-skills.md).
 
 ## Questions
 

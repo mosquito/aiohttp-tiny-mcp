@@ -22,6 +22,7 @@ from .core import (
     Value,
 )
 from .exchange import Exchange
+from .extensions import ExtensionResult
 from .models import (
     CallToolResult,
     CompleteResult,
@@ -212,7 +213,7 @@ class Dispatcher:
                 value = value.model_dump(mode="json", by_alias=True)
             if not isinstance(value, Mapping):
                 raise TypeError(f"{method}: extension handler must return a result object")
-            return Value(result=ResultModel.model_validate(dict(value)))
+            return Value(result=ExtensionResult.model_validate(dict(value)))
         return Failure(FailureKind.UNKNOWN_METHOD, f"unknown method: {method}")
 
     async def set_log_level(self, ex: Exchange) -> Outcome:
@@ -345,6 +346,10 @@ class Dispatcher:
         definition = ex.adapter.describe_resource(spec)
         if definition is None or (isinstance(definition, ResourceDef) and definition.uri != uri):
             return Failure(FailureKind.RESOURCE_NOT_FOUND, f"resource not found: {uri}")
+        if spec.template is not None and spec.legacy_uri is not None:
+            pattern = spec.pattern if ex.adapter.supports_extensions else spec.legacy_pattern
+            if pattern is None or pattern.fullmatch(uri) is None:
+                return Failure(FailureKind.RESOURCE_NOT_FOUND, f"resource not found: {uri}")
         try:
             value = await spec.bound.call(variables, ex)
         except ValidationError as e:

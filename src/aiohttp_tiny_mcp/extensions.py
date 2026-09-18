@@ -8,9 +8,13 @@ from copy import deepcopy
 from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Any
+from urllib.parse import unquote
 
 from pydantic import BaseModel
 
+from .core import Failure, FailureKind, Rejected
+from .models import ResultModel
+from .schema import json_schema
 from .specs import Bound, ResourceSpec
 
 
@@ -21,8 +25,50 @@ class ExtensionSpec:
     methods: Mapping[str, Bound]
 
 
+class ExtensionResult(ResultModel):
+    """Preserve result discriminators defined by an extension."""
+
+    result_type: str | None = None
+
+
 class Nothing(BaseModel):
     pass
+
+
+class LegacyParams(BaseModel):
+    params: str = "{}"
+
+
+def map_resource_uris(value: Any, resources: list[ResourceSpec], *, legacy: bool) -> Any:
+    """Translate URI fields without changing opaque cursors or file contents."""
+    if isinstance(value, list):
+        return [map_resource_uris(item, resources, legacy=legacy) for item in value]
+    if not isinstance(value, dict):
+        return value
+    result = {}
+    for key, item in value.items():
+        if key == "uri" and isinstance(item, str):
+            for spec in resources:
+                assert spec.legacy_uri is not None
+                if spec.definition is not None:
+                    canonical = spec.definition.uri
+                else:
+                    assert spec.template is not None
+                    canonical = spec.template.uri_template
+                source, target = (
+                    (canonical, spec.legacy_uri) if legacy else (spec.legacy_uri, canonical)
+                )
+                pattern = spec.pattern if legacy else spec.legacy_pattern
+                if item == source:
+                    item = target
+                    break
+                if pattern is not None and (match := pattern.fullmatch(item)):
+                    item = ResourceSpec.VAR.sub(lambda m: match[m[1]], target)
+                    break
+            result[key] = item
+        else:
+            result[key] = map_resource_uris(item, resources, legacy=legacy)
+    return result
 
 
 class Extension:
@@ -59,9 +105,18 @@ class Extension:
 
         Return a result mapping or a ``ResultModel`` subclass. Additional
         parameters use the registry's dependency providers, including Exchange.
+        Older revisions invoke the same handler through a namespaced resource.
+        Parameters use a percent-encoded JSON query value. Reading a method
+        resource can change state, depending on the handler.
         """
         if not name or name.startswith("rpc.") or any(char.isspace() for char in name):
             raise ValueError(f"invalid extension method: {name!r}")
+        if (
+            any(part in ("", ".", "..") for part in name.split("/"))
+            or any(char in "?#%:{}\\" for char in name)
+            or name == "manifest.json"
+        ):
+            raise ValueError(f"invalid legacy method path: {name!r}")
 
         def register(fn: Callable[..., Awaitable[Any]]):
             if name in self.methods:
@@ -79,7 +134,7 @@ class Extension:
         legacy_path: str | None = None,
         **kw: Any,
     ):
-        """Bundle a resource with a legacy ``mcp-extenstion://{name}/...`` URI.
+        """Bundle a resource with a legacy ``mcp-extensions://{name}/...`` URI.
 
         By default, the legacy path is the URI after its scheme. Set
         ``legacy_path`` to choose a different relative path within the extension.
@@ -94,41 +149,122 @@ class Extension:
             if uri in self.resources:
                 raise ValueError(f"duplicate extension resource: {uri}")
             spec = ResourceSpec.build(uri, fn, **kw)
-            if spec.definition is None:
-                raise ValueError("extension resources must use fixed URIs")
-            spec.legacy_uri = f"mcp-extenstion://{self.name}/{path}"
+            spec.legacy_uri = f"mcp-extensions://{self.name}/{path}"
+            alias = ResourceSpec.build(spec.legacy_uri, fn)
+            if set(ResourceSpec.VAR.findall(uri)) != set(ResourceSpec.VAR.findall(path)):
+                raise ValueError("legacy_path must use the same template variables as the URI")
+            spec.legacy_pattern = alias.pattern
             self.resources[uri] = spec
             return fn
 
         return register(fn) if fn is not None else register
 
-    def manifest_resource(self) -> ResourceSpec:
+    def method_resources(self) -> tuple[dict[str, ResourceSpec], dict[str, Any]]:
+        """Build legacy resource routes around every registered method."""
+        from .exchange import Exchange
+
+        resources = [spec.model_copy(deep=True) for spec in self.resources.values()]
+        routes: dict[str, ResourceSpec] = {}
+        entries = {}
+
+        def reader(bound: Bound):
+            async def read(args: LegacyParams, ex) -> dict:
+                try:
+                    params = json.loads(unquote(args.params))
+                except (ValueError, UnicodeError) as error:
+                    raise Rejected(
+                        Failure(FailureKind.INVALID_PARAMS, "Invalid JSON params")
+                    ) from error
+                if not isinstance(params, dict):
+                    raise Rejected(Failure(FailureKind.INVALID_PARAMS, "params must be an object"))
+                params = map_resource_uris(params, resources, legacy=False)
+                value = await bound.call(params, ex)
+                if isinstance(value, BaseModel):
+                    value = value.model_dump(mode="json", by_alias=True, exclude_none=True)
+                if not isinstance(value, Mapping):
+                    raise TypeError("extension handler must return a result object")
+                return map_resource_uris(dict(value), resources, legacy=True)
+
+            read.__annotations__["ex"] = Exchange
+            return read
+
+        for name in sorted(self.methods):
+            bound = self.methods[name].model_copy(deep=True)
+            uri = f"mcp-extensions://{self.name}/{name}"
+            schema = json_schema(bound.args_model)
+            entry = {
+                "uriTemplate": uri + "?params={params}",
+                "inputSchema": schema,
+                "description": (bound.fn.__doc__ or "").strip(),
+            }
+            if isinstance(bound.returns, type) and issubclass(bound.returns, BaseModel):
+                entry["outputSchema"] = json_schema(bound.returns)
+            if not schema.get("required"):
+                entry["uri"] = uri
+            handler = reader(bound)
+            for address in [entry["uriTemplate"], *([uri] if "uri" in entry else [])]:
+                spec = ResourceSpec.build(
+                    address,
+                    handler,
+                    name=name,
+                    mime_type="application/json",
+                    description=(
+                        f"Invoke {name}; this can change state. "
+                        "params is a percent-encoded JSON object. "
+                        + (bound.fn.__doc__ or "").strip()
+                    ),
+                )
+                spec.legacy_only = True
+                routes[address] = spec
+            entries[name] = entry
+        return routes, entries
+
+    def manifest_resource(
+        self, routes: dict[str, ResourceSpec] | None = None, methods: dict[str, Any] | None = None
+    ) -> ResourceSpec:
         """Describe the extension to clients that only support resources."""
-        content = json.dumps(
-            {
-                "name": self.name,
-                "capabilities": self.capabilities,
-                "methods": sorted(self.methods),
-                "resources": sorted(
+        manifest = {
+            "name": self.name,
+            "instructions": (
+                "Use resources/read to invoke a method URI. For arguments, substitute "
+                "percent-encoded JSON for {params} in its uriTemplate. Each read invokes "
+                "the handler and can change state. Results are JSON resource contents; "
+                "failures are JSON-RPC errors. Follow returned resource URIs to read files."
+            ),
+            "capabilities": self.capabilities,
+            "methods": sorted(self.methods),
+            "resources": sorted(
+                [
                     spec.legacy_uri
                     for spec in self.resources.values()
-                    if spec.legacy_uri is not None
-                ),
-            },
-            ensure_ascii=False,
+                    if spec.legacy_uri is not None and spec.definition is not None
+                ]
+                + [uri for uri, spec in (routes or {}).items() if spec.definition is not None]
+            ),
+        }
+        templates = sorted(
+            [
+                spec.legacy_uri
+                for spec in self.resources.values()
+                if spec.template is not None and spec.legacy_uri is not None
+            ]
+            + [uri for uri, spec in (routes or {}).items() if spec.template is not None]
         )
+        if templates:
+            manifest["resourceTemplates"] = templates
+        if methods:
+            manifest["methodResources"] = methods
+        content = json.dumps(manifest, ensure_ascii=False)
 
         async def read(args: Nothing) -> str:
             return content
 
         spec = ResourceSpec.build(
-            f"mcp-extenstion://{self.name}/manifest.json",
+            f"mcp-extensions://{self.name}/manifest.json",
             read,
             name=f"{self.name} manifest",
             mime_type="application/json",
-            description=(
-                f"Extension metadata and resource URIs. Methods require MCP {self.min_revision}+."
-            ),
+            description="Compatibility resource routes, parameter schemas, and file URIs.",
         )
         spec.legacy_only = True
         return spec

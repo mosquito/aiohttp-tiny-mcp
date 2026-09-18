@@ -88,24 +88,27 @@ async def test_legacy_extensions_publish_prefixed_resources_and_manifest(transpo
 
     registry = Registry("legacy", "1")
     registry.extension(extension)
-    prefix = "mcp-extenstion://example.org/manual/"
+    prefix = "mcp-extensions://example.org/manual/"
     async with transport(registry, adapter=version) as client:
         discovery = await client.initialize()
         assert "extensions" not in discovery["capabilities"]
         assert {item.uri for item in await client.list_resources()} == {
             prefix + "manifest.json",
             prefix + "guide/start.md",
+            prefix + "manual/get",
         }
         result = await client.read_resource(prefix + "guide/start.md")
         assert result.contents[0].text == "# Guide"
         assert result.contents[0].uri == prefix + "guide/start.md"
         manifest = await client.read_resource(prefix + "manifest.json")
-        assert json.loads(manifest.contents[0].text) == {
-            "name": "example.org/manual",
-            "capabilities": {},
-            "methods": ["manual/get"],
-            "resources": [prefix + "guide/start.md"],
-        }
+        details = json.loads(manifest.contents[0].text)
+        assert details["name"] == "example.org/manual"
+        assert details["capabilities"] == {}
+        assert details["methods"] == ["manual/get"]
+        assert details["resources"] == [prefix + "guide/start.md", prefix + "manual/get"]
+        assert details["methodResources"]["manual/get"]["uri"] == prefix + "manual/get"
+        invoked = await client.read_resource(prefix + "manual/get")
+        assert json.loads(invoked.contents[0].text) == {"text": "manual"}
         with pytest.raises(ClientError) as missing:
             await client.request_method("manual/get")
         assert missing.value.code == -32601
@@ -212,7 +215,7 @@ def test_resource_conflicts_and_missing_providers_leave_registry_unchanged():
         return ""
 
     registry = Registry("conflicts", "1")
-    registry.resource("mcp-extenstion://example.org/data/file", read)
+    registry.resource("mcp-extensions://example.org/data/file", read)
     extension = Extension("example.org/data")
     extension.resource("data://file", read)
     with pytest.raises(ValueError, match="duplicate resource"):

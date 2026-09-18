@@ -115,3 +115,9 @@ against manifests, nested skills, pagination, startup validation, and snapshots.
 
 The optional directory-reading feature of Skills is not implemented or
 advertised. Skills use `skills/list`, `skills/get`, and `resources/read`.
+
+`tests/test_extension_wire.py` checks the legacy wire boundary on every older
+revision over stdio and HTTP. It verifies ordinary resource response shapes,
+rejection of native extension requests, and no extension capability declaration.
+Extension-specific result fields remain JSON text inside resource contents.
+See [Extension compatibility](../guide/extension-compatibility.md).

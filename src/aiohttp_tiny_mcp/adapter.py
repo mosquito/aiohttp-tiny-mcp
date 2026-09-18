@@ -174,11 +174,7 @@ class Adapter(ABC):
             if msg.is_notification:
                 raise Rejected(Failure(FailureKind.MALFORMED, "extension requests require an id"))
             call.target = msg.method
-            call.arguments = {
-                key: value
-                for key, value in msg.params.items()
-                if key not in {"_meta", "inputResponses", "requestState"}
-            }
+            call.arguments = {key: value for key, value in msg.params.items() if key != "_meta"}
         return call
 
     def build_call(self, operation: Operation, msg: Incoming, params: Params) -> Call:
@@ -331,6 +327,8 @@ class Adapter(ABC):
             return None
         if spec.definition is not None and spec.legacy_uri and not self.supports_extensions:
             return spec.definition.model_copy(update={"uri": spec.legacy_uri})
+        if spec.template is not None and spec.legacy_uri and not self.supports_extensions:
+            return spec.template.model_copy(update={"uri_template": spec.legacy_uri})
         return spec.definition if spec.definition is not None else spec.template
 
     def describe_prompt(self, spec: PromptSpec) -> PromptDef | None:

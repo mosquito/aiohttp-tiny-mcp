@@ -153,6 +153,7 @@ class ResourceSpec(Model):
     cache_ttl_ms: int | None = None
     cache_scope: Literal["public", "private"] | None = None
     legacy_uri: str | None = None
+    legacy_pattern: Any = None
     legacy_only: bool = False
 
     VAR: ClassVar[re.Pattern] = re.compile(r"\{([A-Za-z_][A-Za-z0-9_]*)\}")

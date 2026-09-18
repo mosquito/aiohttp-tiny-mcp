@@ -1124,7 +1124,18 @@ function report(title, body, failed) {
   page.outcome.append(card);
 }
 
+function resourceUris(value, found = new Set()) {
+  if (!value || typeof value !== "object") return found;
+  for (const [key, child] of Object.entries(value)) {
+    if (key === "uri" && typeof child === "string" && /^[a-z][a-z0-9+.-]*:/i.test(child)) {
+      found.add(child);
+    } else if (child && typeof child === "object") resourceUris(child, found);
+  }
+  return found;
+}
+
 function reportContents(result) {
+  const links = new Set();
   (result.contents || []).forEach((part) => {
     if (part.text === undefined) {
       reportValue(part.mimeType || "contents", part);
@@ -1135,8 +1146,23 @@ function reportContents(result) {
       report(part.mimeType || "contents", part.text);
     } else {
       reportValue(part.mimeType || "contents", held);
+      resourceUris(held, links);
     }
   });
+  if (links.size) {
+    const group = element("div", "group");
+    group.append(element("h4", null, "Read a resource"));
+    links.forEach((uri) => {
+      const button = element("button", "item", uri);
+      button.type = "button";
+      button.onclick = () => {
+        choose({ kind: "resource", item: { uri } });
+        invoke();
+      };
+      group.append(button);
+    });
+    page.outcome.append(group);
+  }
 }
 
 async function verifiedSkillFile(result, file) {
@@ -1161,23 +1187,22 @@ async function verifiedSkillFile(result, file) {
 
 function reportSkill(skill) {
   reportValue("Frontmatter", skill.frontmatter);
-  if (skill.resources === "dynamic") {
-    report("Files", "This skill has a dynamic manifest. Read its files by URI in Resources.");
-    return;
-  }
-  if (!Array.isArray(skill.resources)) throw new Error("The skill has no file manifest.");
-  reportValue("File manifest", skill.resources);
+  const dynamic = skill.resources === "dynamic";
+  if (!dynamic && !Array.isArray(skill.resources)) throw new Error("The skill has no file manifest.");
+  if (dynamic) report("Files", "Read the current instructions below. This dynamic manifest provides no file digests.");
+  else reportValue("File manifest", skill.resources);
   const files = element("div", "group");
   files.append(element("h4", null, "Read a file"));
   const selected = chosen;
   const source = client;
-  skill.resources.forEach((file) => {
-    const button = element("button", "item", `${file.uri} (${file.size} bytes)`);
+  (dynamic ? [{ uri: skill.uri }] : skill.resources).forEach((file) => {
+    const button = element("button", "item", dynamic ? file.uri : `${file.uri} (${file.size} bytes)`);
     button.type = "button";
     button.onclick = async () => {
       button.disabled = true;
       try {
-        const result = await verifiedSkillFile(await source.readResource(file.uri), file);
+        const content = await source.readResource(file.uri);
+        const result = dynamic ? content : await verifiedSkillFile(content, file);
         if (chosen === selected && client === source) reportContents(result);
       } catch (error) {
         if (chosen === selected && client === source) report("Could not read file", error.message, true);

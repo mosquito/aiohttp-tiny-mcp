@@ -127,13 +127,13 @@ or dictionaries that include `ttlMs` and `cacheScope`.
 ## Older clients
 
 The same callback is available at
-`mcp-extenstion://io.modelcontextprotocol/skills/deploy/SKILL.md` on older
+`mcp-extensions://io.modelcontextprotocol/skills/deploy/SKILL.md` on older
 revisions. Find it through `resources/list` or the extension's `manifest.json`.
 Continue the example to verify that the legacy resource also reads current data:
 
 <!-- name: async test_dynamic_skills -->
 ```python
-legacy_uri = "mcp-extenstion://io.modelcontextprotocol/skills/deploy/SKILL.md"
+legacy_uri = "mcp-extensions://io.modelcontextprotocol/skills/deploy/SKILL.md"
 
 async with connect(registry, adapter="2025-11-25") as client:
     assert legacy_uri in {resource.uri for resource in await client.list_resources()}
@@ -144,7 +144,10 @@ async with connect(registry, adapter="2025-11-25") as client:
 
 See [List skills on older MCP revisions](extensions.md#list-skills-on-older-mcp-revisions)
 for pagination and manifest examples. Older clients receive ordinary resources;
-they do not receive the modern `resources: "dynamic"` entry through `skills/list`.
+read `mcp-extensions://io.modelcontextprotocol/skills/skills/list` to receive the
+current entries, including `resources: "dynamic"`. This read runs the same handler
+as native `skills/list`. In the viewer, select that URI under **Resources**
+and click **Read**. Older revisions do not have native extension views.
 
 ## Changing the catalog
 
@@ -152,15 +155,17 @@ The example changes content at an existing URI. Changing which skills exist
 requires additional routing and discovery work:
 
 - Custom `skills/list` and `skills/get` handlers can query a live catalog.
-- `Extension.resource()` accepts fixed URIs. It does not support URI templates
-  or a catch-all file reader.
+- `Extension.resource()` accepts fixed URIs and templates such as
+  `skill://{name}/SKILL.md`. Register templates to route files from a live catalog.
 - `Registry.resource()` supports templates, but resources registered there do
   not acquire an extension's legacy prefix automatically. Their templates are
   listed through `resources/templates/list`; concrete instances are not enumerated.
-- The legacy extension manifest captures resource addresses at installation.
-  It does not invoke `skills/list` or track later declaration changes.
+- The legacy extension manifest captures route declarations at installation.
+  Its `methodResources` points to live handlers; it does not snapshot
+  their catalogue results.
 
 There is no built-in async Skills provider with `list`, `get`, and `read` yet.
-For an unbounded live catalog, implement its resource routing and legacy
-catalog discovery explicitly. For a finite catalog, register the file URIs at
+For an unbounded live catalog, register list/get handlers with
+`extension.method()` and file templates with `extension.resource()`. The method
+resources are generated automatically. For a finite catalog, register file URIs at
 startup and let their handlers return current content.

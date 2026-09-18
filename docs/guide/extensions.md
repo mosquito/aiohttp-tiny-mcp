@@ -6,8 +6,12 @@ The same registration works over Streamable HTTP and stdio.
 
 On MCP `2026-07-28`, `server/discover` advertises the extension and its methods
 are callable. Older revisions expose its files and a manifest through resources
-under `mcp-extenstion://{name}/...`, where `{name}` is the full extension identifier.
-This resource convention does not add extension methods to older protocols.
+under `mcp-extensions://{name}/...`, where `{name}` is the full extension identifier.
+Every registered method also has a resource route, including methods that change state. Older clients
+call `resources/read`; they do not send custom JSON-RPC method names.
+
+See [Extension compatibility through resources](extension-compatibility.md) for
+the protocol boundary, wire examples, invocation rules, and client limitations.
 
 ## Declare an extension
 
@@ -69,14 +73,15 @@ protocol failure, raise `Rejected(Failure(...))` from `aiohttp_tiny_mcp.core`.
 Unexpected exceptions produce `-32603`. Extension methods are requests and require
 an id; extension notification handlers are not supported.
 
-Protocol metadata and retry fields are available through `Exchange`; they are
-removed before validating the handler's arguments. HTTP authentication, origin
+Protocol metadata is available through `Exchange`; `_meta` is removed before
+validating handler arguments. Method fields, including `inputResponses` and
+`requestState`, remain available to the argument model. HTTP authentication, origin
 checks, and required protocol headers still apply. Apply any method-specific
 authorization in the handler using an injected `Principal`.
 
 ## Bundle resources for older clients
 
-Register fixed resources with `extension.resource()`. The default legacy path
+Register fixed resources or URI templates with `extension.resource()`. The default legacy path
 is the part after `://`; `legacy_path=` overrides it.
 
 <!-- name: async test_extension_resources -->
@@ -105,7 +110,7 @@ registry = Registry("manual", "1.0")
 registry.extension(extension)
 
 async with connect(registry, adapter="2025-11-25") as client:
-    prefix = "mcp-extenstion://example.org/manual/"
+    prefix = "mcp-extensions://example.org/manual/"
     resource = await client.read_resource(prefix + "start.md")
     assert resource.contents[0].text.startswith("# Start")
     manifest = await client.read_resource(prefix + "manifest.json")
@@ -114,9 +119,64 @@ async with connect(registry, adapter="2025-11-25") as client:
 
 `resources/list` includes the manifest and files on all four older revisions.
 The manifest lists the extension identifier, settings, method names, and legacy
-resource URIs. Method names are descriptive; callers cannot invoke those methods
-on older revisions. On `2026-07-28`, resources use their declared URIs, and the
-legacy manifest is hidden. `manifest.json` is reserved within the legacy prefix.
+resource URIs. `resourceTemplates` lists templates, and `methodResources` maps
+all methods to resource routes and parameter schemas. On `2026-07-28`,
+resources use their declared URIs; legacy manifests and method routes are hidden.
+`manifest.json` is reserved within the legacy prefix.
+
+## Invoke methods on older revisions
+
+Every `extension.method()` registration automatically gets a resource route.
+The same handler runs on each invocation, with argument validation and dependency
+injection. No compatibility flag, separate server resource, or copied catalogue
+is needed. The manifest includes the parameter schema and any declared output model.
+
+<!-- name: async test_extension_method_resource -->
+```python
+import json
+from urllib.parse import quote
+
+from pydantic import BaseModel
+from aiohttp_tiny_mcp import Extension, Registry
+from aiohttp_tiny_mcp.testing import connect
+
+class Lookup(BaseModel):
+    name: str
+
+extension = Extension("example.org/catalog")
+
+@extension.method("catalog/lookup")
+async def lookup(args: Lookup) -> dict:
+    return {"entry": {"name": args.name}}
+
+registry = Registry("catalog", "1")
+registry.extension(extension)
+
+async with connect(registry, adapter="2025-11-25") as client:
+    params = quote(json.dumps({"name": "deploy"}), safe="")
+    uri = "mcp-extensions://example.org/catalog/catalog/lookup?params=" + params
+    result = await client.read_resource(uri)
+    assert json.loads(result.contents[0].text)["entry"]["name"] == "deploy"
+```
+
+`resources/templates/list` advertises the parameterized route. Methods without
+required parameters also have a fixed URI without a query in `resources/list`.
+The extension manifest describes both through `methodResources`.
+
+URI fields in arguments and results are translated for resources registered
+on the same extension, including templates. Cursors remain opaque. URI template
+variables retain their encoded values; decode them in the file handler when needed.
+
+The mapping includes state-changing methods such as `tasks/update` and
+`tasks/cancel`. Reading their method resources invokes those operations. The
+resource descriptions and manifest state this behavior; listings do not invoke
+handlers. Clients must not treat method resources as static files or reuse a
+cached read when they intend to invoke the method again.
+
+Results remain JSON objects in resource contents. Custom result discriminators
+such as `resultType: "task"` are preserved. `Rejected` errors keep their code,
+message, and data as errors from `resources/read`. The mapping does not add
+custom JSON-RPC methods or extension capabilities to an older MCP revision.
 
 ## Load skills from a directory
 
@@ -181,7 +241,7 @@ exceeding 512 files or 16 MiB. Only files inside discovered skill directories
 are published, including hidden files.
 
 Older clients read the same skill at
-`mcp-extenstion://io.modelcontextprotocol/skills/deploy/SKILL.md`.
+`mcp-extensions://io.modelcontextprotocol/skills/deploy/SKILL.md`.
 They receive ordinary resources; automatic skill loading depends on the client.
 The loader does not advertise the optional `resources/directory/read` method.
 
@@ -190,62 +250,55 @@ actions in existing MCP tools and let the client decide how to load instructions
 
 ## List skills on older MCP revisions
 
-For `Skills.from_directory()`, use the standard resource API on `2024-11-05`,
-`2025-03-26`, `2025-06-18`, and `2025-11-25`. Complete `initialize` first.
-These revisions do not expose `skills/list` or `skills/get`.
+`Skills.from_directory()` exposes `skills/list` and `skills/get` through resources
+on all four older revisions. Complete initialization, then read:
 
-1. Call `resources/list`. If the response has `nextCursor`, pass it as `cursor`
-   in the next request until all pages have been read.
-2. Keep URIs starting with `mcp-extenstion://io.modelcontextprotocol/skills/`
-   and ending with `/SKILL.md`. Each identifies a skill published by this loader.
-3. Call `resources/read` with one of those URIs to retrieve its instructions
-   and YAML frontmatter.
+```text
+mcp-extensions://io.modelcontextprotocol/skills/skills/list
+```
 
-The bundled client's `list_resources()` follows pagination automatically.
-Continuing the directory example above, this code works on all four revisions:
+The JSON content contains `skills` and an optional `nextCursor`. Each skill has
+frontmatter and a file manifest. File URIs already use the extension namespace.
+For pagination or `skills/get`, append `?params=` followed by percent-encoded JSON.
+Continue the directory example above:
 
 <!-- name: async test_extension_skills -->
 ```python
 import json
+from urllib.parse import quote
 
-prefix = "mcp-extenstion://io.modelcontextprotocol/skills/"
+prefix = "mcp-extensions://io.modelcontextprotocol/skills/"
 
 for revision in ("2024-11-05", "2025-03-26", "2025-06-18", "2025-11-25"):
     async with connect(registry, adapter=revision) as client:
-        # connect() completes initialization before yielding the client.
-        resources = await client.list_resources()
-        skill_uris = sorted(
-            resource.uri
-            for resource in resources
-            if resource.uri.startswith(prefix) and resource.uri.endswith("/SKILL.md")
-        )
-        assert skill_uris == [prefix + "deploy/SKILL.md"]
+        entries = []
+        params = {}
+        while True:
+            uri = prefix + "skills/list"
+            if params:
+                uri += "?params=" + quote(json.dumps(params), safe="")
+            page = json.loads((await client.read_resource(uri)).contents[0].text)
+            entries.extend(page["skills"])
+            if not page.get("nextCursor"):
+                break
+            params = {"cursor": page["nextCursor"]}
 
-        document = await client.read_resource(skill_uris[0])
+        skill_uri = entries[0]["uri"]
+        assert skill_uri == prefix + "deploy/SKILL.md"
+        params = quote(json.dumps({"uri": skill_uri}), safe="")
+        detail = await client.read_resource(prefix + "skills/get?params=" + params)
+        assert json.loads(detail.contents[0].text)["skill"] == entries[0]
+        document = await client.read_resource(skill_uri)
         assert "name: deploy" in document.contents[0].text
-
-        manifest = await client.read_resource(prefix + "manifest.json")
-        files = json.loads(manifest.contents[0].text)["resources"]
-        assert skill_uris[0] in files
 ```
 
-If the extension is already known, read
-`mcp-extenstion://io.modelcontextprotocol/skills/manifest.json` directly. Its
-`resources` array lists all bundled file URIs, including supporting files.
-Apply the same `/SKILL.md` filter to find skill entry points. This extension
-manifest is a startup snapshot of resource addresses; it does not contain
-frontmatter, file digests, or `skills/list` results. Its `methods` field does
-not make those methods callable on older revisions.
+In the [console](console.md#extensions-and-skills), select the namespaced
+`skills/list` URI under **Resources** and click **Read**. Parameterized routes
+appear under **Resource templates**. Older revisions have no **Extensions** or
+**Skills** group; these are ordinary MCP resource operations.
 
-The prefix and filename filter are this library's fallback convention for its
-Skills loader, not a general MCP rule for identifying arbitrary resources as
-skills. Nested skills appear as separate `/SKILL.md` entries. A known skill URI
-can be read directly even without listing.
-
-In the [console](console.md#extensions-and-skills), choose an older revision
-and connect. Under **Resources**, select the extension's `manifest.json` and
-click **Read** to see its file list. Select a listed `SKILL.md` resource and
-click **Read** to inspect that skill.
+This is a library convention carried by the standard resource API. It does not
+add native extension support to older MCP protocols or agent clients.
 
 ## Dynamic skills
 
@@ -253,3 +306,23 @@ click **Read** to inspect that skill.
 request, use async `Extension` handlers instead. See
 [Dynamic skills](dynamic-skills.md) for a complete example, cache settings,
 and the limits of changing the catalog at runtime.
+
+## What the generic API provides
+
+`Extension` provides capability advertisement, method dispatch, Pydantic argument
+validation, dependency injection, and resource registration. Every registered
+method has an automatic resource representation, including state-changing methods. On older revisions, the viewer displays
+the mapped resources and templates without interpreting them as extensions.
+
+Registering an identifier does not implement that extension's behavior:
+
+| Extension | Additional work required |
+| --- | --- |
+| [Tasks](https://modelcontextprotocol.io/extensions/tasks/overview) | Durable jobs, capability checks, polling, input handling, and cancellation. Custom method results preserve `resultType: "task"`. The core tool path still coerces returns to `CallToolResult`; returning Tasks from `tools/call` needs additional integration. |
+| [Apps](https://modelcontextprotocol.io/extensions/apps/overview) | HTML resources, tool UI metadata, CSP, and a host bridge. The viewer does not implement an Apps iframe host; the tool decorator has no `_meta` registration option. |
+| [OAuth Client Credentials](https://modelcontextprotocol.io/extensions/auth/oauth-client-credentials) | An authorization server, client registration, token acquisition/renewal, and token validation. The library's HTTP authorization hooks do not implement the grant. |
+| [Enterprise-Managed Authorization](https://modelcontextprotocol.io/extensions/auth/enterprise-managed-authorization) | IdP trust, ID-JAG issuance/exchange, identity mapping, and policy enforcement. Capability declarations do not perform those flows. |
+
+Use `Exchange` to inspect client capabilities and request metadata. Method
+argument models can declare `inputResponses` and other extension-specific fields. The viewer does not declare Tasks, Apps, or
+enterprise authentication support merely because the server advertises them.

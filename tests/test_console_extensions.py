@@ -22,10 +22,12 @@ def run(body):
     verify = source[
         source.index("async function verifiedSkillFile") : source.index("function reportSkill")
     ]
+    links = source[source.index("function resourceUris") : source.index("function reportContents")]
     driver = (
         'const assert = require("node:assert/strict");\n'
         + client
         + verify
+        + links
         + "\n(async () => {\n"
         + body
         + "\n})().catch(error => { console.error(error); process.exit(1); });"
@@ -107,4 +109,36 @@ def test_skill_text_and_binary_verification_reject_changed_content():
       await assert.rejects(
         verifiedSkillFile(result, {...file, uri: "skill://other/file"}), /requested file/);
     }
+    """)
+
+
+def test_legacy_resources_keep_their_names_without_extension_discovery():
+    run("""
+    const prefix = "mcp-extensions://example.org/catalog/";
+    const uri = prefix + "catalog/list";
+    const manifest = {uri: prefix + "manifest.json"};
+    for (const version of Object.keys(REVISIONS).filter(v => v !== "2026-07-28")) {
+      const client = new Client("http://localhost/mcp", version, {});
+      const sent = [];
+      client.request = async (method, params) => {
+        sent.push(method);
+        if (method === "resources/list") return {resources: [manifest, {uri}]};
+        if (method === "resources/templates/list") return {
+          resourceTemplates: [{uriTemplate: uri + "?params={params}"}],
+        };
+        assert.equal(method, "resources/read");
+        assert.equal(params.uri, uri);
+        return {contents: [{uri, text: '{"entries":[]}'}]};
+      };
+      const listed = await client.listResources();
+      assert.deepEqual(listed.resources, [manifest, {uri}]);
+      assert.deepEqual(client.extensions, {});
+      assert.deepEqual(await client.listSkills(), []);
+      await client.readResource(uri);
+      assert.deepEqual(sent, ["resources/list", "resources/templates/list", "resources/read"]);
+    }
+    assert.deepEqual([...resourceUris({entries: [
+      {uri: "other://file"}, {uri: prefix + "file"}, {uri: "other://file"},
+      {uri: 42}, {uri: "not a URI"}, {description: "https://unrelated.example"},
+    ]})], ["other://file", prefix + "file"]);
     """)

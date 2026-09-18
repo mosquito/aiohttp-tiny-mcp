@@ -85,9 +85,21 @@ class Registry:
             if any(name in spec.methods for spec in self.extensions.values()):
                 raise ValueError(f"duplicate extension method: {name}")
             self.check(name, bound)
-        manifest = extension.manifest_resource()
+        routes, methods = extension.method_resources()
+        manifest = extension.manifest_resource(routes, methods)
         assert manifest.definition is not None
-        resources = {**extension.resources, manifest.definition.uri: manifest}
+        if manifest.definition.uri in extension.resources:
+            raise ValueError("duplicate extension manifest resource")
+        if set(routes) & set(extension.resources):
+            raise ValueError("duplicate extension method resource")
+        resources = {**extension.resources, **routes, manifest.definition.uri: manifest}
+        templates = {
+            address
+            for spec in self.resources_templated
+            if spec.template is not None
+            for address in (spec.template.uri_template, spec.legacy_uri)
+            if address is not None
+        }
         claimed: set[str] = set()
         for uri, resource in resources.items():
             for address in {uri, resource.legacy_uri}:
@@ -97,6 +109,7 @@ class Registry:
                     address in claimed
                     or address in self.resources_fixed
                     or address in self.resource_aliases
+                    or address in templates
                 ):
                     raise ValueError(f"duplicate resource: {address}")
                 claimed.add(address)
@@ -104,9 +117,17 @@ class Registry:
         self.extensions[extension.name] = extension.snapshot()
         for uri, resource in resources.items():
             resource = resource.model_copy(deep=True)
-            self.resources_fixed[uri] = resource
-            if resource.legacy_uri is not None:
-                self.resource_aliases[resource.legacy_uri] = resource
+            if resource.definition is not None:
+                self.resources_fixed[uri] = resource
+                if resource.legacy_uri is not None:
+                    self.resource_aliases[resource.legacy_uri] = resource
+            else:
+                if resource.legacy_only:
+                    # Method query routes take precedence over file templates
+                    # such as skills/{name}, whose matcher also accepts '?'.
+                    self.resources_templated.insert(0, resource)
+                else:
+                    self.resources_templated.append(resource)
 
     def provide(self, kind: type, source: Any) -> None:
         """Bind a type to where it comes from. Call before registering
@@ -176,7 +197,8 @@ class Registry:
             else:
                 template = spec.template.uri_template if spec.template is not None else uri
                 if any(
-                    item.template is not None and item.template.uri_template == template
+                    item.template is not None
+                    and template in (item.template.uri_template, item.legacy_uri)
                     for item in self.resources_templated
                 ):
                     raise ValueError(f"duplicate resource template: {template}")
@@ -210,6 +232,8 @@ class Registry:
             return fixed, {}
         for spec in self.resources_templated:
             m = spec.pattern.match(uri)
+            if m is None and spec.legacy_pattern is not None:
+                m = spec.legacy_pattern.match(uri)
             if m:
                 return spec, m.groupdict()
         return None
