@@ -88,7 +88,7 @@ async def test_legacy_extensions_publish_prefixed_resources_and_manifest(transpo
 
     registry = Registry("legacy", "1")
     registry.extension(extension)
-    prefix = "mcp-extensions/example.org/manual/"
+    prefix = "mcp-extenstion://example.org/manual/"
     async with transport(registry, adapter=version) as client:
         discovery = await client.initialize()
         assert "extensions" not in discovery["capabilities"]
@@ -212,7 +212,7 @@ def test_resource_conflicts_and_missing_providers_leave_registry_unchanged():
         return ""
 
     registry = Registry("conflicts", "1")
-    registry.resource("mcp-extensions/example.org/data/file", read)
+    registry.resource("mcp-extenstion://example.org/data/file", read)
     extension = Extension("example.org/data")
     extension.resource("data://file", read)
     with pytest.raises(ValueError, match="duplicate resource"):

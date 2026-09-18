@@ -47,6 +47,7 @@ pieces
 guide/tools
 guide/resources
 guide/extensions
+guide/dynamic-skills
 guide/prompts
 guide/completion
 guide/exchange

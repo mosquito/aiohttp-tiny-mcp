@@ -21,7 +21,7 @@ This page is that claim, stated precisely.
 | Batching | no | no | no | yes | no |
 | Header mirroring | yes | no | no | no | no |
 | Extension methods and discovery | yes | resources only | resources only | resources only | resources only |
-| Skill files | `skill://...` | `mcp-extensions/io.modelcontextprotocol/skills/...` | same | same | same |
+| Skill files | `skill://...` | `mcp-extenstion://io.modelcontextprotocol/skills/...` | same | same | same |
 
 Rows in bold are the ones where the mechanism differs but the application code
 does not. Everything else is either present everywhere or a property of the
@@ -45,7 +45,7 @@ place, by the adapter.
 **Cache hints.** `ttlMs` and `cacheScope` exist only on `2026-07-28`.
 
 **Extension methods.** Older clients can list and read extension files and a
-manifest under `mcp-extensions/{name}/...`. They cannot call the extension's
+manifest under `mcp-extenstion://{name}/...`. They cannot call the extension's
 custom methods. See [Extensions and skills](../guide/extensions.md).
 
 ## What costs something

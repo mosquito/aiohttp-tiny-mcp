@@ -79,7 +79,7 @@ class Extension:
         legacy_path: str | None = None,
         **kw: Any,
     ):
-        """Bundle a resource with a legacy ``mcp-extensions/{name}/...`` URI.
+        """Bundle a resource with a legacy ``mcp-extenstion://{name}/...`` URI.
 
         By default, the legacy path is the URI after its scheme. Set
         ``legacy_path`` to choose a different relative path within the extension.
@@ -96,7 +96,7 @@ class Extension:
             spec = ResourceSpec.build(uri, fn, **kw)
             if spec.definition is None:
                 raise ValueError("extension resources must use fixed URIs")
-            spec.legacy_uri = f"mcp-extensions/{self.name}/{path}"
+            spec.legacy_uri = f"mcp-extenstion://{self.name}/{path}"
             self.resources[uri] = spec
             return fn
 
@@ -122,7 +122,7 @@ class Extension:
             return content
 
         spec = ResourceSpec.build(
-            f"mcp-extensions/{self.name}/manifest.json",
+            f"mcp-extenstion://{self.name}/manifest.json",
             read,
             name=f"{self.name} manifest",
             mime_type="application/json",

@@ -80,7 +80,7 @@ async def test_skill_manifest_matches_every_resource_and_snapshot(tmp_path, tran
         with pytest.raises(ClientError):
             await client.read_resource("skill://deploy/../secret")
         with pytest.raises(ClientError):
-            await client.read_resource(f"mcp-extensions/{SKILLS_EXTENSION}/manifest.json")
+            await client.read_resource(f"mcp-extenstion://{SKILLS_EXTENSION}/manifest.json")
 
 
 async def test_nested_skills_are_flat_and_paginated_with_complete_manifests(tmp_path):
@@ -112,7 +112,7 @@ async def test_single_skill_directory_and_legacy_uri(tmp_path):
     registry = Registry("legacy", "1")
     registry.extension(Skills.from_directory(directory))
     async with connect(registry, adapter="2025-11-25") as client:
-        uri = f"mcp-extensions/{SKILLS_EXTENSION}/deploy/SKILL.md"
+        uri = f"mcp-extenstion://{SKILLS_EXTENSION}/deploy/SKILL.md"
         assert uri in {item.uri for item in await client.list_resources()}
         result = await client.read_resource(uri)
         assert result.contents[0].text == (directory / "SKILL.md").read_text()

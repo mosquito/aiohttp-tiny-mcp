@@ -141,8 +141,18 @@ read files by URI through the resource view; there are no published digests
 to verify. A failed skill listing leaves the rest of the catalog available.
 
 On older revisions, extension files and manifests appear in **Resources**
-under `mcp-extensions/{name}/...`. The extension request view is only available
-on `2026-07-28`. See [Extensions and skills](extensions.md) for server setup.
+under `mcp-extenstion://{name}/...`. The extension request view is only available
+on `2026-07-28`. To find skills, select
+`mcp-extenstion://io.modelcontextprotocol/skills/manifest.json` under **Resources**
+and click **Read**. Its `resources` array lists file URIs; entries ending in
+`/SKILL.md` are the skill entry points published by the directory loader.
+Select one of those resources and click **Read** to view its instructions.
+
+The console fetches every page of `resources/list`, so all registered skill files
+appear in **Resources**. It does not call `skills/list` on older revisions.
+See [listing skills on older MCP revisions](extensions.md#list-skills-on-older-mcp-revisions)
+for the equivalent client code, and [Dynamic skills](dynamic-skills.md) for
+instructions generated at request time.
 
 ## Questions
 
