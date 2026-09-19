@@ -406,6 +406,10 @@ if __name__ == "__main__":
         app[STORE] = NoteStore(db_path)
         app.cleanup_ctx.append(closing_the_store)
         app.add_routes([web.get("/health", health)])
-        Endpoint(registry).setup(app, "/mcp")
+        Endpoint(
+            registry,
+            # Behind a reverse proxy, uncomment this and let the proxy check Origin.
+            # trust_proxy_origin_validation=True,
+        ).setup(app, "/mcp")
         print(f"notebook data: {db_path}")
         web.run_app(app, host="127.0.0.1", port=8090)

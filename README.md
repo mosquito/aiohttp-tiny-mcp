@@ -104,7 +104,11 @@ async def deploy(args: Deploy, ex: Exchange) -> str:
     return f"deployed {args.service}"
 
 
-app = Endpoint(registry).app("/mcp")
+app = Endpoint(
+    registry,
+    # Behind a reverse proxy, uncomment this and let the proxy check Origin.
+    # trust_proxy_origin_validation=True,
+).app("/mcp")
 
 if __name__ == "__main__":
     web.run_app(app, host="127.0.0.1", port=8080)

@@ -272,7 +272,11 @@ if __name__ == "__main__":
         app = web.Application(middlewares=[auth, tenant])
         app.cleanup_ctx.append(pool_ctx)
         app.add_routes([web.get("/health", health)])
-        Endpoint(registry).setup(app, "/mcp")
+        Endpoint(
+            registry,
+            # Behind a reverse proxy, uncomment this and let the proxy check Origin.
+            # trust_proxy_origin_validation=True,
+        ).setup(app, "/mcp")
         Console(
             "/mcp",
             title="Demo MCP server",

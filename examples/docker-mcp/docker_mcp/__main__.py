@@ -95,7 +95,12 @@ async def background(registry: Registry, storage: SqliteStorage, client: Docker)
 
 async def serve(parser: Parser) -> None:
     registry, storage, client = assemble(parser)
-    endpoint = Endpoint(registry, allowed_origins=set(parser.allowed_origin) or None)
+    endpoint = Endpoint(
+        registry,
+        allowed_origins=set(parser.allowed_origin) or None,
+        # Behind a reverse proxy, uncomment this and let the proxy check Origin.
+        # trust_proxy_origin_validation=True,
+    )
     app = endpoint.app(parser.path)
     if parser.console:
         Console(
