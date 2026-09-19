@@ -140,14 +140,18 @@ from pydantic import BaseModel
 from aiohttp_tiny_mcp import Extension, Registry
 from aiohttp_tiny_mcp.testing import connect
 
+
 class Lookup(BaseModel):
     name: str
 
+
 extension = Extension("example.org/catalog")
+
 
 @extension.method("catalog/lookup")
 async def lookup(args: Lookup) -> dict:
     return {"entry": {"name": args.name}}
+
 
 registry = Registry("catalog", "1")
 registry.extension(extension)
