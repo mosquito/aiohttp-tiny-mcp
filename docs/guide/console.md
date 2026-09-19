@@ -79,6 +79,10 @@ disagree. See [Transports](../deployment/transports.md#origin-checking).
 
 **The bar** shows where it is connected, which revision it is speaking, and
 whether it is willing to be asked. Connect and Disconnect are the same button.
+The endpoint is a field: it starts as the path the page was told, and a query
+string typed after it -- `/mcp?mcp=2025-06-18` to pin a revision, or whatever
+the server reads from its URL -- is sent as typed. The page remembers it for
+the next visit as long as the path is still the configured one.
 
 **Offered** lists the tools, resources, resource templates and prompts, with
 what each says about itself. A tool that declared `destructiveHint` is marked.

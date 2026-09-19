@@ -11,10 +11,10 @@
 
 <header class="bar">
   <h1>{{TITLE}}</h1>
-  <span class="field">
+  <label class="field grow" title="The path the server serves MCP on. A query string is sent as typed">
     <span>Endpoint</span>
-    <code id="endpoint" class="endpoint"></code>
-  </span>
+    <input id="endpoint" class="endpoint" type="text" spellcheck="false" autocomplete="off">
+  </label>
   <label class="field">
     <span>Revision</span>
     <select id="revision" class="revision"></select>

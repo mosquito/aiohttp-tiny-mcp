@@ -71,6 +71,8 @@ body {
 }
 
 .field { display: flex; align-items: center; gap: 6px; }
+.field.grow { flex: 1 1 12em; min-width: 0; }
+.field.grow > input { flex: 1 1 auto; min-width: 8em; }
 .field > span { color: var(--ink-soft); font-size: 12px; }
 
 input[type="text"], input[type="number"], select, textarea {

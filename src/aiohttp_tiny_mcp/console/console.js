@@ -384,6 +384,34 @@ const page = {
 let client = null;
 let chosen = null;
 let endpointUrl = null;
+//: Where the page was told the endpoint is. The field starts from it and may add a query.
+let configuredEndpoint = null;
+
+// The endpoint field: the path, plus any query string a person adds, such as
+// `?mcp=2025-06-18` to pin a revision or whatever the server reads from the URL.
+// The value is kept for the next visit while its path is still the configured one,
+// so a server moved elsewhere is not chased at a stale address.
+function endpointKey() {
+  return `mcp-console-endpoint:${location.pathname}`;
+}
+
+function rememberedEndpoint() {
+  const kept = localStorage.getItem(endpointKey());
+  if (!kept) return null;
+  const url = new URL(kept, location.origin);
+  return url.pathname === configuredEndpoint.pathname ? kept : null;
+}
+
+function chosenEndpoint() {
+  const typed = page.endpoint.value.trim() || configuredEndpoint.pathname;
+  const url = new URL(typed, location.origin);
+  if (url.origin !== location.origin) {
+    throw new Error(`The endpoint must be on this server, not ${url.origin}.`);
+  }
+  page.endpoint.value = url.pathname + url.search;
+  localStorage.setItem(endpointKey(), page.endpoint.value);
+  return url;
+}
 
 function element(tag, className, text) {
   const made = document.createElement(tag);
@@ -1297,6 +1325,7 @@ function disconnect() {
   page.refresh.disabled = true;
   page.revision.disabled = false;
   page.answerable.disabled = false;
+  page.endpoint.disabled = false;
   page.connect.textContent = "Connect";
   say("not connected", "");
 }
@@ -1305,9 +1334,11 @@ async function connect() {
   page.connect.disabled = true;
   page.revision.disabled = true;
   page.answerable.disabled = true;
+  page.endpoint.disabled = true;
   say("connecting", "");
   page.outcome.textContent = "";
   try {
+    endpointUrl = chosenEndpoint();
     client = new Client(endpointUrl.href, page.revision.value, {
       answerable: page.answerable.checked,
       onFrame: record,
@@ -1330,6 +1361,7 @@ async function connect() {
     page.refresh.disabled = true;
     page.revision.disabled = false;
     page.answerable.disabled = false;
+    page.endpoint.disabled = false;
     page.connect.textContent = "Connect";
     say(error.message, "off");
     report("Could not connect", connectionHelp(error), true);
@@ -1340,7 +1372,7 @@ async function connect() {
 
 function connectionHelp(error) {
   const lines = [error.message];
-  if (error instanceof TypeError || /fetch/i.test(error.message)) {
+  if (endpointUrl && (error instanceof TypeError || /fetch/i.test(error.message))) {
     lines.push("", `The request to ${endpointUrl.href} did not reach a server.`);
   }
   return lines.join("\n");
@@ -1409,8 +1441,14 @@ function start() {
   const remembered = localStorage.getItem("mcp-console-revision");
   page.revision.value = REVISIONS[remembered] ? remembered : Object.keys(REVISIONS)[0];
 
-  endpointUrl = new URL(document.documentElement.dataset.endpoint || "/mcp", location.origin);
-  page.endpoint.textContent = endpointUrl.pathname;
+  configuredEndpoint = new URL(document.documentElement.dataset.endpoint || "/mcp", location.origin);
+  page.endpoint.value = rememberedEndpoint() || configuredEndpoint.pathname + configuredEndpoint.search;
+  page.endpoint.onkeydown = (event) => {
+    if (event.key === "Enter" && !client) {
+      event.preventDefault();
+      connect();
+    }
+  };
 
   page.connect.onclick = () => (client ? disconnect() : connect());
   page.refresh.onclick = async () => {
