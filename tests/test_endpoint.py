@@ -395,6 +395,51 @@ async def test_origin_header_allowed_when_allowlisted(registry: Registry):
         assert resp.status == 200
 
 
+@pytest.mark.parametrize(
+    ("origin", "status"),
+    [
+        ("https://app.example.com", 200),
+        ("https://a.b.example.com", 200),
+        ("https://example.com", 403),
+        ("https://app.example.com.evil.example", 403),
+        ("http://app.example.com", 403),
+        ("https://app.example.com:8443", 403),
+    ],
+)
+async def test_wildcard_origins(registry: Registry, origin: str, status: int):
+    """`*` is one label, `**` one or more; the scheme and any port stay literal."""
+    endpoint = Endpoint(
+        registry, allowed_origins={"https://*.example.com", "https://**.example.com"}
+    )
+    async with TestClient(TestServer(endpoint.app("/mcp"))) as client:
+        resp = await client.post(
+            "/mcp",
+            headers={"Origin": origin},
+            json={"jsonrpc": "2.0", "id": 1, "method": "ping", "params": {}},
+        )
+        assert resp.status == status
+
+
+@pytest.mark.parametrize(
+    ("origin", "status"),
+    [
+        ("https://app.eu.example.com", 200),
+        ("https://app.example.com", 403),
+        ("https://app.eu.west.example.com", 403),
+        ("https://api.eu.example.com", 403),
+    ],
+)
+async def test_wildcard_in_the_middle_of_the_host(registry: Registry, origin: str, status: int):
+    endpoint = Endpoint(registry, allowed_origins={"https://app.*.example.com"})
+    async with TestClient(TestServer(endpoint.app("/mcp"))) as client:
+        resp = await client.post(
+            "/mcp",
+            headers={"Origin": origin},
+            json={"jsonrpc": "2.0", "id": 1, "method": "ping", "params": {}},
+        )
+        assert resp.status == status
+
+
 async def test_origin_header_accepted_when_trust_proxy_validation(registry: Registry):
     endpoint = Endpoint(registry, trust_proxy_origin_validation=True)
     async with TestClient(TestServer(endpoint.app("/mcp"))) as client:

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 from collections.abc import Mapping
 from contextlib import suppress
 from dataclasses import replace
@@ -51,6 +52,24 @@ log = logging.getLogger("aiohttp_tiny_mcp")
 MAY_ASK = frozenset({Operation.CALL_TOOL, Operation.GET_PROMPT, Operation.READ_RESOURCE})
 
 
+def origin_pattern(spec: str) -> re.Pattern[str]:
+    """Compile an allowed origin with wildcards.
+
+    `*` matches one host label, `**` matches one or more labels, so
+    `https://*.example.com` admits `https://app.example.com` and `https://**.example.com`
+    admits `https://a.b.example.com` as well. Everything else matches literally.
+    """
+    parts = []
+    for piece in re.split(r"(\*\*|\*)", spec):
+        if piece == "**":
+            parts.append(r"[^./]+(?:\.[^./]+)*")
+        elif piece == "*":
+            parts.append(r"[^./]+")
+        else:
+            parts.append(re.escape(piece))
+    return re.compile("".join(parts))
+
+
 class Endpoint:
     """The MCP endpoint, in the spec's sense: one path that accepts POST.
 
@@ -81,6 +100,7 @@ class Endpoint:
         self.adapters = adapters or AdapterSet.default()
         self.dispatcher = Dispatcher(registry)
         self.allowed_origins = allowed_origins
+        self.origin_patterns = [origin_pattern(o) for o in allowed_origins or () if "*" in o]
         self.trust_proxy_origin_validation = trust_proxy_origin_validation
         self.compress = compress
 
@@ -187,8 +207,11 @@ class Endpoint:
             return
         if origin == self.own_origin(request):
             return
-        if self.allowed_origins is None or origin not in self.allowed_origins:
-            raise Rejected(Failure(FailureKind.ORIGIN_REJECTED, "origin not allowed"))
+        if self.allowed_origins is not None and origin in self.allowed_origins:
+            return
+        if any(pattern.fullmatch(origin) for pattern in self.origin_patterns):
+            return
+        raise Rejected(Failure(FailureKind.ORIGIN_REJECTED, "origin not allowed"))
 
     def own_origin(self, request: web.Request) -> str:
         """Origin of pages served by this endpoint. A rebound page retains the attacker's origin

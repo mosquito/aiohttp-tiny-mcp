@@ -245,10 +245,27 @@ for, and it is on by default.
 endpoint = Endpoint(registry, allowed_origins={"https://app.example.com"})
 ```
 
+An entry may carry wildcards in the host: `*` matches one label and `**` one
+or more, while the scheme and any port match literally.
+
+<!-- name: test_transports -->
+```python
+endpoint = Endpoint(
+    registry,
+    allowed_origins={
+        "https://*.example.com",  # app.example.com, not a.b.example.com
+        "https://**.example.com",  # any depth below example.com, not example.com itself
+        "https://app.*.example.com",  # app.eu.example.com
+    },
+)
+```
+
 Requests with no `Origin` header -- the normal case for a native client or
 another server -- are unaffected either way.
 
-Behind a gateway that already enforces this, opt out rather than duplicating it:
+Behind a reverse proxy the server sees `http://` and the proxy's `Host`, so
+the origin a browser sends never matches and every request fails with 403
+`origin not allowed`. Opt out there and let the proxy check `Origin`:
 
 <!-- name: test_transports -->
 ```python
