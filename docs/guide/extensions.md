@@ -365,9 +365,7 @@ from aiohttp_tiny_mcp.protocol.selection import AdapterSet
 TASK_CHANGED = "notifications/backlog/task"
 
 registry = Registry("backlog", "1.0")
-registry.extension(
-    Extension("example.org/backlog", notifications={TASK_CHANGED: "project"})
-)
+registry.extension(Extension("example.org/backlog", notifications={TASK_CHANGED: "project"}))
 
 
 async def watch(client, methods, count):

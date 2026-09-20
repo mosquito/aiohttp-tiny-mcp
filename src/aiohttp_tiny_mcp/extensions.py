@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import json
 from collections.abc import Awaitable, Callable, Iterable, Mapping
 from copy import deepcopy
@@ -57,7 +58,7 @@ class ExtensionSpec:
     methods: Mapping[str, Bound]
     #: Broadcast method to the params field that carries its topic, or None for one
     #: every listener of the method gets.
-    notifications: Mapping[str, str | None] = MappingProxyType({})
+    notifications: Mapping[str, str | None] = dataclasses.field(default_factory=dict)
 
 
 class ExtensionResult(ResultModel):
