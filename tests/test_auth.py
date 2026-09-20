@@ -320,7 +320,9 @@ async def test_a_session_belongs_to_whoever_opened_it(served):
 
 
 async def test_binding_can_be_turned_off_for_a_layer_that_does_it_elsewhere():
-    registry, _ = build(bind_sessions=False)
+    """The namespace separates sessions by principal as well, so it is turned
+    off with the binding; otherwise bob's lookup of alice's session is a 404."""
+    registry, _ = build(bind_sessions=False, namespace_from_token=False)
     server = TestServer(Endpoint(registry).app("/mcp"))
     client = TestClient(server)
     await client.start_server()

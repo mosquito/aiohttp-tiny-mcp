@@ -302,6 +302,19 @@ class PostgresSessionStore(SessionStore):
         )
 
     @cached_property
+    def _query_touch(self) -> sql.Composed:
+        return sql.Composed(
+            [
+                sql.SQL("UPDATE "),
+                self.storage.sessions_table,
+                sql.SQL("""
+                SET expires_at = now() + make_interval(secs => %s)
+                WHERE id = %s AND expires_at > now()
+                """),
+            ]
+        )
+
+    @cached_property
     def _query_delete(self) -> sql.Composed:
         return sql.Composed(
             [
@@ -341,6 +354,12 @@ class PostgresSessionStore(SessionStore):
             found = await connection.execute(
                 self._query_save, (json.dumps(data), ttl_seconds, session_id, expected_version)
             )
+            return found.rowcount > 0
+
+    async def touch(self, session_id: str, *, ttl_seconds: int) -> bool:
+        pool = await self.storage.open()
+        async with pool.connection() as connection:
+            found = await connection.execute(self._query_touch, (ttl_seconds, session_id))
             return found.rowcount > 0
 
     async def delete(self, session_id: str) -> None:

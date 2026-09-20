@@ -89,6 +89,7 @@ class FailureKind(StringEnum):
     HEADER_MISMATCH = "header_mismatch"
     UNSUPPORTED_VERSION = "unsupported_version"
     ORIGIN_REJECTED = "origin_rejected"
+    SESSION_NOT_FOUND = "session_not_found"
     INPUT_UNSUPPORTED = "input_unsupported"
     MISSING_REQUIRED_CAPABILITY = "missing_required_capability"
     INTERNAL = "internal"

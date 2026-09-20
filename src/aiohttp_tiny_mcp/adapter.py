@@ -90,6 +90,7 @@ class Adapter(ABC):
             FailureKind.MALFORMED: (-32600, 400),
             FailureKind.INVALID_PARAMS: (-32602, 200),
             FailureKind.ORIGIN_REJECTED: (-32600, 403),
+            FailureKind.SESSION_NOT_FOUND: (-32001, 404),
             FailureKind.INTERNAL: (-32603, 200),
             FailureKind.INVALID_ARGUMENTS: (-32603, 200),
             FailureKind.UNKNOWN_METHOD: (-32601, 200),

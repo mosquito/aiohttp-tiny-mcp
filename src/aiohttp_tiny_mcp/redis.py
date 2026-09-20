@@ -126,6 +126,12 @@ class RedisSessionStore(SessionStore):
         )
         return bool(written)
 
+    async def touch(self, session_id: str, *, ttl_seconds: int) -> bool:
+        """EXPIRE answers 1 only for a key that exists, so a lost session reads False."""
+        client = await self.storage.open()
+        renewed: Any = await client.expire(self.key(session_id), ttl_seconds)
+        return bool(renewed)
+
     async def delete(self, session_id: str) -> None:
         client = await self.storage.open()
         await client.delete(self.key(session_id))

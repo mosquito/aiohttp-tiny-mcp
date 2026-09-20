@@ -43,11 +43,12 @@ class SessionStore(Protocol):
     """Application-provided storage, safe across workers.
 
     create() atomically returns False for an existing id. save() atomically returns False when
-    expected_version no longer matches. Store only JSON-serializable values, never requests,
-    sockets, queues, or tasks.
+    expected_version no longer matches. touch() renews the TTL without a write to the data, so
+    a session stays alive as long as its client keeps sending requests. Store only
+    JSON-serializable values, never requests, sockets, queues, or tasks.
 
     Subclass it to have the methods checked and the missing ones refused, or
-    supply any object with these four methods: this is a protocol, so a
+    supply any object with these five methods: this is a protocol, so a
     backend that inherits nothing is still a SessionStore.
     """
 
@@ -69,6 +70,12 @@ class SessionStore(Protocol):
         ttl_seconds: int,
     ) -> bool:
         """Replace the data and renew the TTL, or return False where the version moved."""
+
+    @abstractmethod
+    async def touch(self, session_id: str, *, ttl_seconds: int) -> bool:
+        """Renew the TTL of a live record, keeping its data and version. Return False where
+        it is missing or expired.
+        """
 
     @abstractmethod
     async def delete(self, session_id: str) -> None:
@@ -116,6 +123,14 @@ class MemorySessionStore(SessionStore):
         if entry is None or entry[1] != expected_version:
             return False
         self.records[session_id] = (dict(data), expected_version + 1, self.clock() + ttl_seconds)
+        return True
+
+    async def touch(self, session_id: str, *, ttl_seconds: int) -> bool:
+        entry = self.live(session_id)
+        if entry is None:
+            return False
+        data, version, _ = entry
+        self.records[session_id] = (data, version, self.clock() + ttl_seconds)
         return True
 
     async def delete(self, session_id: str) -> None:

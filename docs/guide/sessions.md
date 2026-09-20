@@ -250,3 +250,10 @@ where it started, and nothing has to.
 Sessions and request state expire on separate schedules. Set the request-state
 TTL long enough for the interaction you expect; a follow-up call with an expired
 state identifier is rejected.
+
+Every request that carries `Mcp-Session-Id` renews the session, so the TTL is
+the longest silence a client may keep, not the longest conversation. A request
+naming a session the store no longer holds -- expired, deleted, or lost to a
+restart of a process-local store -- is answered with `404` and a JSON-RPC error,
+as the specification requires. `Client` handles that by calling `initialize`
+again and repeating the request once.

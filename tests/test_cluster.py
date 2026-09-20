@@ -229,8 +229,10 @@ async def test_an_sdk_legacy_session_stays_on_the_node_that_made_it(cluster):
     """A shared event store does not make a stateful SDK session portable.
 
     The SDK keeps its stateful transports in a per-process dictionary, so the
-    second node answers as if the session never existed. This is the behavior
+    second node answers 404 as if the session never existed. This is the behavior
     to design around, not a defect: the SDK documents affinity for this mode.
+    The client recovers by opening a new session on the second node, so the
+    call succeeds, but on a session id the first node never issued.
     """
     async with Client(cluster["sdk_a"].url, LEGACY) as opened:
         await opened.initialize()
@@ -240,8 +242,8 @@ async def test_an_sdk_legacy_session_stays_on_the_node_that_made_it(cluster):
     assert cluster.rows("sdk-stream/") > 0
     async with Client(cluster["sdk_b"].url, LEGACY) as elsewhere:
         elsewhere.session_id = held
-        with pytest.raises(ClientError, match="Session not found"):
-            await elsewhere.call_tool("add", {"a": 2, "b": 3})
+        assert said(await elsewhere.call_tool("add", {"a": 2, "b": 3})) == "5"
+        assert elsewhere.session_id != held
 
 
 async def test_this_package_finishes_a_round_trip_on_another_node(cluster):

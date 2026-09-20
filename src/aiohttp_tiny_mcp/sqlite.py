@@ -165,6 +165,14 @@ class SqliteSessionStore(SessionStore):
         )
         return cursor.rowcount > 0
 
+    async def touch(self, session_id: str, *, ttl_seconds: int) -> bool:
+        connection = await self.storage.open()
+        cursor = await connection.execute(
+            f"UPDATE mcp_sessions SET expires_at = {NOW} + ? WHERE id = ? AND expires_at > {NOW}",
+            (ttl_seconds, session_id),
+        )
+        return cursor.rowcount > 0
+
     async def delete(self, session_id: str) -> None:
         connection = await self.storage.open()
         await connection.execute("DELETE FROM mcp_sessions WHERE id = ?", (session_id,))

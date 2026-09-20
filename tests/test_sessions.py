@@ -7,7 +7,7 @@ from aiohttp.test_utils import TestClient, TestServer
 
 from aiohttp_tiny_mcp import Endpoint, Exchange, MemorySessionStore, Registry, namespace
 from aiohttp_tiny_mcp.protocol.selection import AdapterSet
-from aiohttp_tiny_mcp.sessions import SESSION_HEADER
+from aiohttp_tiny_mcp.sessions import SESSION_HEADER, new_session_id
 
 pytestmark = pytest.mark.asyncio
 
@@ -80,6 +80,46 @@ async def test_sessions_expire():
     assert await store.get("s1") is not None
     clock.now = 10
     assert await store.get("s1") is None
+
+
+async def test_touch_moves_the_expiry_and_nothing_else():
+    clock = Clock()
+    store = MemorySessionStore(clock=clock)
+    await store.create("s1", {"a": 1}, ttl_seconds=10)
+    clock.now = 9
+    assert await store.touch("s1", ttl_seconds=10) is True
+    clock.now = 18
+    record = await store.get("s1")
+    assert record is not None
+    assert record.data == {"a": 1}
+    assert record.version == 1
+    clock.now = 19
+    assert await store.get("s1") is None
+
+
+async def test_touch_reports_a_missing_or_expired_session():
+    clock = Clock()
+    store = MemorySessionStore(clock=clock)
+    assert await store.touch("never", ttl_seconds=10) is False
+    await store.create("s1", {"a": 1}, ttl_seconds=10)
+    clock.now = 10
+    assert await store.touch("s1", ttl_seconds=10) is False
+    assert await store.get("s1") is None
+
+
+async def test_every_store_touches_a_live_record_only(store_and_hub):
+    """The contract, on each backend that answers: True keeps data and version,
+    False names a record the store does not hold."""
+    store, _ = store_and_hub
+    session_id = f"touch-{new_session_id()}"
+    await store.create(session_id, {"a": 1}, ttl_seconds=60)
+    await store.save(session_id, {"a": 2}, expected_version=1, ttl_seconds=60)
+    assert await store.touch(session_id, ttl_seconds=60) is True
+    record = await store.get(session_id)
+    assert record is not None
+    assert record.data == {"a": 2}
+    assert record.version == 2
+    assert await store.touch(f"never-{new_session_id()}", ttl_seconds=60) is False
 
 
 async def initialize(client, version="2025-06-18", **kw):
@@ -158,8 +198,10 @@ async def test_explicit_version_outranks_the_session(registry: Registry):
         await client.close()
 
 
-async def test_unknown_session_id_degrades_instead_of_failing(registry: Registry):
-    """Unknown or expired sessions fall back to normal version selection."""
+async def test_an_unknown_session_id_is_404(registry: Registry):
+    """The spec answers a session the server no longer holds with 404, so the
+    client starts over with initialize instead of going on without its
+    capabilities and log level."""
     client = await stateful_client(registry)
     try:
         resp = await client.post(
@@ -167,8 +209,86 @@ async def test_unknown_session_id_degrades_instead_of_failing(registry: Registry
             headers={SESSION_HEADER: "no-such-session"},
             json={"jsonrpc": "2.0", "id": 1, "method": "ping", "params": {}},
         )
+        assert resp.status == 404
+        body = await resp.json()
+        assert body["jsonrpc"] == "2.0"
+        assert body["error"]["code"] == -32001
+        assert "session" in body["error"]["message"]
+    finally:
+        await client.close()
+
+
+async def test_an_expired_session_id_is_404(registry: Registry):
+    clock = Clock()
+    registry.session_store = MemorySessionStore(clock=clock)
+    registry.session_ttl_seconds = 10
+    endpoint = Endpoint(registry)
+    client = TestClient(TestServer(endpoint.app("/mcp")))
+    await client.start_server()
+    try:
+        session_id = (await initialize(client, "2025-11-25")).headers[SESSION_HEADER]
+        clock.now = 10
+        resp = await client.post(
+            "/mcp",
+            headers={SESSION_HEADER: session_id},
+            json={"jsonrpc": "2.0", "id": 2, "method": "ping", "params": {}},
+        )
+        assert resp.status == 404
+    finally:
+        await client.close()
+
+
+async def test_the_notification_stream_refuses_an_unknown_session(registry: Registry):
+    client = await stateful_client(registry)
+    try:
+        resp = await client.get(
+            "/mcp",
+            headers={SESSION_HEADER: "no-such-session", "Accept": "text/event-stream"},
+        )
+        assert resp.status == 404
+        assert (await resp.json())["error"]["code"] == -32001
+    finally:
+        await client.close()
+
+
+async def test_a_request_without_the_header_is_served_as_before(registry: Registry):
+    client = await stateful_client(registry)
+    try:
+        resp = await client.post(
+            "/mcp", json={"jsonrpc": "2.0", "id": 1, "method": "ping", "params": {}}
+        )
         assert resp.status == 200
         assert "error" not in await resp.json()
+    finally:
+        await client.close()
+
+
+async def test_every_request_renews_the_session(registry: Registry):
+    """A session lives while its client keeps talking, not for a fixed time
+    after the handshake."""
+    clock = Clock()
+    registry.session_store = MemorySessionStore(clock=clock)
+    registry.session_ttl_seconds = 10
+    endpoint = Endpoint(registry)
+    client = TestClient(TestServer(endpoint.app("/mcp")))
+    await client.start_server()
+    try:
+        session_id = (await initialize(client, "2025-11-25")).headers[SESSION_HEADER]
+        for step in (9, 18, 27):
+            clock.now = step
+            resp = await client.post(
+                "/mcp",
+                headers={SESSION_HEADER: session_id},
+                json={"jsonrpc": "2.0", "id": 2, "method": "ping", "params": {}},
+            )
+            assert resp.status == 200, step
+        clock.now = 37
+        resp = await client.post(
+            "/mcp",
+            headers={SESSION_HEADER: session_id},
+            json={"jsonrpc": "2.0", "id": 3, "method": "ping", "params": {}},
+        )
+        assert resp.status == 404
     finally:
         await client.close()
 

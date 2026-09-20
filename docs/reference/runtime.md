@@ -115,7 +115,9 @@ tool declared `streaming=True`, a `subscriptions/listen` that runs until the
 client goes away, or a question this revision would have to push.
 
 `GET` is the notification stream for the revisions that read one. This endpoint
-returns `405` for `DELETE`; its sessions end by expiration.
+returns `405` for `DELETE`; its sessions end by expiration, and every request
+that names a session renews it. A request naming a session the store does not
+hold is answered `404`, so the client shakes hands again.
 
 ## Caching
 

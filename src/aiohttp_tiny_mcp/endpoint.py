@@ -291,14 +291,12 @@ class Endpoint:
             await relay_reply(self.registry.hub, pre.body)
             return web.Response(status=202)
 
-        session = await self.load_session(request)
-        if not self.owns(session, principal):
-            session = None
-        held = self.open_values(request, session)
         try:
+            session = await self.load_session(request, principal)
             adapter = self.adapters.select(pre, stored_version(session))
         except Rejected as e:
             return self.render_failure(self.adapters.fallback(), e.failure)
+        held = self.open_values(request, session)
 
         log.debug("<- [%s] %s", adapter.version, raw.decode("utf-8", "replace"))
 
@@ -399,9 +397,10 @@ class Endpoint:
             assert self.registry.auth is not None
             return self.refuse(self.registry.auth, refusal)
 
-        record = await self.load_session(request)
-        if not self.owns(record, principal):
-            record = None
+        try:
+            record = await self.load_session(request, principal)
+        except Rejected as e:
+            return self.render_failure(self.adapters.fallback(), e.failure)
         adapter = self.stream_adapter(request, record)
         if not adapter.has_handshake:
             return web.Response(
@@ -435,9 +434,7 @@ class Endpoint:
             found = await events.poll()
             if not found:
                 continue
-            accepted = wanted(
-                capabilities, self.open_values(request, await self.load_session(request))
-            )
+            accepted = wanted(capabilities, self.open_values(request, await self.stored(request)))
             for event in found:
                 if relays(event.message, accepted):
                     text = json.dumps(event.message, ensure_ascii=False)
@@ -472,12 +469,34 @@ class Endpoint:
             return True
         return principal is not None and principal.identity == owner
 
-    async def load_session(self, request: web.Request) -> SessionRecord | None:
-        """Load a legacy handshake, or None if no session exists or it has expired."""
+    async def stored(self, request: web.Request) -> SessionRecord | None:
+        """The record the session header names, or None where there is no header or no record."""
         session_id = request.headers.get(SESSION_HEADER)
         if not session_id:
             return None
         return await self.registry.session_store.get(scoped(session_id))
+
+    async def load_session(self, request: web.Request, principal: Any) -> SessionRecord | None:
+        """Load the legacy handshake this request names, or None without a session header.
+
+        Raises `Rejected` where the header names a session the store does not
+        hold or another principal owns. The spec answers that with 404 so the
+        client opens a new session with `initialize` instead of going on with
+        capabilities and a log level this server no longer remembers.
+
+        A found session has its TTL renewed: it lives while the client keeps
+        talking, not for a fixed time after the handshake.
+        """
+        session_id = request.headers.get(SESSION_HEADER)
+        if not session_id:
+            return None
+        record = await self.registry.session_store.get(scoped(session_id))
+        if record is None or not self.owns(record, principal):
+            raise Rejected(Failure(FailureKind.SESSION_NOT_FOUND, "session not found"))
+        await self.registry.session_store.touch(
+            scoped(session_id), ttl_seconds=self.registry.session_ttl_seconds
+        )
+        return record
 
     def open_values(self, request: web.Request, record: SessionRecord | None) -> Session | None:
         """The application-owned half of this request's session, if any."""

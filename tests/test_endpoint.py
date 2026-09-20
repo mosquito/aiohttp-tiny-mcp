@@ -320,7 +320,7 @@ async def test_a_session_id_is_minted_by_the_handshake_and_by_nothing_else(clien
         headers={"MCP-Protocol-Version": "2025-11-25", "Mcp-Session-Id": "client-supplied-id"},
         json={"jsonrpc": "2.0", "id": 1, "method": "ping", "params": {}},
     )
-    assert resp2.status == 200
+    assert resp2.status == 404
     assert "Mcp-Session-Id" not in resp2.headers
 
 

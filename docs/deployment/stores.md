@@ -346,9 +346,11 @@ and does not make application operations transactional.
 
 ## The session store
 
-Four methods. `create` and `save` report failure rather than overwriting, and
+Five methods. `create` and `save` report failure rather than overwriting, and
 the backend supplies that atomicity -- a compare-and-set, a conditional update,
-or a transaction.
+or a transaction. `touch` renews the TTL alone: the endpoint calls it on every
+request that names a session, so a session lives while its client keeps
+talking rather than for a fixed time after the handshake.
 
 <!-- name: test_stores -->
 ```python
@@ -376,6 +378,9 @@ class SessionStoreProtocol(Protocol):
         """False if missing, expired, or the version differs. Otherwise
         replace data, advance the version, and renew the TTL atomically."""
 
+    async def touch(self, session_id: str, *, ttl_seconds: int) -> bool:
+        """Renew the TTL and keep data and version. False if missing or expired."""
+
     async def delete(self, session_id: str) -> None:
         """Forget it."""
 ```
@@ -385,7 +390,8 @@ state must satisfy that requirement; do not pass an `Exchange`, socket, queue,
 or task as state.
 
 Treat expired records as absent in every operation. `create` must be able to
-reuse an expired key, and `save` must not resurrect an expired record. Concurrent
+reuse an expired key, and neither `save` nor `touch` may resurrect an expired
+record. Concurrent
 creates for one key must have one winner. Concurrent saves with the same
 `expected_version` must also have one winner: checking the version in Python
 and updating later is not atomic.

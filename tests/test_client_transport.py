@@ -54,6 +54,85 @@ async def test_the_session_a_server_issues_is_returned_on_every_later_request():
     assert seen[1:] == ["s-1"] * (len(seen) - 1)
 
 
+async def test_a_lost_session_is_reopened_and_the_request_retried_once():
+    """A 404 on a request that named a session means the server forgot it,
+    as after a restart. The client shakes hands again and repeats the request."""
+    calls: list[tuple[str, str | None]] = []
+    issued = iter(["s-1", "s-2"])
+    live = {"s-1", "s-2"}
+
+    async def handler(request):
+        body = await request.json()
+        held = request.headers.get("Mcp-Session-Id")
+        calls.append((body["method"], held))
+        headers = {}
+        if body["method"] == "initialize":
+            headers["Mcp-Session-Id"] = next(issued)
+        elif body["method"] == "prompts/list" and held == "s-1":
+            live.discard("s-1")  # the server restarted between the two calls
+        if body["method"] != "initialize" and held not in live:
+            return web.json_response(
+                {"jsonrpc": "2.0", "id": None, "error": {"code": -32001, "message": "gone"}},
+                status=404,
+            )
+        if "id" not in body:
+            return web.Response(status=202, headers=headers)
+        result = {} if body["method"] == "initialize" else {"prompts": []}
+        return web.json_response(
+            {"jsonrpc": "2.0", "id": body["id"], "result": result}, headers=headers
+        )
+
+    server, url = await serve(handler)
+    try:
+        async with Client(url, LEGACY) as client:
+            await client.initialize()
+            assert client.session_id == "s-1"
+            assert await client.list_prompts() == []
+            assert client.session_id == "s-2"
+    finally:
+        await server.close()
+    assert calls == [
+        ("initialize", None),
+        ("notifications/initialized", "s-1"),
+        ("prompts/list", "s-1"),  # 404: the session is gone
+        ("initialize", None),
+        ("notifications/initialized", "s-2"),
+        ("prompts/list", "s-2"),  # the one retry
+    ]
+
+
+async def test_a_second_404_is_not_retried_again():
+    """One reopen per request. A server that answers 404 to everything is an error,
+    not a loop."""
+    initializes = 0
+
+    async def handler(request):
+        nonlocal initializes
+        body = await request.json()
+        if body["method"] == "initialize":
+            initializes += 1
+            return web.json_response(
+                {"jsonrpc": "2.0", "id": body["id"], "result": {}},
+                headers={"Mcp-Session-Id": f"s-{initializes}"},
+            )
+        if "id" not in body:
+            return web.Response(status=202)
+        return web.json_response(
+            {"jsonrpc": "2.0", "id": body["id"], "error": {"code": -32001, "message": "gone"}},
+            status=404,
+        )
+
+    server, url = await serve(handler)
+    try:
+        async with Client(url, LEGACY) as client:
+            await client.initialize()
+            with pytest.raises(ClientError, match="gone"):
+                await client.list_prompts()
+    finally:
+        await server.close()
+    assert initializes == 2
+
+
 async def test_a_reply_is_read_before_the_stream_ends():
     """The server may keep SSE open after the reply; waiting for EOF would hang."""
 
