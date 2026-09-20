@@ -434,7 +434,11 @@ class Endpoint:
             found = await events.poll()
             if not found:
                 continue
-            accepted = wanted(capabilities, self.open_values(request, await self.stored(request)))
+            accepted = wanted(
+                capabilities,
+                self.open_values(request, await self.stored(request)),
+                self.registry.broadcasts,
+            )
             for event in found:
                 if relays(event.message, accepted):
                     text = json.dumps(event.message, ensure_ascii=False)

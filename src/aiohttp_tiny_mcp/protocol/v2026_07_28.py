@@ -324,7 +324,11 @@ class Adapter2026_07_28(Adapter):  # noqa: N801 -- revision date, greppable agai
     def capabilities(self, registry: RegistryProtocol) -> dict[str, Any]:
         caps = dict(super().capabilities(registry))
         extensions = {
-            name: dict(spec.capabilities)
+            name: (
+                {**spec.capabilities, "notifications": sorted(spec.notifications)}
+                if spec.notifications
+                else dict(spec.capabilities)
+            )
             for name, spec in registry.extensions.items()
             if spec.min_revision <= self.version
         }

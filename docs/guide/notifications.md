@@ -198,6 +198,7 @@ The topics are:
 | `notifications/resources/list_changed` | `resources_changed` |
 | `notifications/tools/list_changed` | `tools_changed` |
 | `notifications/prompts/list_changed` | `prompts_changed` |
+| A method an extension declared, sent with `registry.broadcast` | `methods=[...]` on `2026-07-28`; every declared one on older revisions |
 
 Anything else published to the topic is ignored, so an application may use the
 same hub for its own traffic.

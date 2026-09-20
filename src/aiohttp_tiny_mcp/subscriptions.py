@@ -1,11 +1,13 @@
 """Notification filtering for modern request streams and legacy session subscriptions.
 
 Both read the same hub topic; legacy streams reload subscriptions from the shared session.
+Extension broadcasts travel the same topic: a modern stream names the methods it wants, a
+legacy stream gets every declared one.
 """
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from typing import TYPE_CHECKING, Any
 
 from . import hub as hubs
@@ -39,7 +41,18 @@ def relays(payload: Mapping[str, Any], accepted: Mapping[str, Any]) -> bool:
         if not isinstance(params, Mapping):
             return False
         return params.get("uri") in accepted.get("resourceSubscriptions", [])
-    return method in LIST_CHANGES and bool(accepted.get(LIST_CHANGES[method][0]))
+    if method in LIST_CHANGES:
+        return bool(accepted.get(LIST_CHANGES[method][0]))
+    return method in accepted.get("methods", ())
+
+
+def broadcasts_for(ex: Exchange) -> frozenset[str]:
+    """The broadcast methods this revision may hear: those of the extensions it can see."""
+    found: frozenset[str] = frozenset()
+    for spec in ex.registry.extensions.values():
+        if spec.min_revision <= ex.adapter.version:
+            found |= spec.notifications
+    return found
 
 
 async def listen(ex: Exchange) -> EmptyResult:
@@ -55,6 +68,10 @@ async def listen(ex: Exchange) -> EmptyResult:
         uris = [uri for uri in wanted.resource_subscriptions if ex.registry.match_resource(uri)]
         if uris:
             accepted["resourceSubscriptions"] = list(dict.fromkeys(uris))
+    declared = broadcasts_for(ex)
+    methods = [method for method in wanted.methods if method in declared]
+    if methods:
+        accepted["methods"] = list(dict.fromkeys(methods))
 
     ack = tag(
         {
@@ -107,9 +124,11 @@ async def unsubscribe(session: Session, uri: str) -> None:
     )
 
 
-def wanted(capabilities: Mapping[str, Any], session: Session | None) -> dict[str, Any]:
+def wanted(
+    capabilities: Mapping[str, Any], session: Session | None, broadcasts: Iterable[str] = ()
+) -> dict[str, Any]:
     """Legacy list changes follow advertised capabilities; resource updates follow session
-    subscriptions.
+    subscriptions; every declared broadcast is relayed, as a legacy stream cannot choose.
     """
     accepted: dict[str, Any] = {}
     for field, capability in LIST_CHANGES.values():
@@ -119,4 +138,7 @@ def wanted(capabilities: Mapping[str, Any], session: Session | None) -> dict[str
         uris = subscribed(session)
         if uris:
             accepted["resourceSubscriptions"] = uris
+    methods = sorted(broadcasts)
+    if methods:
+        accepted["methods"] = methods
     return accepted

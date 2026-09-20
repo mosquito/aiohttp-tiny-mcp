@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from typing import Any
 
 from .auth import Authorization, Principal
 from .exchange import Exchange, Instance
 from .extensions import Extension, ExtensionSpec
-from .hub import Hub, MemoryHub
+from .hub import NOTIFICATIONS, Cursor, Hub, MemoryHub, topic
 from .models import Implementation
 from .request_state import DEFAULT_TTL_SECONDS as STATE_TTL_SECONDS
 from .request_state import RequestStates
@@ -85,6 +85,11 @@ class Registry:
             if any(name in spec.methods for spec in self.extensions.values()):
                 raise ValueError(f"duplicate extension method: {name}")
             self.check(name, bound)
+        for method in extension.notifications:
+            if any(adapter.operation_for(method) is not None for adapter in adapters):
+                raise ValueError(f"extension cannot broadcast a protocol notification: {method}")
+            if method in self.broadcasts:
+                raise ValueError(f"duplicate broadcast notification: {method}")
         routes, methods = extension.method_resources()
         manifest = extension.manifest_resource(routes, methods)
         assert manifest.definition is not None
@@ -128,6 +133,37 @@ class Registry:
                     self.resources_templated.insert(0, resource)
                 else:
                     self.resources_templated.append(resource)
+
+    @property
+    def broadcasts(self) -> frozenset[str]:
+        """Every notification method some installed extension may broadcast."""
+        found: frozenset[str] = frozenset()
+        for spec in self.extensions.values():
+            found |= spec.notifications
+        return found
+
+    async def broadcast(
+        self,
+        method: str,
+        params: Mapping[str, Any] | None = None,
+        *,
+        meta: Mapping[str, Any] | None = None,
+    ) -> Cursor:
+        """Send one notification to every client listening in the current namespace.
+
+        `method` must be declared by an installed extension. The event goes
+        through the hub, so a listener on another worker gets it too, and a
+        legacy stream that reconnects with `Last-Event-ID` is replayed it.
+        Returns the hub id the event was stored under.
+        """
+        if method not in self.broadcasts:
+            raise ValueError(f"no installed extension declares the broadcast {method!r}")
+        sent: dict[str, Any] = dict(params or {})
+        if meta:
+            sent["_meta"] = {**dict(sent.get("_meta") or {}), **meta}
+        return await self.hub.publish(
+            topic(NOTIFICATIONS), {"jsonrpc": "2.0", "method": method, "params": sent}
+        )
 
     def provide(self, kind: type, source: Any) -> None:
         """Bind a type to where it comes from. Call before registering

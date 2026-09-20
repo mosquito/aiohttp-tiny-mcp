@@ -304,6 +304,63 @@ appear under **Resource templates**. Older revisions have no **Extensions** or
 This is a library convention carried by the standard resource API. It does not
 add native extension support to older MCP protocols or agent clients.
 
+## Broadcasts
+
+A server that learns something every client should hear -- a task closed, a
+note edited, by someone else -- sends it once with `registry.broadcast`. Only
+methods an extension declared may be sent, so a client can learn them from the
+extension's capability block and ask for the ones it wants.
+
+<!-- name: async test_extension_broadcast; fixtures: serve -->
+```python
+import asyncio
+
+from aiohttp_tiny_mcp import Client, Extension, Registry
+from aiohttp_tiny_mcp.protocol.selection import AdapterSet
+
+TASK_CHANGED = "notifications/backlog/task"
+
+registry = Registry("backlog", "1.0")
+registry.extension(Extension("example.org/backlog", notifications=[TASK_CHANGED]))
+
+url = await serve(registry)
+async with Client(url, AdapterSet.default().by_version["2026-07-28"]) as client:
+    discovery = await client.initialize()
+    block = discovery["capabilities"]["extensions"]["example.org/backlog"]
+    assert block["notifications"] == [TASK_CHANGED]
+
+    stream = client.listen(methods=[TASK_CHANGED])
+    heard = asyncio.ensure_future(stream.__anext__())
+    while not client.accepted:  # the server has taken its place on the topic
+        await asyncio.sleep(0.01)
+    assert client.accepted == {"methods": [TASK_CHANGED]}
+
+    await registry.broadcast(TASK_CHANGED, {"id": 12, "status": "done"})
+    change = await heard
+    await stream.aclose()
+
+assert change["method"] == TASK_CHANGED
+assert change["params"]["id"] == 12
+```
+
+`broadcast` returns the hub id the event was stored under, and raises
+`ValueError` for a method no installed extension declared. Names must start
+with `notifications/` and may not be one the protocol owns, such as
+`notifications/tools/list_changed`.
+
+On `2026-07-28` a `subscriptions/listen` request names the broadcasts it wants
+in `methods`; the acknowledgment echoes the ones the server declares, and the
+rest are dropped. Older revisions cannot choose: their `GET` stream, and the
+per-client stream of the 2024-11-05 transport, carry every declared broadcast,
+and their manifest resource lists the names under `notifications`. On every
+revision a broadcast arrives as an ordinary notification, so
+`on_notification` and `listen` see it the same way they see a list change.
+
+The event goes through the hub, so it reaches a listener served by another
+worker, and a legacy stream that reconnects with `Last-Event-ID` is replayed
+what it missed. See [Notifications](notifications.md) for the delivery rules
+the broadcasts share with list changes.
+
 ## Dynamic skills
 
 `Skills.from_directory()` reads files once. For instructions generated on each

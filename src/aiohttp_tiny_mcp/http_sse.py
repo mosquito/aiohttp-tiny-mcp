@@ -5,8 +5,10 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from collections.abc import Coroutine
 from contextlib import suppress
 from dataclasses import replace
+from typing import Any
 
 from aiohttp import web
 
@@ -24,7 +26,7 @@ from .core import (
 from .dispatcher import Dispatcher
 from .endpoint import Endpoint
 from .exchange import Exchange
-from .hub import Subscription, topic
+from .hub import NOTIFICATIONS, Subscription, topic
 from .namespaces import scoped
 from .protocol.selection import AdapterSet
 from .registry import Registry
@@ -38,6 +40,7 @@ from .sessions import (
     stored_version,
 )
 from .sse import SSEResponse
+from .subscriptions import relays, wanted
 
 log = logging.getLogger(__name__)
 
@@ -103,7 +106,9 @@ class SseEndpoint:
         session_id = await self.open_session()
         where = topic(STREAM, session_id)
         hub = self.registry.hub
-        events = await hub.subscribe(where, wait=self.registry.hub_poll_seconds)
+        wait = self.registry.hub_poll_seconds
+        events = await hub.subscribe(where, wait=wait)
+        shared = await hub.subscribe(topic(NOTIFICATIONS), wait=wait)
 
         response = SSEResponse(compress=self.compress)
         await response.prepare(request)
@@ -111,7 +116,11 @@ class SseEndpoint:
         await self.write(response, "endpoint", f"{posting}?session_id={session_id}")
 
         try:
-            await self.relay_until_disconnect(request, response, events)
+            await self.relay_until_disconnect(
+                request,
+                self.relay(response, events),
+                self.relay_shared(response, shared, session_id),
+            )
         finally:
             await hub.delete(where)
             await self.registry.session_store.delete(scoped(session_id))
@@ -128,25 +137,53 @@ class SseEndpoint:
         return session_id
 
     async def relay_until_disconnect(
-        self, request: web.Request, response: SSEResponse, events: Subscription
+        self, request: web.Request, *relays: Coroutine[Any, Any, None]
     ) -> None:
-        """Run a relay until its client disconnects, then always join it."""
-        relay = asyncio.create_task(self.relay(response, events))
+        """Run the relays until the client disconnects or one ends, then always join them."""
+        tasks = [asyncio.create_task(relay) for relay in relays]
         try:
-            while not relay.done():
-                await asyncio.wait({relay}, timeout=0.05)
+            while not any(task.done() for task in tasks):
+                await asyncio.wait(tasks, timeout=0.05, return_when=asyncio.FIRST_COMPLETED)
                 transport = request.transport
                 if transport is None or transport.is_closing():
                     break
         finally:
-            relay.cancel()
-            with suppress(asyncio.CancelledError, ConnectionError):
-                await relay
+            for task in tasks:
+                task.cancel()
+            for task in tasks:
+                with suppress(asyncio.CancelledError, ConnectionError):
+                    await task
 
     async def relay(self, response: SSEResponse, events: Subscription) -> None:
         """Write everything published for this connection, until cancelled."""
         async for event in events:
             await self.write(response, "message", json.dumps(event.message, ensure_ascii=False))
+
+    async def relay_shared(
+        self, response: SSEResponse, events: Subscription, session_id: str
+    ) -> None:
+        """Write the list changes, resource updates and broadcasts this session wants.
+
+        The session is re-read for each batch, so a subscription made through
+        the message endpoint takes effect on the stream that is already open.
+        """
+        store = self.registry.session_store
+        while True:
+            found = await events.poll()
+            if not found:
+                continue
+            record = await store.get(scoped(session_id))
+            if record is None:
+                return
+            adapter = self.adapters.resolve_version(stored_version(record) or VERSION)
+            session = Session(store, session_id, record, self.registry.session_ttl_seconds)
+            accepted = wanted(
+                adapter.capabilities(self.registry), session, self.registry.broadcasts
+            )
+            for event in found:
+                if relays(event.message, accepted):
+                    text = json.dumps(event.message, ensure_ascii=False)
+                    await self.write(response, "message", text)
 
     async def write(self, response: SSEResponse, event: str, data: str) -> None:
         log.debug("-> [%s] %s %s", VERSION, event, data)

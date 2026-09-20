@@ -258,13 +258,19 @@ class BaseClient(ABC):
         tools_changed: bool = False,
         prompts_changed: bool = False,
         resources_changed: bool = False,
+        methods: Sequence[str] = (),
     ) -> AsyncIterator[dict[str, Any]]:
-        """Yield changes until cancelled, via a request stream or legacy resource subscriptions."""
+        """Yield changes until cancelled, via a request stream or legacy resource subscriptions.
+
+        `methods` names the extension broadcasts to relay. A legacy stream
+        carries every broadcast the server declares, so there it is not sent.
+        """
         wanted = ListenNotifications(
             tools_list_changed=tools_changed,
             prompts_list_changed=prompts_changed,
             resources_list_changed=resources_changed,
             resource_subscriptions=list(resources),
+            methods=list(methods),
         )
         method = self.adapter.method_for(Operation.LISTEN)
         if method is not None:

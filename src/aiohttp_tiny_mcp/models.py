@@ -318,6 +318,8 @@ class ListenNotifications(Model):
     prompts_list_changed: StrictBool = False
     resources_list_changed: StrictBool = False
     resource_subscriptions: list[StrictStr] = Field(default_factory=list)
+    #: Extension broadcasts to relay, by method name.
+    methods: list[StrictStr] = Field(default_factory=list)
 
 
 class ListenParams(Params):

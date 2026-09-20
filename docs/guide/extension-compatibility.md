@@ -49,6 +49,8 @@ Read `manifest.json` through `resources/read`. Its JSON content contains:
   and output schema when the handler declares a Pydantic return model.
 - `resources` and `resourceTemplates`: fixed addresses and parameterized routes.
 - `name`, `capabilities`, and `methods`: descriptive application data.
+- `notifications`: the methods `registry.broadcast` may send on the stream;
+  see [Broadcasts](extensions.md#broadcasts).
 
 The `capabilities` field inside this JSON document is resource content. It is
 not the `capabilities` field of an MCP initialization response.

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Iterable, Mapping
 from copy import deepcopy
 from dataclasses import dataclass
 from types import MappingProxyType
@@ -17,12 +17,41 @@ from .models import ResultModel
 from .schema import json_schema
 from .specs import Bound, ResourceSpec
 
+RESERVED_NOTIFICATIONS = frozenset(
+    {
+        "notifications/cancelled",
+        "notifications/initialized",
+        "notifications/message",
+        "notifications/progress",
+        "notifications/prompts/list_changed",
+        "notifications/resources/list_changed",
+        "notifications/resources/updated",
+        "notifications/roots/list_changed",
+        "notifications/subscriptions/acknowledged",
+        "notifications/tools/list_changed",
+    }
+)
+
+
+def check_notification(name: str) -> None:
+    """Refuse a broadcast name the protocol owns or a client could not route."""
+    if (
+        not name.startswith("notifications/")
+        or len(name) <= len("notifications/")
+        or any(char.isspace() for char in name)
+        or any(part in ("", ".", "..") for part in name.split("/"))
+    ):
+        raise ValueError(f"invalid broadcast notification: {name!r}")
+    if name in RESERVED_NOTIFICATIONS:
+        raise ValueError(f"extension cannot broadcast a protocol notification: {name}")
+
 
 @dataclass(frozen=True)
 class ExtensionSpec:
     capabilities: Mapping[str, Any]
     min_revision: str
     methods: Mapping[str, Bound]
+    notifications: frozenset[str] = frozenset()
 
 
 class ExtensionResult(ResultModel):
@@ -84,6 +113,7 @@ class Extension:
         *,
         capabilities: Mapping[str, Any] | None = None,
         min_revision: str = "2026-07-28",
+        notifications: Iterable[str] = (),
     ) -> None:
         if (
             not name
@@ -99,6 +129,11 @@ class Extension:
         self.min_revision = min_revision
         self.methods: dict[str, Bound] = {}
         self.resources: dict[str, ResourceSpec] = {}
+        #: Methods `Registry.broadcast` may send to every listening client.
+        self.notifications: frozenset[str] = frozenset()
+        for method in notifications:
+            check_notification(method)
+            self.notifications |= {method}
 
     def method(self, name: str, fn: Callable[..., Awaitable[Any]] | None = None):
         """Register an async handler whose first argument is a Pydantic model.
@@ -233,6 +268,7 @@ class Extension:
             ),
             "capabilities": self.capabilities,
             "methods": sorted(self.methods),
+            "notifications": sorted(self.notifications),
             "resources": sorted(
                 [
                     spec.legacy_uri
@@ -276,4 +312,5 @@ class Extension:
             methods=MappingProxyType(
                 {name: bound.model_copy(deep=True) for name, bound in self.methods.items()}
             ),
+            notifications=self.notifications,
         )

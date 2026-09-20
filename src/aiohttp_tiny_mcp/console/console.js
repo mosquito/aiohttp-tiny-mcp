@@ -876,6 +876,9 @@ function choose(what) {
     page.subject.textContent = what.item.name;
     page.about.textContent = "Enter a method and its JSON parameters from the extension documentation.";
     reportValue("Capabilities", what.item.capabilities);
+    if (Array.isArray((what.item.capabilities || {}).notifications)) {
+      reportValue("Broadcasts", what.item.capabilities.notifications);
+    }
     chosen.fields = buildFields({
       properties: {
         method: { type: "string", default: what.item.name === SKILLS_EXTENSION ? "skills/list" : "" },
