@@ -6,7 +6,6 @@ import asyncio
 import json
 import logging
 from collections.abc import Coroutine
-from contextlib import suppress
 from dataclasses import replace
 from typing import Any
 
@@ -41,6 +40,7 @@ from .sessions import (
 )
 from .sse import SSEResponse
 from .subscriptions import relays, wanted
+from .tasks import stop
 
 log = logging.getLogger(__name__)
 
@@ -148,11 +148,7 @@ class SseEndpoint:
                 if transport is None or transport.is_closing():
                     break
         finally:
-            for task in tasks:
-                task.cancel()
-            for task in tasks:
-                with suppress(asyncio.CancelledError, ConnectionError):
-                    await task
+            await stop(*tasks)
 
     async def relay(self, response: SSEResponse, events: Subscription) -> None:
         """Write everything published for this connection, until cancelled."""

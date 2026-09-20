@@ -11,6 +11,7 @@ import json
 import logging
 import sys
 from collections.abc import Callable, Mapping
+from contextlib import suppress
 from dataclasses import replace
 from typing import Any
 
@@ -26,6 +27,7 @@ from .dispatcher import Dispatcher
 from .exchange import Exchange, is_reply, relay_reply
 from .protocol.selection import AdapterSet
 from .registry import Registry
+from .tasks import stop
 
 log = logging.getLogger("aiohttp_tiny_mcp")
 
@@ -155,9 +157,9 @@ async def serve_stdio(
         tasks = []
         for exchange, task in list(active.values()):
             exchange.cancel()
-            task.cancel()
             tasks.append(task)
-        await asyncio.gather(*tasks, return_exceptions=True)
+        with suppress(Exception):
+            await stop(*tasks)
 
 
 async def stdin_reader() -> asyncio.StreamReader:

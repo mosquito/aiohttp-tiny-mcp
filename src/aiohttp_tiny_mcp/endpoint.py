@@ -7,7 +7,6 @@ import json
 import logging
 import re
 from collections.abc import Mapping
-from contextlib import suppress
 from dataclasses import replace
 from functools import cached_property
 from typing import Any
@@ -46,6 +45,7 @@ from .sessions import (
 )
 from .sse import SSEResponse
 from .subscriptions import relays, wanted
+from .tasks import stop
 
 log = logging.getLogger("aiohttp_tiny_mcp")
 
@@ -419,9 +419,7 @@ class Endpoint:
                 if transport is None or transport.is_closing():
                     break
         finally:
-            relay.cancel()
-            with suppress(asyncio.CancelledError, ConnectionError):
-                await relay
+            await stop(relay)
         return response
 
     async def relay_notifications(
@@ -578,10 +576,7 @@ class Endpoint:
             ex.cancel()
             raise
         finally:
-            if not task.done():
-                task.cancel()
-                with suppress(asyncio.CancelledError):
-                    await task
+            await stop(task)
 
 
 MCP_ENDPOINT = web.AppKey("mcp_endpoint", Endpoint)
