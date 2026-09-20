@@ -8,10 +8,11 @@ legacy stream gets every declared one.
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
+from types import MappingProxyType
 from typing import TYPE_CHECKING, Any
 
 from . import hub as hubs
-from .models import EmptyResult, ListenParams, Meta
+from .models import EmptyResult, ListenParams, Meta, MethodFilter
 from .sessions import SUBSCRIPTIONS_KEY, Session
 
 if TYPE_CHECKING:
@@ -31,8 +32,17 @@ def tag(payload: Mapping[str, Any], subscription_id: str | int) -> dict[str, Any
     return {**payload, "params": params}
 
 
-def relays(payload: Mapping[str, Any], accepted: Mapping[str, Any]) -> bool:
-    """Whether this event is one the client asked for."""
+def relays(
+    payload: Mapping[str, Any],
+    accepted: Mapping[str, Any],
+    fields: Mapping[str, str | None] = MappingProxyType({}),
+) -> bool:
+    """Whether this event is one the client asked for.
+
+    `fields` maps a multicast method to the params field that carries its
+    topic; an accepted entry with `topics` matches only when that field holds
+    one of them.
+    """
     method = payload.get("method")
     if "id" in payload or payload.get("jsonrpc") != "2.0":
         return False
@@ -43,16 +53,57 @@ def relays(payload: Mapping[str, Any], accepted: Mapping[str, Any]) -> bool:
         return params.get("uri") in accepted.get("resourceSubscriptions", [])
     if method in LIST_CHANGES:
         return bool(accepted.get(LIST_CHANGES[method][0]))
-    return method in accepted.get("methods", ())
+    for entry in accepted.get("methods", ()):
+        if isinstance(entry, str):
+            if entry == method:
+                return True
+            continue
+        if entry.get("method") != method:
+            continue
+        field = fields.get(method)
+        params = payload.get("params")
+        if field is None or not isinstance(params, Mapping):
+            return False
+        return params.get(field) in entry.get("topics", ())
+    return False
 
 
-def broadcasts_for(ex: Exchange) -> frozenset[str]:
-    """The broadcast methods this revision may hear: those of the extensions it can see."""
-    found: frozenset[str] = frozenset()
+def broadcasts_for(ex: Exchange) -> dict[str, str | None]:
+    """The broadcasts this revision may hear, those of the extensions it can see, each with
+    its topic field.
+    """
+    found: dict[str, str | None] = {}
     for spec in ex.registry.extensions.values():
         if spec.min_revision <= ex.adapter.version:
-            found |= spec.notifications
+            found.update(spec.notifications)
     return found
+
+
+def merged(
+    requested: Iterable[str | MethodFilter], declared: Mapping[str, str | None]
+) -> list[str | dict[str, Any]]:
+    """The entries a listen request keeps, in first-seen order, one per method.
+
+    A bare name asks for every event of the method, so it wins over any
+    filter for the same method. Filters on one method merge their topics. A
+    filter on a method declared without a topic field has nothing to match
+    on and becomes the bare name. Undeclared methods are dropped.
+    """
+    kept: dict[str, list[str] | None] = {}
+    for entry in requested:
+        name = entry if isinstance(entry, str) else entry.method
+        if name not in declared:
+            continue
+        topics = None if isinstance(entry, str) or declared[name] is None else entry.topics
+        held = kept.get(name, [])
+        if topics is None or held is None:
+            kept[name] = None
+        else:
+            kept[name] = list(dict.fromkeys([*held, *topics]))
+    return [
+        name if topics is None else {"method": name, "topics": topics}
+        for name, topics in kept.items()
+    ]
 
 
 async def listen(ex: Exchange) -> EmptyResult:
@@ -69,9 +120,9 @@ async def listen(ex: Exchange) -> EmptyResult:
         if uris:
             accepted["resourceSubscriptions"] = list(dict.fromkeys(uris))
     declared = broadcasts_for(ex)
-    methods = [method for method in wanted.methods if method in declared]
+    methods = merged(wanted.methods, declared)
     if methods:
-        accepted["methods"] = list(dict.fromkeys(methods))
+        accepted["methods"] = methods
 
     ack = tag(
         {
@@ -90,7 +141,7 @@ async def listen(ex: Exchange) -> EmptyResult:
     await ex.emit(ack)
     while not ex.cancelled.is_set():
         for event in await events.poll():
-            if relays(event.message, accepted):
+            if relays(event.message, accepted, declared):
                 await ex.emit(tag(event.message, ex.id))
     return EmptyResult(meta=Meta.model_validate({SUBSCRIPTION_ID: ex.id}))
 

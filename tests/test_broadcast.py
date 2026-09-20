@@ -16,7 +16,7 @@ import pytest
 from aiohttp import web
 from pydantic import BaseModel
 
-from aiohttp_tiny_mcp import Client, Extension, MemoryHub, Registry, SseEndpoint
+from aiohttp_tiny_mcp import Client, Extension, MemoryHub, MethodFilter, Registry, SseEndpoint
 from aiohttp_tiny_mcp.hub import NOTIFICATIONS, topic
 from aiohttp_tiny_mcp.protocol.selection import AdapterSet
 from aiohttp_tiny_mcp.sqlite import SqliteHub, SqliteSessionStore, SqliteStorage
@@ -148,12 +148,12 @@ async def test_the_capability_block_and_the_manifest_list_the_broadcasts(registr
     async with connect(registry, adapter=MODERN) as modern:
         discovered = await modern.initialize()
         block = discovered["capabilities"]["extensions"]["example.org/backlog"]
-        assert block["notifications"] == [NOTE, TASK]
+        assert block["notifications"] == {NOTE: None, TASK: None}
 
     async with connect(registry, adapter=LEGACY) as legacy:
         found = await legacy.read_resource("mcp-extensions://example.org/backlog/manifest.json")
         manifest = json.loads(found.contents[0].text)
-        assert manifest["notifications"] == [NOTE, TASK]
+        assert manifest["notifications"] == {NOTE: None, TASK: None}
 
 
 # --- delivery ---------------------------------------------------------------
@@ -262,6 +262,140 @@ async def test_stdio_listeners_get_broadcasts_too(registry):
         await stream.aclose()
     assert frame["method"] == NOTE
     assert frame["params"]["title"] == "renamed"
+
+
+# --- multicast: topics within a method ----------------------------------------
+
+PROJECT = "notifications/backlog/project"
+
+
+def multicasting() -> Registry:
+    reg = Registry("multicasting", "1.0", hub=Watched(), hub_poll_seconds=0.2)
+    reg.extension(Extension("example.org/projects", notifications={PROJECT: "project", TASK: None}))
+
+    @reg.tool
+    async def noop(args: Nothing) -> str:
+        """Makes the server advertise tool list changes."""
+        return ""
+
+    return reg
+
+
+@pytest.mark.parametrize("field", ["", "_meta", 3])
+def test_a_topic_field_must_be_a_usable_params_key(field):
+    with pytest.raises(ValueError, match="invalid topic field"):
+        Extension("example.org/bad", notifications={PROJECT: field})
+
+
+async def test_a_multicast_needs_its_topic_and_publishes_nothing_without_it():
+    registry = multicasting()
+    where = topic(NOTIFICATIONS)
+    before = await registry.hub.position(where)
+    with pytest.raises(ValueError, match="multicast"):
+        await registry.broadcast(PROJECT, {"id": 1})
+    with pytest.raises(ValueError, match="multicast"):
+        await registry.broadcast(PROJECT, {"id": 1, "project": 7})
+    assert await registry.hub.position(where) == before
+    await registry.broadcast(PROJECT, {"id": 1, "project": "a"})
+
+
+async def test_the_declaration_shows_the_topic_field():
+    registry = multicasting()
+    async with connect(registry, adapter=MODERN) as modern:
+        block = (await modern.initialize())["capabilities"]["extensions"]["example.org/projects"]
+        assert block["notifications"] == {PROJECT: "project", TASK: None}
+    async with connect(registry, adapter=LEGACY) as legacy:
+        found = await legacy.read_resource("mcp-extensions://example.org/projects/manifest.json")
+        assert json.loads(found.contents[0].text)["notifications"] == {
+            PROJECT: "project",
+            TASK: None,
+        }
+
+
+async def test_listeners_get_the_topics_they_named_and_a_bare_name_gets_all():
+    registry = multicasting()
+    hub = registry.hub
+    heard: dict[str, list[str]] = {"a": [], "b": [], "all": []}
+
+    async def collect(client: Client, into: list[str], methods: list, count: int) -> None:
+        stream = client.listen(methods=methods)
+        async for frame in stream:
+            into.append(frame["params"]["id"])
+            if len(into) == count:
+                break
+        await stream.aclose()
+
+    async with serving(registry) as url:
+        async with (
+            Client(url, MODERN) as on_a,
+            Client(url, MODERN) as on_b,
+            Client(url, MODERN) as on_all,
+        ):
+            readers = [
+                asyncio.ensure_future(
+                    collect(on_a, heard["a"], [MethodFilter(method=PROJECT, topics=["a"])], 2)
+                ),
+                asyncio.ensure_future(
+                    collect(on_b, heard["b"], [{"method": PROJECT, "topics": ["b"]}], 1)
+                ),
+                asyncio.ensure_future(collect(on_all, heard["all"], [PROJECT], 3)),
+            ]
+            await hub.readers_reach(3)
+            while not (on_a.accepted and on_b.accepted and on_all.accepted):
+                await asyncio.sleep(0.01)
+            assert on_a.accepted == {"methods": [{"method": PROJECT, "topics": ["a"]}]}
+            assert on_all.accepted == {"methods": [PROJECT]}
+            await registry.broadcast(PROJECT, {"id": "a1", "project": "a"})
+            await registry.broadcast(PROJECT, {"id": "b1", "project": "b"})
+            await registry.broadcast(PROJECT, {"id": "a2", "project": "a"})
+            await asyncio.wait_for(asyncio.gather(*readers), 5)
+    assert heard == {"a": ["a1", "a2"], "b": ["b1"], "all": ["a1", "b1", "a2"]}
+
+
+async def test_the_acknowledgment_keeps_what_the_server_can_filter_on():
+    """Filters on one method merge; a bare name outranks them; a filter on a
+    plain broadcast loses its topics; an undeclared method is dropped."""
+    registry = multicasting()
+
+    async def acknowledged(client: Client, methods: list) -> dict:
+        client.accepted = {}
+        stream = client.listen(methods=methods)
+        reading = asyncio.ensure_future(first(stream))
+        while not client.accepted:
+            await asyncio.sleep(0.01)
+        reading.cancel()
+        await asyncio.gather(reading, return_exceptions=True)  # let the generator stop
+        await stream.aclose()
+        return dict(client.accepted)
+
+    async with connect(registry, adapter=MODERN) as client:
+        merged_filters = await acknowledged(
+            client,
+            [
+                {"method": PROJECT, "topics": ["a"]},
+                {"method": PROJECT, "topics": ["b", "a"]},
+                {"method": TASK, "topics": ["x"]},
+                {"method": "notifications/backlog/nope", "topics": ["x"]},
+            ],
+        )
+        outranked = await acknowledged(client, [{"method": PROJECT, "topics": ["a"]}, PROJECT])
+    assert merged_filters == {"methods": [{"method": PROJECT, "topics": ["a", "b"]}, TASK]}
+    assert outranked == {"methods": [PROJECT]}
+
+
+async def test_legacy_streams_get_every_topic():
+    registry = multicasting()
+    hub = registry.hub
+    async with serving(registry) as url:
+        async with Client(url, LEGACY) as client:
+            await client.initialize()
+            stream = client.stream_notifications()
+            reading = asyncio.ensure_future(first(stream))
+            await hub.readers_reach(1)
+            await registry.broadcast(PROJECT, {"id": 1, "project": "elsewhere"})
+            frame = await reading
+            await stream.aclose()
+    assert frame["params"] == {"id": 1, "project": "elsewhere"}
 
 
 # --- resumption and other nodes ---------------------------------------------

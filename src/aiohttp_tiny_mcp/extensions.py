@@ -33,8 +33,10 @@ RESERVED_NOTIFICATIONS = frozenset(
 )
 
 
-def check_notification(name: str) -> None:
-    """Refuse a broadcast name the protocol owns or a client could not route."""
+def check_notification(name: str, field: str | None) -> None:
+    """Refuse a broadcast name the protocol owns or a client could not route, and a topic
+    field a listener could not match on.
+    """
     if (
         not name.startswith("notifications/")
         or len(name) <= len("notifications/")
@@ -44,6 +46,8 @@ def check_notification(name: str) -> None:
         raise ValueError(f"invalid broadcast notification: {name!r}")
     if name in RESERVED_NOTIFICATIONS:
         raise ValueError(f"extension cannot broadcast a protocol notification: {name}")
+    if field is not None and (not isinstance(field, str) or not field or field == "_meta"):
+        raise ValueError(f"invalid topic field for {name}: {field!r}")
 
 
 @dataclass(frozen=True)
@@ -51,7 +55,9 @@ class ExtensionSpec:
     capabilities: Mapping[str, Any]
     min_revision: str
     methods: Mapping[str, Bound]
-    notifications: frozenset[str] = frozenset()
+    #: Broadcast method to the params field that carries its topic, or None for one
+    #: every listener of the method gets.
+    notifications: Mapping[str, str | None] = MappingProxyType({})
 
 
 class ExtensionResult(ResultModel):
@@ -113,7 +119,7 @@ class Extension:
         *,
         capabilities: Mapping[str, Any] | None = None,
         min_revision: str = "2026-07-28",
-        notifications: Iterable[str] = (),
+        notifications: Iterable[str] | Mapping[str, str | None] = (),
     ) -> None:
         if (
             not name
@@ -129,11 +135,18 @@ class Extension:
         self.min_revision = min_revision
         self.methods: dict[str, Bound] = {}
         self.resources: dict[str, ResourceSpec] = {}
-        #: Methods `Registry.broadcast` may send to every listening client.
-        self.notifications: frozenset[str] = frozenset()
-        for method in notifications:
-            check_notification(method)
-            self.notifications |= {method}
+        #: Methods `Registry.broadcast` may send, each with the params field that
+        #: carries its topic. None makes it a broadcast every listener of the method
+        #: gets; a field makes it a multicast a listener filters by topic.
+        self.notifications: dict[str, str | None] = {}
+        declared = (
+            notifications.items()
+            if isinstance(notifications, Mapping)
+            else ((method, None) for method in notifications)
+        )
+        for method, field in declared:
+            check_notification(method, field)
+            self.notifications[method] = field
 
     def method(self, name: str, fn: Callable[..., Awaitable[Any]] | None = None):
         """Register an async handler whose first argument is a Pydantic model.
@@ -268,7 +281,9 @@ class Extension:
             ),
             "capabilities": self.capabilities,
             "methods": sorted(self.methods),
-            "notifications": sorted(self.notifications),
+            "notifications": {
+                name: self.notifications[name] for name in sorted(self.notifications)
+            },
             "resources": sorted(
                 [
                     spec.legacy_uri
@@ -312,5 +327,5 @@ class Extension:
             methods=MappingProxyType(
                 {name: bound.model_copy(deep=True) for name, bound in self.methods.items()}
             ),
-            notifications=self.notifications,
+            notifications=MappingProxyType(dict(self.notifications)),
         )

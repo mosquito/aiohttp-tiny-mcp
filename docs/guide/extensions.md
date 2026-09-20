@@ -327,7 +327,7 @@ url = await serve(registry)
 async with Client(url, AdapterSet.default().by_version["2026-07-28"]) as client:
     discovery = await client.initialize()
     block = discovery["capabilities"]["extensions"]["example.org/backlog"]
-    assert block["notifications"] == [TASK_CHANGED]
+    assert block["notifications"] == {TASK_CHANGED: None}
 
     stream = client.listen(methods=[TASK_CHANGED])
     heard = asyncio.ensure_future(stream.__anext__())
@@ -347,6 +347,69 @@ assert change["params"]["id"] == 12
 `ValueError` for a method no installed extension declared. Names must start
 with `notifications/` and may not be one the protocol owns, such as
 `notifications/tools/list_changed`.
+
+### Multicast: the topics of one method
+
+A server with many projects, rooms, or documents does not want every
+listener to hear about all of them. Declare the method with the params field
+that carries its topic, and a listener names the topics it wants. The event
+itself does not change: the topic is a field the notification carries anyway.
+
+<!-- name: async test_extension_multicast; fixtures: serve -->
+```python
+import asyncio
+
+from aiohttp_tiny_mcp import Client, Extension, MethodFilter, Registry
+from aiohttp_tiny_mcp.protocol.selection import AdapterSet
+
+TASK_CHANGED = "notifications/backlog/task"
+
+registry = Registry("backlog", "1.0")
+registry.extension(
+    Extension("example.org/backlog", notifications={TASK_CHANGED: "project"})
+)
+
+
+async def watch(client, methods, count):
+    """The ids of the first `count` events this listener is sent."""
+    heard = []
+    stream = client.listen(methods=methods)
+    async for change in stream:
+        heard.append(change["params"]["id"])
+        if len(heard) == count:
+            break
+    await stream.aclose()
+    return heard
+
+
+url = await serve(registry)
+adapter = AdapterSet.default().by_version["2026-07-28"]
+async with Client(url, adapter) as one, Client(url, adapter) as every:
+    only_one = asyncio.ensure_future(
+        watch(one, [MethodFilter(method=TASK_CHANGED, topics=["one"])], 1)
+    )
+    all_of_them = asyncio.ensure_future(watch(every, [TASK_CHANGED], 2))
+    while not (one.accepted and every.accepted):
+        await asyncio.sleep(0.01)
+    assert one.accepted == {"methods": [{"method": TASK_CHANGED, "topics": ["one"]}]}
+
+    await registry.broadcast(TASK_CHANGED, {"id": 1, "project": "other"})
+    await registry.broadcast(TASK_CHANGED, {"id": 2, "project": "one"})
+    assert await only_one == [2]
+    assert await all_of_them == [1, 2]
+```
+
+A declaration is a mapping from method to topic field; `None`, or the plain
+list form above, keeps a method a broadcast that every listener of it gets.
+`broadcast` of a multicast without its topic field, or with one that is not a
+string, raises `ValueError` and sends nothing. A bare method name in `methods`
+asks for every topic and outranks a filter for the same method; filters for
+one method merge their topics; a filter on a plain broadcast keeps the method
+and drops the topics, as the acknowledgment shows. Older revisions get every
+topic: their stream cannot choose.
+
+The capability block and the legacy manifest carry the same mapping under
+`notifications`, so a client can see which field to filter on.
 
 On `2026-07-28` a `subscriptions/listen` request names the broadcasts it wants
 in `methods`; the acknowledgment echoes the ones the server declares, and the

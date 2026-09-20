@@ -313,13 +313,21 @@ class ListParams(Params):
     cursor: str | None = None
 
 
+class MethodFilter(Model):
+    """One extension multicast, narrowed to the topics named."""
+
+    method: StrictStr
+    topics: list[StrictStr] = Field(default_factory=list)
+
+
 class ListenNotifications(Model):
     tools_list_changed: StrictBool = False
     prompts_list_changed: StrictBool = False
     resources_list_changed: StrictBool = False
     resource_subscriptions: list[StrictStr] = Field(default_factory=list)
-    #: Extension broadcasts to relay, by method name.
-    methods: list[StrictStr] = Field(default_factory=list)
+    #: Extension broadcasts to relay: a method name for every event of it, or a
+    #: `MethodFilter` for the topics of a multicast.
+    methods: list[StrictStr | MethodFilter] = Field(default_factory=list)
 
 
 class ListenParams(Params):

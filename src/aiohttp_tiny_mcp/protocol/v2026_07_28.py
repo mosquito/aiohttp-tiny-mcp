@@ -325,7 +325,12 @@ class Adapter2026_07_28(Adapter):  # noqa: N801 -- revision date, greppable agai
         caps = dict(super().capabilities(registry))
         extensions = {
             name: (
-                {**spec.capabilities, "notifications": sorted(spec.notifications)}
+                {
+                    **spec.capabilities,
+                    "notifications": {
+                        name: spec.notifications[name] for name in sorted(spec.notifications)
+                    },
+                }
                 if spec.notifications
                 else dict(spec.capabilities)
             )

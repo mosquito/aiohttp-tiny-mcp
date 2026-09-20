@@ -137,9 +137,14 @@ class Registry:
     @property
     def broadcasts(self) -> frozenset[str]:
         """Every notification method some installed extension may broadcast."""
-        found: frozenset[str] = frozenset()
+        return frozenset(self.topic_fields)
+
+    @property
+    def topic_fields(self) -> dict[str, str | None]:
+        """Each declared broadcast with the params field that carries its topic, or None."""
+        found: dict[str, str | None] = {}
         for spec in self.extensions.values():
-            found |= spec.notifications
+            found.update(spec.notifications)
         return found
 
     async def broadcast(
@@ -151,14 +156,21 @@ class Registry:
     ) -> Cursor:
         """Send one notification to every client listening in the current namespace.
 
-        `method` must be declared by an installed extension. The event goes
-        through the hub, so a listener on another worker gets it too, and a
-        legacy stream that reconnects with `Last-Event-ID` is replayed it.
-        Returns the hub id the event was stored under.
+        `method` must be declared by an installed extension. A method declared
+        with a topic field is a multicast: `params` must carry that field as a
+        string, and a listener that named topics gets the event only when the
+        value is one of them. The event goes through the hub, so a listener
+        on another worker gets it too, and a legacy stream that reconnects
+        with `Last-Event-ID` is replayed it. Returns the hub id the event was
+        stored under.
         """
-        if method not in self.broadcasts:
+        fields = self.topic_fields
+        if method not in fields:
             raise ValueError(f"no installed extension declares the broadcast {method!r}")
         sent: dict[str, Any] = dict(params or {})
+        field = fields[method]
+        if field is not None and not isinstance(sent.get(field), str):
+            raise ValueError(f"{method} is a multicast: params[{field!r}] must be a string topic")
         if meta:
             sent["_meta"] = {**dict(sent.get("_meta") or {}), **meta}
         return await self.hub.publish(

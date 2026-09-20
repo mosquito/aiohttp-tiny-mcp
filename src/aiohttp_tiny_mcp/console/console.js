@@ -876,7 +876,8 @@ function choose(what) {
     page.subject.textContent = what.item.name;
     page.about.textContent = "Enter a method and its JSON parameters from the extension documentation.";
     reportValue("Capabilities", what.item.capabilities);
-    if (Array.isArray((what.item.capabilities || {}).notifications)) {
+    if ((what.item.capabilities || {}).notifications) {
+      // Method to the params field that carries its topic; null for a plain broadcast.
       reportValue("Broadcasts", what.item.capabilities.notifications);
     }
     chosen.fields = buildFields({
