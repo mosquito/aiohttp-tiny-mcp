@@ -27,10 +27,11 @@ import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
-from aiohttp_tiny_mcp import Endpoint, Registry
+from aiohttp_tiny_mcp import Endpoint, Registry, StaticBasicAuth
 from aiohttp_tiny_mcp.auth import Authorization, Principal
 from aiohttp_tiny_mcp.console import Console
 from aiohttp_tiny_mcp.http_sse import SseEndpoint
+from aiohttp_tiny_mcp.oauth import GitHub, OAuthClient, OAuthFacade
 
 pytestmark = pytest.mark.asyncio
 
@@ -94,25 +95,34 @@ async def test_the_metadata_path_follows_the_resource_not_the_mount(auth):
     assert auth.metadata_url == f"https://mcp.example.com{auth.metadata_path}"
 
 
-async def test_a_prefix_in_the_path_leaves_the_metadata_at_the_root(auth, protected):
+async def test_a_prefix_in_the_path_leaves_the_metadata_at_the_root(auth, protected, caplog):
     app = web.Application()
     app.add_routes(protected.routes("/reports/mcp"))
 
     assert canonical(app) == [auth.metadata_path, "/reports/mcp"]
     assert await status(app, auth.metadata_path) == 200
+    assert not caplog.records
 
 
-async def test_a_subapplication_would_move_the_metadata_where_no_client_looks(auth, protected):
+async def test_a_subapplication_would_move_the_metadata_where_no_client_looks(
+    auth, protected, caplog
+):
     """What `metadata=False` is for. A prefix reaches every route a
     subapplication holds, and this is the one that must not take one."""
     host = web.Application()
     host.add_subapp("/reports/", protected.app("/mcp"))
 
+    assert len(caplog.records) == 1
+    assert caplog.records[0].name == "aiohttp_tiny_mcp"
+    assert caplog.records[0].levelname == "WARNING"
+    assert f"belongs at {auth.metadata_path}" in caplog.text
+    assert f"moved it to /reports{auth.metadata_path}" in caplog.text
+    assert "metadata=False" in caplog.text
     assert await status(host, auth.metadata_path) == 404
     assert await status(host, f"/reports{auth.metadata_path}") == 200
 
 
-async def test_the_endpoint_under_a_prefix_with_its_metadata_at_the_root(auth, protected):
+async def test_the_endpoint_under_a_prefix_with_its_metadata_at_the_root(auth, protected, caplog):
     """The explicit split: the endpoint in the subapplication, the metadata on
     the application that owns the root."""
     section = web.Application()
@@ -127,7 +137,90 @@ async def test_the_endpoint_under_a_prefix_with_its_metadata_at_the_root(auth, p
         found = await http.get(auth.metadata_path)
         assert found.status == 200
         assert (await found.json())["resource"] == RESOURCE
+        assert (await http.head(auth.metadata_path)).status == 200
         assert (await http.post("/reports/mcp", json={})).status == 401
+    assert str(host.router["mcp-resource-metadata"].url_for()) == auth.metadata_path
+    assert not caplog.records
+
+
+@pytest.mark.parametrize("transport", [Endpoint, SseEndpoint])
+@pytest.mark.parametrize("installation", ["routes", "setup"])
+async def test_metadata_warns_during_subapp_mount_for_both_http_transports(
+    auth, caplog, transport, installation
+):
+    endpoint = transport(Registry("reports", "1.0", auth=auth))
+    section = web.Application()
+    if installation == "routes":
+        section.add_routes(endpoint.routes())
+    else:
+        endpoint.setup(section)
+    assert not caplog.records
+    web.Application().add_subapp("/api", section)
+    assert len(caplog.records) == 1
+    assert f"moved it to /api{auth.metadata_path}" in caplog.text
+
+
+async def test_nested_mount_warning_keeps_the_original_required_path(auth, protected, caplog):
+    inner = protected.app()
+    middle = web.Application()
+    middle.add_subapp("/inner", inner)
+    caplog.clear()
+    web.Application().add_subapp("/outer", middle)
+    assert len(caplog.records) == 1
+    assert f"belongs at {auth.metadata_path}" in caplog.text
+    assert f"moved it to /outer/inner{auth.metadata_path}" in caplog.text
+
+
+@pytest.mark.parametrize("transport", [Endpoint, SseEndpoint])
+async def test_basic_auth_subapp_does_not_warn(transport, caplog):
+    section = web.Application()
+    transport(Registry("basic", "1", auth=StaticBasicAuth("user", "password"))).setup(section)
+    web.Application().add_subapp("/api", section)
+    assert not caplog.records
+
+
+@pytest.mark.parametrize("installation", ["routes", "setup"])
+@pytest.mark.parametrize("issuer_path", ["", "/oauth"])
+async def test_oauth_facade_warns_when_metadata_moves(installation, issuer_path, caplog):
+    facade = OAuthFacade(
+        "https://mcp.example.com" + issuer_path,
+        GitHub("test-id", "test-secret"),
+        resource=RESOURCE,
+        clients=[OAuthClient("test", ["https://client.example.com/callback"])],
+    )
+    section = web.Application()
+    if installation == "routes":
+        section.add_routes(facade.routes())
+    else:
+        facade.setup(section)
+    assert not caplog.records
+    host = web.Application()
+    host.add_subapp("/api", section)
+    expected = "/.well-known/oauth-authorization-server" + issuer_path
+    assert len(caplog.records) == 1
+    assert f"belongs at {expected}" in caplog.text
+    assert f"moved it to /api{expected}" in caplog.text
+    assert "mount OAuthFacade routes on the root application" in caplog.text
+    async with TestClient(TestServer(host)) as http:
+        assert (await http.get(expected)).status == 404
+        actual = await http.get("/api" + expected)
+        assert actual.status == 200
+        assert (await actual.json())["issuer"] == facade.issuer
+
+
+async def test_oauth_facade_with_issuer_path_on_root_does_not_warn(caplog):
+    facade = OAuthFacade(
+        "https://mcp.example.com/oauth",
+        GitHub("test-id", "test-secret"),
+        resource=RESOURCE,
+        clients=[OAuthClient("test", ["https://client.example.com/callback"])],
+    )
+    root = facade.setup(web.Application())
+    async with TestClient(TestServer(root)) as http:
+        path = "/.well-known/oauth-authorization-server/oauth"
+        assert (await http.get(path)).status == 200
+        assert (await http.head(path)).status == 200
+    assert not caplog.records
 
 
 async def test_a_console_addresses_its_own_files_wherever_it_is_mounted():

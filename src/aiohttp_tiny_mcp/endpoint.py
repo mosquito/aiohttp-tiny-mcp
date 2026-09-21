@@ -29,6 +29,7 @@ from .core import (
 from .dispatcher import Dispatcher
 from .exchange import Exchange, is_reply, relay_reply
 from .hub import NOTIFICATIONS, Subscription, topic
+from .metadata import metadata_route
 from .namespaces import current, namespace, scoped
 from .protocol.selection import AdapterSet
 from .registry import Registry
@@ -162,10 +163,12 @@ class Endpoint:
             documents[path] = document
             suffix = f"-policy{len(found)}" if found else ""
             found.append(
-                web.get(
-                    path,
-                    partial(self.metadata, auth=auth),
-                    name=f"{name}-resource-metadata{suffix}" if name else None,
+                metadata_route(
+                    web.get(
+                        path,
+                        partial(self.metadata, auth=auth),
+                        name=f"{name}-resource-metadata{suffix}" if name else None,
+                    )
                 )
             )
         return found

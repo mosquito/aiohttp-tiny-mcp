@@ -19,6 +19,7 @@ from aiohttp import ClientSession, ClientTimeout, DummyCookieJar, web
 from yarl import URL
 
 from ..auth import Authorization, Principal
+from ..metadata import metadata_route
 from ..sessions import MemorySessionStore, SessionRecord, SessionStore
 from .upstream import Identity, OAuth2, UpstreamAuthError
 
@@ -175,8 +176,11 @@ class OAuthFacade:
     def routes(self) -> list[web.RouteDef]:
         """Mount at the origin root. Paths come from the configured issuer."""
         return [
-            web.get(
-                "/.well-known/oauth-authorization-server" + self.base_path, self.handle_metadata
+            metadata_route(
+                web.get(
+                    "/.well-known/oauth-authorization-server" + self.base_path,
+                    self.handle_metadata,
+                )
             ),
             web.get(self.base_path + "/authorize", self.handle_authorize, allow_head=False),
             web.post(self.base_path + "/authorize", self.handle_consent),

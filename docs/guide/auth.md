@@ -778,6 +778,16 @@ for mounting both transports with one metadata route.
 
 ## Where the metadata has to be served
 
+The library logs a warning when `add_subapp()` adds a prefix to a `.well-known`
+metadata route. The warning includes the required path and the prefixed path.
+It applies to protected-resource metadata from both HTTP transports and to
+authorization-server metadata from `OAuthFacade`. It also works with `routes()`
+and `app.add_routes()`. The warning does not move routes or prevent startup.
+
+An MCP path such as `/reports/mcp` on the root application is valid and does not
+trigger this warning. Reverse-proxy path rewriting is outside this check; ensure
+the proxy exposes the documented public metadata URLs.
+
 Endpoint.routes includes the metadata route along with the endpoint, and
 Endpoint.metadata_routes returns it alone. The path comes from resource, not
 from where you mounted anything, and RFC 8615 places a well-known URI directly
