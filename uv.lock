@@ -176,6 +176,9 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
+jwt = [
+    { name = "pyjwt", extra = ["crypto"] },
+]
 postgres = [
     { name = "psycopg", extra = ["binary", "pool"] },
 ]
@@ -198,7 +201,7 @@ dev = [
     { name = "myst-parser", version = "4.0.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "myst-parser", version = "5.1.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
     { name = "psycopg", extra = ["binary", "pool"] },
-    { name = "pyjwt" },
+    { name = "pyjwt", extra = ["crypto"] },
     { name = "pytest" },
     { name = "pytest-asyncio" },
     { name = "pytest-cov" },
@@ -219,10 +222,11 @@ requires-dist = [
     { name = "aiosqlite", marker = "extra == 'sqlite'", specifier = ">=0.20" },
     { name = "psycopg", extras = ["binary", "pool"], marker = "extra == 'postgres'", specifier = ">=3" },
     { name = "pydantic", specifier = ">=2.13" },
+    { name = "pyjwt", extras = ["crypto"], marker = "extra == 'jwt'", specifier = ">=2.13" },
     { name = "pyyaml", marker = "extra == 'skills'", specifier = ">=6" },
     { name = "redis", marker = "extra == 'redis'", specifier = ">=5" },
 ]
-provides-extras = ["skills", "sqlite", "redis", "postgres"]
+provides-extras = ["jwt", "skills", "sqlite", "redis", "postgres"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -232,7 +236,7 @@ dev = [
     { name = "mcp", extras = ["cli"], specifier = "==2.0.0" },
     { name = "myst-parser", specifier = ">=4.0.1" },
     { name = "psycopg", extras = ["binary", "pool"], specifier = ">=3" },
-    { name = "pyjwt", specifier = ">=2.13" },
+    { name = "pyjwt", extras = ["crypto"], specifier = ">=2.13" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
     { name = "pytest-cov", specifier = ">=7.1.0" },

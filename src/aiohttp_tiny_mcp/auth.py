@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import math
 import time
 from abc import ABC, abstractmethod
 from base64 import b64decode
 from binascii import Error as Base64Error
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
+from hashlib import sha256
 from secrets import compare_digest
 from typing import Any, Protocol, runtime_checkable
 from urllib.parse import urlsplit
@@ -50,6 +52,73 @@ class TokenVerifier(Protocol):
     """Verify a bearer token for this resource."""
 
     async def verify(self, token: str) -> Principal | None: ...
+
+
+def principal_from_claims(claims: Mapping[str, Any]) -> Principal:
+    """Map verified claims to a principal. This function does not verify tokens.
+
+    Empty claims are valid. Malformed identity, scope, or expiry values raise
+    ValueError. Application-specific namespaces require a custom mapper.
+    """
+    subject = claims.get("sub")
+    issuer = claims.get("iss")
+    client_id = claims.get("client_id", claims.get("azp", ""))
+    if subject is not None and not isinstance(subject, str):
+        raise ValueError("sub must be a string")
+    if issuer is not None and not isinstance(issuer, str):
+        raise ValueError("iss must be a string")
+    if not isinstance(client_id, str):
+        raise ValueError("client_id or azp must be a string")
+    scope = claims.get("scope", claims.get("scp", []))
+    if isinstance(scope, str):
+        scopes = frozenset(scope.split())
+    elif isinstance(scope, list) and all(isinstance(item, str) for item in scope):
+        scopes = frozenset(scope)
+    else:
+        raise ValueError("scope or scp must be a string or a list of strings")
+    expires_at = None
+    if "exp" in claims:
+        try:
+            expires_at = float(claims["exp"])
+        except (ValueError, TypeError, OverflowError) as error:
+            raise ValueError("exp must be a finite timestamp") from error
+        if isinstance(claims["exp"], bool) or not math.isfinite(expires_at):
+            raise ValueError("exp must be a finite timestamp")
+    return Principal(
+        subject=subject,
+        issuer=issuer,
+        client_id=client_id,
+        scopes=scopes,
+        expires_at=expires_at,
+        claims=dict(claims),
+    )
+
+
+class StaticVerifier:
+    """Verify configured opaque tokens for development and tests.
+
+    Compare fixed-size digests for every configured token, including after a
+    match. Authorization enforces the returned principal's expiry and scopes.
+    """
+
+    def __init__(self, mapping: Mapping[str, Principal]) -> None:
+        if any(not token for token in mapping):
+            raise ValueError("static tokens must be non-empty")
+        self._entries = tuple(
+            (sha256(token.encode("utf-8")).digest(), principal)
+            for token, principal in mapping.items()
+        )
+
+    async def verify(self, token: str) -> Principal | None:
+        try:
+            digest = sha256(token.encode("utf-8")).digest()
+        except UnicodeEncodeError:
+            return None
+        found = None
+        for expected, principal in self._entries:
+            if compare_digest(digest, expected):
+                found = principal
+        return found
 
 
 class Unauthorized(Exception):
@@ -269,6 +338,8 @@ __all__ = [
     "BasicAuth",
     "Principal",
     "StaticBasicAuth",
+    "StaticVerifier",
     "TokenVerifier",
     "Unauthorized",
+    "principal_from_claims",
 ]

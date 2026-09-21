@@ -19,7 +19,7 @@ from aiohttp.test_utils import TestClient, TestServer
 from pydantic import BaseModel
 
 from aiohttp_tiny_mcp import Client, Endpoint, MemoryHub, MemorySessionStore, Registry
-from aiohttp_tiny_mcp.auth import Authorization, Principal, Unauthorized
+from aiohttp_tiny_mcp.auth import Authorization, Principal, StaticVerifier, Unauthorized
 from aiohttp_tiny_mcp.namespaces import current, namespace
 from aiohttp_tiny_mcp.protocol.selection import AdapterSet
 from aiohttp_tiny_mcp.sessions import SESSION_HEADER
@@ -61,21 +61,12 @@ TOKENS = {
 }
 
 
-class Tokens:
-    def __init__(self) -> None:
-        self.seen: list[str] = []
-
-    async def verify(self, token: str) -> Principal | None:
-        self.seen.append(token)
-        return TOKENS.get(token)
-
-
 class Nothing(BaseModel):
     pass
 
 
-def build(**options) -> tuple[Registry, Tokens]:
-    verifier = Tokens()
+def build(**options) -> tuple[Registry, StaticVerifier]:
+    verifier = StaticVerifier(TOKENS)
     auth = Authorization(
         verifier=verifier,
         resource=RESOURCE,
@@ -405,7 +396,7 @@ async def test_a_machine_token_still_has_an_identity():
 async def test_a_refusal_is_raised_rather_than_returned():
     """Every caller of this has to refuse the same way, and a return value
     that is forgotten fails open."""
-    auth = Authorization(verifier=Tokens(), resource=RESOURCE)
+    auth = Authorization(verifier=StaticVerifier(TOKENS), resource=RESOURCE)
     with pytest.raises(Unauthorized):
         await auth.principal(None)
 

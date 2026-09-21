@@ -2,7 +2,17 @@
 
 from __future__ import annotations
 
-from .auth import Authentication, Authorization, BasicAuth, Principal, StaticBasicAuth, Unauthorized
+from .auth import (
+    Authentication,
+    Authorization,
+    BasicAuth,
+    Principal,
+    StaticBasicAuth,
+    StaticVerifier,
+    TokenVerifier,
+    Unauthorized,
+    principal_from_claims,
+)
 from .client import Client
 from .client_base import ClientError, Elicitor
 from .core import (
@@ -81,6 +91,8 @@ __all__ = [
     "SessionStore",
     "StdioClient",
     "StaticBasicAuth",
+    "StaticVerifier",
+    "TokenVerifier",
     "TextContent",
     "TextResourceContents",
     "Unauthorized",
@@ -88,6 +100,7 @@ __all__ = [
     "elicit_accept",
     "elicit_cancel",
     "elicit_decline",
+    "principal_from_claims",
     "run_stdio",
     "serve_stdio",
 ]

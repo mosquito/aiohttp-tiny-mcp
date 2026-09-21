@@ -178,6 +178,18 @@ The classes below provide the API reference.
 
 .. autoclass:: aiohttp_tiny_mcp.auth.TokenVerifier
 
+.. autoclass:: aiohttp_tiny_mcp.auth.StaticVerifier
+   :members:
+
+.. autofunction:: aiohttp_tiny_mcp.auth.principal_from_claims
+
+.. autoclass:: aiohttp_tiny_mcp.jwt.JWTVerifier
+   :members:
+
+.. autoclass:: aiohttp_tiny_mcp.jwt.HMACJWTVerifier
+
+.. autoclass:: aiohttp_tiny_mcp.jwt.PublicKeyJWTVerifier
+
 .. autoclass:: aiohttp_tiny_mcp.oauth.OAuthFacade
    :members: resource, routes, setup, cleanup_ctx, is_public, revoke
 

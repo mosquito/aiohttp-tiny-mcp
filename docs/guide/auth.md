@@ -12,7 +12,9 @@ scopes, inject the principal into handlers, and enforce session ownership.
 | One Basic account | `StaticBasicAuth` | Configure the account and scopes. |
 | Basic with a user database | Subclass `BasicAuth` | Implement async `verify(username, password)`. |
 | API key, cookie, or existing request identity | Subclass `Authentication` | Implement async `authenticate(request)` and `challenge(refusal)`. |
-| Existing OAuth Bearer tokens | `Authorization` | Supply an object with async `verify(token)`. Inheritance is optional. |
+| Fixed development tokens | `Authorization` with `StaticVerifier` | Map tokens to principals. |
+| JWT Bearer tokens | `Authorization` with a JWT verifier | Install `[jwt]`; configure a key, issuer, and audience. |
+| Other OAuth Bearer tokens | `Authorization` | Supply an object with async `verify(token)`. Inheritance is optional. |
 | GitHub browser login | `OAuthFacade` with `GitHub` | Supply `identity=` to map verified accounts to permissions. |
 | Another OAuth provider | `OAuth2` with `OAuthFacade` | Configure endpoints and an async `profile(tokens, http)` callback. |
 
@@ -718,23 +720,23 @@ authorization_servers tells an MCP client where it may obtain a token.
 from pydantic import BaseModel
 
 from aiohttp_tiny_mcp import Registry
-from aiohttp_tiny_mcp.auth import Authorization, Principal
+from aiohttp_tiny_mcp.auth import Authorization, Principal, StaticVerifier
 
 
-class Tokens:
-    async def verify(self, token: str) -> Principal | None:
-        if token == "report-token":
-            return Principal(
-                subject="alice",
-                client_id="reports",
-                issuer="https://login.example.com",
-                scopes=frozenset({"reports:read"}),
-            )
-        return None
+verifier = StaticVerifier(
+    {
+        "report-token": Principal(
+            subject="alice",
+            client_id="reports",
+            issuer="https://login.example.com",
+            scopes=frozenset({"reports:read"}),
+        ),
+    }
+)
 
 
 auth = Authorization(
-    verifier=Tokens(),
+    verifier=verifier,
     resource="https://mcp.example.com/reports/mcp",
     authorization_servers=["https://login.example.com"],
     scopes_supported=["reports:read"],
@@ -775,6 +777,134 @@ on each POST, including requests handled by another worker. Historical clients
 must acquire a token separately if they lack OAuth discovery and login support.
 See [HTTP+SSE deployment](../deployment/transports.md#httpsse-for-2024-11-05-clients)
 for mounting both transports with one metadata route.
+
+### Static tokens and custom verifiers
+
+`StaticVerifier(mapping)` supports development and tests without extra dependencies.
+It snapshots a mapping from non-empty token strings to `Principal` objects.
+It compares SHA-256 digests with `compare_digest` for every entry, including after
+finding a match. `Authorization` checks expiry and scopes on the returned principal.
+
+Custom verifiers implement `async verify(token: str) -> Principal | None`.
+Return `None` for invalid tokens. Inheritance from `TokenVerifier` is optional.
+Keep token parsing and verification inside the verifier. Return identity and
+permissions through `Principal`; do not place credentials in its claims.
+
+### JWT verifiers
+
+Install the optional dependency:
+
+```bash
+pip install 'aiohttp-tiny-mcp[jwt]'
+```
+
+Import JWT verifiers from `aiohttp_tiny_mcp.jwt`. Core imports, `StaticVerifier`,
+and claims mapping work without PyJWT or cryptography. Importing the JWT module
+without these dependencies raises an `ImportError` that names the required extra.
+
+`HMACJWTVerifier(pre_shared_key, ...)` accepts HS256 with a secret of at least
+32 bytes. `PublicKeyJWTVerifier(public_key, ...)` accepts a PEM public key or a
+path to a PEM file. It selects RSA, EC, or EdDSA algorithms from that key.
+RSA keys must contain at least 2048 bits. EC keys use P-256, P-384, or P-521.
+The verifiers never select an algorithm from an unverified token header.
+This follows [PyJWT's algorithm configuration guidance](https://pyjwt.readthedocs.io/en/stable/api.html#jwt.decode).
+
+Both verifiers require `exp` and validate the signature and time claims.
+Set `issuer=` and `audience=` explicitly for an OAuth resource. Empty defaults
+disable those comparisons; `Authorization.resource` does not configure them.
+An audience claim can be a string or a list containing the configured audience.
+These classes use configured keys; they do not fetch JWKS or perform discovery.
+
+<!-- name: async test_jwt_verifiers -->
+```python
+import time
+
+import jwt
+
+from aiohttp_tiny_mcp import Authorization
+from aiohttp_tiny_mcp.jwt import HMACJWTVerifier
+
+secret = "replace-this-example-secret-with-random-bytes"
+verifier = HMACJWTVerifier(
+    secret,
+    issuer="https://login.example.com",
+    audience="https://mcp.example.com/mcp",
+)
+auth = Authorization(verifier, resource="https://mcp.example.com/mcp")
+token = jwt.encode(
+    {
+        "sub": "alice",
+        "iss": "https://login.example.com",
+        "aud": "https://mcp.example.com/mcp",
+        "scope": "reports:read",
+        "exp": time.time() + 300,
+    },
+    secret,
+    algorithm="HS256",
+)
+principal = await auth.principal(f"Bearer {token}")
+assert principal.subject == "alice"
+assert principal.scopes == frozenset({"reports:read"})
+```
+
+### Map verified claims to a principal
+
+Both JWT verifiers accept `principal=`, a synchronous callable with the signature
+`Callable[[Mapping[str, Any]], Principal]`. It receives claims only after token
+verification. Raise `ValueError` to reject an account. Verification then returns
+`None`. Use the same mapping function inside an application introspection verifier.
+
+The default `principal_from_claims` maps these fields:
+
+| Claim | Principal field | Default |
+| --- | --- | --- |
+| `sub` | `subject` | `None` |
+| `iss` | `issuer` | `None` |
+| `client_id`, otherwise `azp` | `client_id` | Empty string |
+| `scope`, otherwise `scp` | `scopes` | Empty frozenset |
+| `exp` | `expires_at` | `None` |
+
+Scopes can be a whitespace-separated string or a list of strings. An explicit
+empty `scope` takes precedence over `scp`. The mapper copies claims into
+`Principal.claims` and rejects malformed identity, scope, and expiry values.
+It does not verify signatures, issuer, audience, or token activity.
+
+Empty claims produce `Principal()`. This permits opaque token integrations, but
+does not assign a distinct user identity. An application that needs separate
+session owners must supply a stable subject or client ID.
+
+The default mapper leaves `namespace=None`; it does not trust a namespace claim.
+Use a custom mapper to choose an application namespace from verified claims:
+
+<!-- name: async test_jwt_verifiers -->
+```python
+from collections.abc import Mapping
+from dataclasses import replace
+from typing import Any
+
+from aiohttp_tiny_mcp import Principal, principal_from_claims
+
+
+def tenant_principal(claims: Mapping[str, Any]) -> Principal:
+    principal = principal_from_claims(claims)
+    if claims.get("org") != "example-team":
+        raise ValueError("organization is not allowed")
+    return replace(principal, namespace="example-team")
+
+
+verifier = HMACJWTVerifier(
+    secret,
+    issuer="https://login.example.com",
+    audience="https://mcp.example.com/mcp",
+    principal=tenant_principal,
+)
+assert await verifier.verify(token) is None  # This token has no allowed organization.
+assert principal_from_claims({}) == Principal()
+```
+
+A shared namespace does not change session ownership: owners still use
+`Principal.identity`, derived from issuer and subject or client ID. Applications
+that need shared storage can explicitly set `namespace=""` in their mapper.
 
 ## Where the metadata has to be served
 
