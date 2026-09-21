@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en" data-endpoint="{{ENDPOINT}}" data-console="{{BASE}}">
+<html lang="en" data-endpoint="{{ENDPOINT}}" data-console="{{BASE}}" data-oauth-client-id="{{OAUTH_CLIENT_ID}}">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -24,6 +24,7 @@
     <span>Can be asked</span>
   </label>
   <button id="connect" class="primary">Connect</button>
+  <button id="authenticate" class="quiet" type="button">Authentication</button>
   <span id="status" class="status">not connected</span>
 </header>
 
@@ -91,6 +92,40 @@
       <button value="cancel" class="quiet">Cancel</button>
       <button value="decline" class="quiet">Decline</button>
       <button value="accept" class="primary" autofocus>Accept</button>
+    </menu>
+  </form>
+</dialog>
+
+<dialog id="authentication" class="question" aria-labelledby="auth-title">
+  <form id="auth-form" autocomplete="off">
+    <h2 id="auth-title">Authentication</h2>
+    <p id="auth-message">Enter credentials for this endpoint.</p>
+    <p id="auth-endpoint" class="auth-endpoint"></p>
+    <button id="auth-oauth" class="primary" type="button" hidden>Sign in with OAuth</button>
+    <p id="auth-oauth-status" class="auth-help" role="status"></p>
+    <label class="auth-field">Method
+      <select id="auth-method">
+        <option value="basic">Basic</option>
+        <option value="bearer">Bearer token</option>
+        <option value="custom">Custom header</option>
+      </select>
+    </label>
+    <label id="auth-user-field" class="auth-field">Username
+      <input id="auth-user" type="text" autocomplete="off" spellcheck="false">
+    </label>
+    <label id="auth-header-field" class="auth-field" hidden>Header name
+      <input id="auth-header" type="text" value="X-API-Key" autocomplete="off" spellcheck="false">
+    </label>
+    <label class="auth-field"><span id="auth-secret-label">Password</span>
+      <input id="auth-secret" type="password" autocomplete="off" required>
+    </label>
+    <p class="auth-help">Credentials stay in this page's memory until you clear them or reload.
+      Enter an existing Bearer token or use configured OAuth sign-in.</p>
+    <p id="auth-error" class="auth-error" role="alert"></p>
+    <menu>
+      <button id="auth-clear" class="quiet" type="button">Clear</button>
+      <button id="auth-cancel" class="quiet" type="button">Cancel</button>
+      <button class="primary" type="submit">Connect</button>
     </menu>
   </form>
 </dialog>

@@ -177,6 +177,17 @@ The classes below provide the API reference.
    :members: holds, expired, identity
 
 .. autoclass:: aiohttp_tiny_mcp.auth.TokenVerifier
+
+.. autoclass:: aiohttp_tiny_mcp.oauth.OAuthFacade
+   :members: resource, routes, setup, cleanup_ctx, is_public, revoke
+
+.. autoclass:: aiohttp_tiny_mcp.oauth.OAuthClient
+
+.. autoclass:: aiohttp_tiny_mcp.oauth.OAuth2
+
+.. autoclass:: aiohttp_tiny_mcp.oauth.Identity
+
+.. autofunction:: aiohttp_tiny_mcp.oauth.github.GitHub
 ```
 
 ## Clients

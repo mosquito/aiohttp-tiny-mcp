@@ -131,8 +131,8 @@ Console("/mcp", title="Demo").setup(app, "/console")
 
 Open `http://127.0.0.1:8080/console`. It speaks the protocol itself on any of
 the five revisions, builds a form from each tool's schema, answers the
-questions a handler asks, and shows every message either way. Three files from
-this package, no build step and no second process.
+questions a handler asks, and shows every message either way. Static files from
+this package need no build step or second process.
 
 An MCP host that supports Streamable HTTP can connect to
 `http://127.0.0.1:8080/mcp`. In an existing aiohttp service, use
@@ -193,7 +193,7 @@ Start with [the documentation overview](https://mosquito.github.io/aiohttp-tiny-
 2. [Quickstart](https://mosquito.github.io/aiohttp-tiny-mcp/quickstart.html): a complete server, launch command, and client call.
 3. [How the server fits together](https://mosquito.github.io/aiohttp-tiny-mcp/pieces.html): a conversation across two workers and each object's lifetime.
 4. [Using Exchange](https://mosquito.github.io/aiohttp-tiny-mcp/guide/exchange.html): request context, progress, questions, and state.
-5. [Authentication](https://mosquito.github.io/aiohttp-tiny-mcp/guide/auth.html): Basic, Bearer, custom subclasses, multiple policies, and permissions.
+5. [Authentication](https://mosquito.github.io/aiohttp-tiny-mcp/guide/auth.html): Basic, Bearer, GitHub sign-in, custom policies, and permissions.
 6. [Stores and hubs](https://mosquito.github.io/aiohttp-tiny-mcp/deployment/stores.html): shared backend contracts and deployment requirements.
 7. [Extensions and skills](https://mosquito.github.io/aiohttp-tiny-mcp/guide/extensions.html): custom methods, skill directories, and resources for older clients.
 

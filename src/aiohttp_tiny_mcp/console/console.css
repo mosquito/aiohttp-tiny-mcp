@@ -75,7 +75,7 @@ body {
 .field.grow > input { flex: 1 1 auto; min-width: 8em; }
 .field > span { color: var(--ink-soft); font-size: 12px; }
 
-input[type="text"], input[type="number"], select, textarea {
+input[type="text"], input[type="password"], input[type="number"], select, textarea {
   font: inherit;
   color: inherit;
   background: var(--page);
@@ -84,7 +84,7 @@ input[type="text"], input[type="number"], select, textarea {
   padding: 5px 8px;
 }
 
-input[type="text"]:focus, select:focus, textarea:focus, input[type="number"]:focus {
+input[type="text"]:focus, input[type="password"]:focus, select:focus, textarea:focus, input[type="number"]:focus {
   outline: 2px solid var(--accent);
   outline-offset: -1px;
 }
@@ -532,3 +532,10 @@ dialog.question #question-text p { margin: 0 0 8px; }
 dialog.question #question-text :last-child { margin-bottom: 0; }
 dialog.question menu { display: flex; justify-content: flex-end; gap: 8px; margin: 18px 0 0; padding: 0; }
 dialog.question .argument { margin-bottom: 10px; }
+
+.auth-field { display: flex; flex-direction: column; gap: 4px; margin: 12px 0; }
+.auth-field[hidden] { display: none; }
+.auth-field > input, .auth-field > select { width: 100%; min-width: 0; }
+.auth-endpoint { overflow-wrap: anywhere; font-family: var(--mono); }
+.auth-help { color: var(--ink-soft); font-size: 12px; }
+.auth-error { color: var(--bad); }

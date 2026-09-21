@@ -54,8 +54,8 @@ def test_skills_discovery_paging_and_modern_headers():
         : {skills: [skill], nextCursor: "page-two"};
       else if (body.method === "skills/get") result = {skill};
       else throw new Error(body.method);
-      return {headers: new Headers({"Content-Type": "application/json"}),
-        text: async () => JSON.stringify({jsonrpc: "2.0", id: body.id, result})};
+      return new Response(JSON.stringify({jsonrpc: "2.0", id: body.id, result}),
+        {headers: {"Content-Type": "application/json"}});
     };
     const client = new Client("http://localhost/mcp", "2026-07-28", {onFrame() {}});
     await client.initialize();

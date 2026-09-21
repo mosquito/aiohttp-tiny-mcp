@@ -17,6 +17,7 @@ FILES = {
     "": ("index.html", "text/html"),
     "console.js": ("console.js", "application/javascript"),
     "console.css": ("console.css", "text/css"),
+    "oauth-callback": ("oauth-callback.html", "text/html"),
 }
 
 
@@ -31,12 +32,14 @@ class Console:
         description: str = "",
         template: str | Path | None = None,
         variables: Mapping[str, str] | None = None,
+        oauth_client_id: str | None = None,
     ) -> None:
         self.endpoint_path = endpoint_path
         self.title = title
         self.description = description
         self.template = Path(template) if template else HERE / "index.html"
         self.variables = dict(variables or {})
+        self.oauth_client_id = oauth_client_id
 
     def substitutions(self, base: str) -> dict[str, str]:
         return {
@@ -44,6 +47,7 @@ class Console:
             "BASE": base,
             "TITLE": self.title,
             "DESCRIPTION": self.description,
+            "OAUTH_CLIENT_ID": self.oauth_client_id or "",
             **self.variables,
         }
 
@@ -80,7 +84,7 @@ class Console:
         )
 
     def routes(self, path: str = "/console") -> list[web.RouteDef]:
-        """The page, either way it is addressed, and its two files."""
+        """The page, its assets, and the OAuth callback page."""
         base = path.rstrip("/")
         log.debug("console at %s, for the endpoint at %s", base, self.endpoint_path)
         return [
@@ -88,6 +92,22 @@ class Console:
             web.get(f"{base}/", self.handle),
             web.get(f"{base}/{{file}}", self.handle),
         ]
+
+    @staticmethod
+    def is_public(request: web.Request) -> bool:
+        """Identify a mounted console asset for application authentication middleware.
+
+        Check the resolved handler, method, and file allowlist. No path prefix
+        is trusted, and an unmounted console grants no exemptions.
+        """
+        handler = request.match_info.handler
+        console = getattr(handler, "__self__", None)
+        return (
+            request.method in {"GET", "HEAD"}
+            and isinstance(console, Console)
+            and handler == console.handle
+            and request.match_info.get("file", "") in FILES
+        )
 
     def setup(self, app: web.Application, path: str = "/console") -> web.Application:
         log.debug("adding the console routes to %r", app)

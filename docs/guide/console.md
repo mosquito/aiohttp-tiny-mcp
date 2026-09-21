@@ -227,17 +227,15 @@ bundled page uses, or the script has nothing to fill in.
 
 ## Before you mount it
 
-The console is an HTTP client. MCP routes enforce their configured policies;
-the static HTML, JavaScript, and CSS have separate access rules. See the
-[authentication guide](auth.md) for endpoint protection and
-[credential handling](auth.md#sending-credentials). `Registry(auth=...)` does
-not protect the console's static routes or add a login UI.
+The console is an HTTP client. Its authentication dialog supports Basic, Bearer
+tokens, custom headers, and configured OAuth sign-in. See the [authentication guide](auth.md#console-authentication)
+for credential handling and public asset routing. Application-wide middleware
+can use `Console.is_public(request)` to identify public console requests.
 
-## Three files, no build
+## Static files, no build
 
-One HTML, one CSS, one JavaScript, served from the package. No bundler, no
-dependencies, no step between editing and reloading.
+The console serves HTML, CSS, JavaScript, and an OAuth callback page from the
+package. No bundler, no dependencies, no step between editing and reloading.
 
-It speaks `2026-07-28` today. What differs between revisions is stated once at
-the top of `console.js`, in the same shape the Python adapters use, which is
-where the others will go.
+It supports every library protocol revision. Differences between revisions are
+defined in `REVISIONS` at the top of `console.js`.

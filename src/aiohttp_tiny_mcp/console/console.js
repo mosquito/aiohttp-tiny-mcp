@@ -64,6 +64,170 @@ const SKILLS_EXTENSION = "io.modelcontextprotocol/skills";
 const DRIVEN = new Set([ANSWERS_KEY, STATE_KEY]);
 
 
+function authenticationSchemes(challenge) {
+  // Commas separate challenges and parameters, except inside quoted strings.
+  const parts = challenge.match(/(?:[^,"]|"(?:\\.|[^"\\])*")+/g) || [];
+  const schemes = parts.flatMap((part) => {
+    const match = part.trim().match(/^([\w!#$%&'*+.^`|~-]+)(?:\s+(?!\s*=)|$)/);
+    return match ? [match[1].toLowerCase()] : [];
+  });
+  return [...new Set(schemes)];
+}
+
+function bearerMetadata(challenge) {
+  const parts = challenge.match(/(?:[^,"]|"(?:\\.|[^"\\])*")+/g) || [];
+  let bearer = false;
+  for (let part of parts) {
+    part = part.trim();
+    const scheme = part.match(/^([\w!#$%&'*+.^`|~-]+)(?:\s+(?!\s*=)|$)/);
+    if (scheme) {
+      bearer = scheme[1].toLowerCase() === "bearer";
+      part = part.slice(scheme[0].length);
+    }
+    const param = part.match(/^resource_metadata\s*=\s*"((?:\\.|[^"\\])*)"$/i);
+    if (bearer && param) return param[1].replace(/\\(.)/g, "$1");
+  }
+  return null;
+}
+
+class HttpError extends Error {
+  constructor(response) {
+    const status = response.status;
+    super(status === 401 ? "Authentication required (HTTP 401)."
+      : status === 403 ? "Access denied (HTTP 403)."
+      : `HTTP ${status}: request failed.`);
+    this.status = status;
+    this.schemes = authenticationSchemes(response.headers.get("WWW-Authenticate") || "");
+    this.resourceMetadata = bearerMetadata(response.headers.get("WWW-Authenticate") || "");
+  }
+}
+
+function oauthUrl(value, origin) {
+  const url = new URL(value);
+  if (url.origin !== origin || url.username || url.password || url.hash) {
+    throw new Error("Console OAuth endpoints must use this server's origin without URL credentials or fragments.");
+  }
+  return url;
+}
+
+async function oauthJson(url, options = {}) {
+  const response = await fetch(url, {credentials: "omit", redirect: "error", ...options});
+  if (!response.ok) throw new Error(`OAuth request failed (HTTP ${response.status}).`);
+  const data = await response.json();
+  if (!data || typeof data !== "object" || Array.isArray(data) || data.error) {
+    throw new Error("The OAuth server returned an invalid response.");
+  }
+  return data;
+}
+
+async function discoverOAuth(metadataUri, endpoint) {
+  const origin = new URL(endpoint).origin;
+  const resource = await oauthJson(oauthUrl(metadataUri, origin));
+  // Query parameters can select a wire revision without changing the MCP resource.
+  const target = new URL(endpoint);
+  target.search = "";
+  const resourceUrl = oauthUrl(resource.resource, origin);
+  if (resourceUrl.href !== target.href) throw new Error("OAuth metadata describes another MCP resource.");
+  const issuer = resource.authorization_servers?.[0];
+  const issuerUrl = oauthUrl(issuer, origin);
+  if (issuerUrl.search) throw new Error("The OAuth issuer must not contain a query string.");
+  const metadataUrl = new URL("/.well-known/oauth-authorization-server" +
+    issuerUrl.pathname.replace(/\/$/, ""), origin);
+  const server = await oauthJson(metadataUrl);
+  if (server.issuer !== issuer || server.authorization_response_iss_parameter_supported !== true ||
+      !server.code_challenge_methods_supported?.includes("S256") ||
+      !server.response_types_supported?.includes("code") ||
+      !server.token_endpoint_auth_methods_supported?.includes("none")) {
+    throw new Error("The OAuth server must support public clients, issuer validation, and PKCE S256.");
+  }
+  return {
+    issuer, resource: resource.resource,
+    authorize: oauthUrl(server.authorization_endpoint, origin).href,
+    token: oauthUrl(server.token_endpoint, origin).href,
+    scopes: Array.isArray(resource.scopes_supported) ? resource.scopes_supported : [],
+  };
+}
+
+function oauthRandom() {
+  const bytes = crypto.getRandomValues(new Uint8Array(32));
+  return oauthBase64(bytes);
+}
+
+function oauthBase64(bytes) {
+  return btoa(String.fromCharCode(...bytes)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+async function oauthChallenge(verifier) {
+  return oauthBase64(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier))));
+}
+
+async function exchangeOAuthCode(config, clientId, redirectUri, verifier, state, response) {
+  if (response.state !== state || response.iss !== config.issuer) {
+    throw new Error("The OAuth response state or issuer does not match this sign-in.");
+  }
+  if (response.error || typeof response.code !== "string" || !response.code) {
+    throw new Error("OAuth sign-in was refused or cancelled.");
+  }
+  const result = await oauthJson(config.token, {
+    method: "POST",
+    headers: {"Content-Type": "application/x-www-form-urlencoded", Accept: "application/json"},
+    body: new URLSearchParams({grant_type: "authorization_code", client_id: clientId,
+      redirect_uri: redirectUri, resource: config.resource, code: response.code, code_verifier: verifier}),
+  });
+  if (typeof result.access_token !== "string" || !result.access_token ||
+      String(result.token_type).toLowerCase() !== "bearer") {
+    throw new Error("The OAuth server returned no usable Bearer token.");
+  }
+  return result.access_token;
+}
+
+class ConsoleCredentials {
+  constructor() { this.clear(); }
+
+  clear() {
+    this.endpoint = null;
+    this.method = null;
+    this.headers = {};
+  }
+
+  set(endpoint, method, username, secret, header) {
+    let name = "Authorization";
+    let value;
+    if (method === "basic") {
+      if (username.includes(":") || /[\x00-\x1f\x7f]/.test(username + secret)) {
+        throw new Error("Basic credentials cannot contain control characters or a colon in the username.");
+      }
+      const bytes = new TextEncoder().encode(`${username}:${secret}`);
+      let binary = "";
+      bytes.forEach((byte) => { binary += String.fromCharCode(byte); });
+      value = `Basic ${btoa(binary)}`;
+    } else if (method === "bearer") {
+      if (!/^[A-Za-z0-9._~+/-]+=*$/.test(secret)) throw new Error("Enter a valid Bearer token.");
+      value = `Bearer ${secret}`;
+    } else if (method === "custom") {
+      name = header.trim();
+      // Restrict custom credentials to Authorization and application X-* headers.
+      if (!/^(Authorization|X-[A-Za-z0-9-]+)$/i.test(name)) {
+        throw new Error("Use Authorization or an X-* authentication header.");
+      }
+      if (!/^[\x20-\x7e]+$/.test(secret) || secret !== secret.trim()) {
+        throw new Error("The header value must use printable ASCII without surrounding spaces.");
+      }
+      value = secret;
+    } else {
+      throw new Error("Choose an authentication method.");
+    }
+    this.endpoint = endpoint;
+    this.method = method;
+    this.headers = { [name]: value };
+  }
+
+  forEndpoint(endpoint) {
+    return endpoint === this.endpoint ? { ...this.headers } : {};
+  }
+}
+
+
 class Client {
   constructor(url, version, options) {
     this.url = url;
@@ -73,6 +237,9 @@ class Client {
     this.onFrame = options.onFrame;       // every message, either way
     this.onNotify = options.onNotify;     // progress, logging, changes
     this.onQuestion = options.onQuestion; // returns an ElicitResult
+    this.authHeaders = { ...(options.authHeaders || {}) };
+    this.onAuthError = options.onAuthError;
+    this.abort = new AbortController();
     // Return the server-issued session id on subsequent requests.
     this.sessionId = null;
     this.counter = 0;
@@ -104,6 +271,7 @@ class Client {
 
   headers(method, name) {
     const headers = {
+      ...this.authHeaders,
       "Content-Type": "application/json",
       Accept: "application/json, text/event-stream",
     };
@@ -116,16 +284,40 @@ class Client {
     return headers;
   }
 
-  /* Read frames before EOF so pushed questions can be answered while the stream stays open. */
-  async *frames(envelope, method, name) {
-    const headers = this.headers(method, name);
+  async post(envelope, method, name) {
     this.onFrame("sent", envelope);
     const response = await fetch(this.url, {
       method: "POST",
-      headers,
+      headers: this.headers(method, name),
       body: JSON.stringify(envelope),
+      credentials: "omit",
+      redirect: "error",
+      signal: this.abort.signal,
     });
+    if (!response.ok) {
+      const error = new HttpError(response);
+      const authenticationFailure = error.status === 401 ||
+        (error.status === 403 && error.schemes.length > 0);
+      // Preserve protocol error codes and data on non-authentication failures.
+      if (!authenticationFailure) {
+        const body = await response.json().catch(() => null);
+        if (body?.jsonrpc === "2.0" && body.error) {
+          this.onFrame("received", body);
+          throw Object.assign(new Error(body.error.message), {
+            code: body.error.code, data: body.error.data,
+          });
+        }
+      }
+      if (!response.bodyUsed) await response.body?.cancel();
+      if (authenticationFailure) this.onAuthError?.(error);
+      throw error;
+    }
+    return response;
+  }
 
+  /* Read frames before EOF so pushed questions can be answered while the stream stays open. */
+  async *frames(envelope, method, name) {
+    const response = await this.post(envelope, method, name);
     const issued = response.headers.get("Mcp-Session-Id");
     if (issued) this.sessionId = issued;
 
@@ -194,12 +386,8 @@ class Client {
 
   async notify(method, params) {
     const envelope = { jsonrpc: "2.0", method, params: this.decorate(params || {}, method) };
-    this.onFrame("sent", envelope);
-    await fetch(this.url, {
-      method: "POST",
-      headers: this.headers(method),
-      body: JSON.stringify(envelope),
-    });
+    const response = await this.post(envelope, method);
+    await response.body?.cancel();
   }
 
   async incoming(frame) {
@@ -216,12 +404,8 @@ class Client {
           id: frame.id,
           error: { code: -32601, message: `unsupported: ${frame.method}` },
         };
-    this.onFrame("sent", reply);
-    await fetch(this.url, {
-      method: "POST",
-      headers: this.headers("elicitation/create"),
-      body: JSON.stringify(reply),
-    });
+    const response = await this.post(reply, "elicitation/create");
+    await response.body?.cancel();
   }
 
 
@@ -270,6 +454,7 @@ class Client {
       templates = await this.pages("resources/templates/list", "resourceTemplates");
     } catch (error) {
       /* A server with no templates may not expose the method. */
+      if (error instanceof HttpError) throw error;
     }
     return { resources, templates };
   }
@@ -355,6 +540,23 @@ function encodeHeader(value) {
 
 
 const page = {
+  authOAuth: document.getElementById("auth-oauth"),
+  authOAuthStatus: document.getElementById("auth-oauth-status"),
+  authenticate: document.getElementById("authenticate"),
+  authentication: document.getElementById("authentication"),
+  authForm: document.getElementById("auth-form"),
+  authMessage: document.getElementById("auth-message"),
+  authEndpoint: document.getElementById("auth-endpoint"),
+  authMethod: document.getElementById("auth-method"),
+  authUser: document.getElementById("auth-user"),
+  authUserField: document.getElementById("auth-user-field"),
+  authHeader: document.getElementById("auth-header"),
+  authHeaderField: document.getElementById("auth-header-field"),
+  authSecret: document.getElementById("auth-secret"),
+  authSecretLabel: document.getElementById("auth-secret-label"),
+  authError: document.getElementById("auth-error"),
+  authClear: document.getElementById("auth-clear"),
+  authCancel: document.getElementById("auth-cancel"),
   endpoint: document.getElementById("endpoint"),
   revision: document.getElementById("revision"),
   answerable: document.getElementById("answerable"),
@@ -386,6 +588,183 @@ let chosen = null;
 let endpointUrl = null;
 //: Where the page was told the endpoint is. The field starts from it and may add a query.
 let configuredEndpoint = null;
+const credentials = new ConsoleCredentials();
+let authEndpoint = null;
+let authSchemes = [];
+let oauthConfig = null;
+let oauthMetadata = null;
+let oauthGeneration = 0;
+let cancelOAuth = null;
+
+function resetOAuth() {
+  oauthGeneration++;
+  oauthConfig = null;
+  oauthMetadata = null;
+  cancelOAuth?.();
+  page.authOAuth.hidden = true;
+  page.authOAuthStatus.textContent = "";
+}
+
+async function offerOAuth(metadataUri, endpoint) {
+  if (!document.documentElement.dataset.oauthClientId) return;
+  const generation = ++oauthGeneration;
+  oauthConfig = null;
+  page.authOAuth.hidden = true;
+  page.authOAuthStatus.textContent = "Checking OAuth sign-in…";
+  try {
+    const found = await discoverOAuth(metadataUri, endpoint);
+    if (generation !== oauthGeneration) return;
+    oauthConfig = found;
+    page.authOAuth.hidden = false;
+    page.authOAuthStatus.textContent = "Sign in, or enter credentials below.";
+  } catch (error) {
+    if (generation === oauthGeneration) page.authOAuthStatus.textContent = error.message;
+  }
+}
+
+async function signInOAuth() {
+  if (!oauthConfig) return;
+  cancelOAuth?.();
+  const config = oauthConfig;
+  const endpoint = chosenEndpoint().href;
+  const popup = window.open("about:blank", "_blank", "popup,width=600,height=760");
+  if (!popup) { page.authError.textContent = "Allow pop-up windows to sign in."; return; }
+  const verifier = oauthRandom(), state = oauthRandom();
+  const redirectUri = new URL(document.documentElement.dataset.console + "/oauth-callback", location.origin).href;
+  const clientId = document.documentElement.dataset.oauthClientId;
+  let cancelled = false;
+  cancelOAuth = () => { cancelled = true; popup.close(); };
+  page.authOAuth.disabled = true;
+  page.authError.textContent = "";
+  let cleanup = () => {};
+  try {
+    const codeChallenge = await oauthChallenge(verifier);
+    if (cancelled) throw new Error("OAuth sign-in was cancelled.");
+    const response = await new Promise((resolve, reject) => {
+      const listener = (event) => {
+        if (event.origin !== location.origin || event.source !== popup ||
+            event.data?.type !== "mcp-oauth-response") return;
+        resolve(event.data.response);
+      };
+      const started = Date.now();
+      const timer = setInterval(() => {
+        if (popup.closed || Date.now() - started > 300000) reject(new Error("OAuth sign-in was cancelled or timed out."));
+      }, 500);
+      cancelOAuth = () => {
+        cancelled = true;
+        popup.close();
+        reject(new Error("OAuth sign-in was cancelled."));
+      };
+      cleanup = () => {
+        window.removeEventListener("message", listener);
+        clearInterval(timer);
+        cancelOAuth = null;
+        popup.close();
+      };
+      window.addEventListener("message", listener);
+      const authorize = new URL(config.authorize);
+      for (const [key, value] of Object.entries({response_type: "code", client_id: clientId,
+        redirect_uri: redirectUri, resource: config.resource, scope: config.scopes.join(" "),
+        state, code_challenge: codeChallenge, code_challenge_method: "S256"})) {
+        authorize.searchParams.set(key, value);
+      }
+      popup.location.href = authorize.href;
+    });
+    const token = await exchangeOAuthCode(config, clientId, redirectUri, verifier, state, response);
+    if (cancelled) throw new Error("OAuth sign-in was cancelled.");
+    if (endpoint !== chosenEndpoint().href) throw new Error("The MCP endpoint changed during sign-in.");
+    credentials.set(endpoint, "bearer", "", token, "");
+    page.authenticate.textContent = "Authentication: OAuth";
+    page.authentication.close();
+    disconnect();
+    await connect();
+  } catch (error) {
+    page.authError.textContent = error.message;
+  } finally {
+    cleanup();
+    cancelOAuth = null;
+    popup.close();
+    page.authOAuth.disabled = false;
+  }
+}
+
+function clearCredentials() {
+  credentials.clear();
+  page.authUser.value = "";
+  page.authSecret.value = "";
+  page.authenticate.textContent = "Authentication";
+}
+
+function authFields() {
+  const method = page.authMethod.value;
+  page.authUserField.hidden = method !== "basic";
+  page.authHeaderField.hidden = method !== "custom";
+  page.authSecretLabel.textContent = { basic: "Password", bearer: "Token", custom: "Header value" }[method];
+  page.authSecret.value = "";
+  page.authError.textContent = "";
+}
+
+function openAuthentication(error) {
+  let url;
+  try { url = chosenEndpoint(); }
+  catch (failure) { say(failure.message, "off"); return; }
+  if (authEndpoint !== url.href) {
+    clearCredentials();
+    resetOAuth();
+    authSchemes = [];
+    authEndpoint = url.href;
+  }
+  if (error) authSchemes = error.schemes;
+  if (error?.resourceMetadata && error.resourceMetadata !== oauthMetadata) {
+    oauthMetadata = error.resourceMetadata;
+    offerOAuth(oauthMetadata, url.href);
+  }
+  const offered = authSchemes.filter((scheme) => scheme === "basic" || scheme === "bearer");
+  page.authMethod.value = credentials.method || offered[0] || (authSchemes.length ? "custom" : "basic");
+  page.authMessage.textContent = authSchemes.length
+    ? `Server authentication: ${authSchemes.join(", ")}.`
+    : "Choose the method your server accepts.";
+  page.authEndpoint.textContent = url.pathname + url.search;
+  authFields();
+  if (error) page.authError.textContent = error.message;
+  if (!page.authentication.open) page.authentication.showModal();
+}
+
+function setupAuthentication() {
+  page.authOAuth.onclick = signInOAuth;
+  page.authenticate.onclick = () => openAuthentication();
+  page.authMethod.onchange = authFields;
+  page.authCancel.onclick = () => page.authentication.close();
+  page.authentication.addEventListener("close", () => {
+    page.authSecret.value = "";
+    cancelOAuth?.();
+  });
+  page.authClear.onclick = () => {
+    disconnect();
+    clearCredentials();
+    page.authentication.close();
+  };
+  page.authForm.onsubmit = async (event) => {
+    event.preventDefault();
+    try {
+      const url = chosenEndpoint();
+      credentials.set(url.href, page.authMethod.value, page.authUser.value,
+        page.authSecret.value, page.authHeader.value);
+      page.authenticate.textContent = `Authentication: ${page.authMethod.selectedOptions[0].textContent}`;
+      page.authentication.close();
+      disconnect();
+      await connect();
+    } catch (error) {
+      page.authError.textContent = error.message;
+    }
+  };
+  page.endpoint.addEventListener("input", () => {
+    clearCredentials();
+    resetOAuth();
+    authEndpoint = null;
+    authSchemes = [];
+  });
+}
 
 // The endpoint field: the path, plus any query string a person adds, such as
 // `?mcp=2025-06-18` to pin a revision or whatever the server reads from the URL.
@@ -408,6 +787,8 @@ function chosenEndpoint() {
   if (url.origin !== location.origin) {
     throw new Error(`The endpoint must be on this server, not ${url.origin}.`);
   }
+  if (url.username || url.password) throw new Error("Enter credentials through Authentication.");
+  url.hash = "";
   page.endpoint.value = url.pathname + url.search;
   localStorage.setItem(endpointKey(), page.endpoint.value);
   return url;
@@ -832,6 +1213,7 @@ async function loadCatalogue() {
       }, (skill) => choose({ kind: "skill", item: skill }));
       if (!skills.length) into.append(element("p", "empty", "No skills listed. Use skills/get with a known URI."));
     } catch (error) {
+      if (error instanceof HttpError) throw error;
       into.append(element("p", "empty", `Could not list skills: ${error.message}`));
     }
   }
@@ -1310,13 +1692,14 @@ async function invoke() {
       reportValue("Error data", error.data, true);
     }
   } finally {
-    page.invoke.disabled = false;
+    page.invoke.disabled = !client;
   }
 }
 
 
 function disconnect() {
   // Sessions expire server-side; there is no close request.
+  client?.abort.abort();
   client = null;
   chosen = null;
   page.catalogue.textContent = "";
@@ -1336,6 +1719,7 @@ function disconnect() {
 
 async function connect() {
   page.connect.disabled = true;
+  page.authenticate.disabled = true;
   page.revision.disabled = true;
   page.answerable.disabled = true;
   page.endpoint.disabled = true;
@@ -1343,7 +1727,10 @@ async function connect() {
   page.outcome.textContent = "";
   try {
     endpointUrl = chosenEndpoint();
+    if (credentials.endpoint && credentials.endpoint !== endpointUrl.href) clearCredentials();
     client = new Client(endpointUrl.href, page.revision.value, {
+      authHeaders: credentials.forEndpoint(endpointUrl.href),
+      onAuthError: openAuthentication,
       answerable: page.answerable.checked,
       onFrame: record,
       onNotify: noticed,
@@ -1371,6 +1758,7 @@ async function connect() {
     report("Could not connect", connectionHelp(error), true);
   } finally {
     page.connect.disabled = false;
+    page.authenticate.disabled = false;
   }
 }
 
@@ -1437,6 +1825,7 @@ function markTraffic() {
 
 
 function start() {
+  setupAuthentication();
   Object.keys(REVISIONS).forEach((version) => {
     const option = element("option", null, version);
     option.value = version;
@@ -1484,4 +1873,17 @@ function start() {
   connect();
 }
 
-start();
+if (document.documentElement.dataset.oauthCallback === "true") {
+  const params = new URLSearchParams(location.search);
+  const response = Object.fromEntries(params);
+  history.replaceState(null, "", location.pathname);
+  if (window.opener && ![...params.keys()].some((key) => params.getAll(key).length !== 1)) {
+    window.opener.postMessage({type: "mcp-oauth-response", response}, location.origin);
+    document.getElementById("oauth-result").textContent = "Sign-in returned to the console. You can close this window.";
+    window.close();
+  } else {
+    document.getElementById("oauth-result").textContent = "Open the console and start sign-in again.";
+  }
+} else {
+  start();
+}
