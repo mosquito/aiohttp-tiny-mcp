@@ -7,6 +7,9 @@ a resource or a prompt is.
 Everything is declared on the `Registry`, once, with no mention of a protocol
 revision.
 
+For `scopes=`, verified `Principal` injection, and application access checks,
+see [handler permissions](auth.md#handler-permissions) in the authentication guide.
+
 <!-- name: test_tools -->
 ```python
 from pydantic import BaseModel, Field

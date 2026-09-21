@@ -4,6 +4,9 @@
 code is the same for all of them. `StdioClient` is the same class over a
 subprocess's standard streams.
 
+For protected HTTP servers, follow
+[Sending credentials](auth.md#sending-credentials) in the authentication guide.
+
 <!-- name: async test_client; fixtures: serve -->
 ```python
 from pydantic import BaseModel

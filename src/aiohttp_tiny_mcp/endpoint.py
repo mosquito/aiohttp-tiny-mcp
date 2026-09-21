@@ -8,13 +8,13 @@ import logging
 import re
 from collections.abc import Mapping
 from dataclasses import replace
-from functools import cached_property
+from functools import cached_property, partial
 from typing import Any
 
 from aiohttp import web
 
 from .adapter import Adapter
-from .auth import Authorization, Unauthorized
+from .auth import Authentication, Principal, Unauthorized
 from .core import (
     Call,
     DecodeFailure,
@@ -50,6 +50,7 @@ from .tasks import stop
 log = logging.getLogger("aiohttp_tiny_mcp")
 
 MAY_ASK = frozenset({Operation.CALL_TOOL, Operation.GET_PROMPT, Operation.READ_RESOURCE})
+AUTH_POLICY: web.RequestKey[Authentication] = web.RequestKey("mcp_auth_policy", Authentication)
 
 
 def origin_pattern(spec: str) -> re.Pattern[str]:
@@ -127,10 +128,10 @@ class Endpoint:
     ) -> list[web.RouteDef]:
         """The endpoint, and where a client looks to find out how to reach it.
 
-        The metadata route is included whenever tokens are verified, because a
-        client that has no token learns where to get one from there and
-        nowhere else. Pass `metadata=False` where this application cannot
-        serve that path -- see `metadata_routes`.
+        Metadata routes are included when a policy declares them. OAuth Bearer
+        policies publish protected-resource metadata; Basic policies do not.
+        Pass `metadata=False` when this application cannot serve those paths.
+        See `metadata_routes`.
         """
         log.debug("MCP endpoint at %s, named %r", path, name)
         found = [web.route("*", path, self.view, name=name)]
@@ -141,33 +142,40 @@ class Endpoint:
     def metadata_routes(self, *, name: str | None = "mcp") -> list[web.RouteDef]:
         """RFC 9728 metadata, for the application that owns the site root.
 
-        Empty where nothing verifies tokens. The path comes from the resource
+        Empty when no policy declares metadata. The path comes from the resource
         URL, and RFC 8615 puts a well-known URI directly under the authority,
         so a prefix must not reach it: an endpoint mounted with `add_subapp`
         takes `routes(metadata=False)` and leaves these to the root
         application.
         """
-        auth = self.registry.auth
-        if auth is None:
-            log.debug("no resource metadata route: nothing verifies tokens")
-            return []
-        log.debug("resource metadata at %s, for resource %s", auth.metadata_path, auth.resource)
-        return [
-            web.get(
-                auth.metadata_path,
-                self.metadata,
-                name=f"{name}-resource-metadata" if name else None,
+        found: list[web.RouteDef] = []
+        documents: dict[str, dict[str, Any]] = {}
+        for auth in self.registry.auth_policies:
+            path = auth.metadata_path
+            if path is None:
+                continue
+            document = auth.metadata()
+            if path in documents:
+                if documents[path] != document:
+                    raise ValueError(f"conflicting authentication metadata at {path}")
+                continue
+            documents[path] = document
+            suffix = f"-policy{len(found)}" if found else ""
+            found.append(
+                web.get(
+                    path,
+                    partial(self.metadata, auth=auth),
+                    name=f"{name}-resource-metadata{suffix}" if name else None,
+                )
             )
-        ]
+        return found
 
-    async def metadata(self, request: web.Request) -> web.Response:
+    async def metadata(self, request: web.Request, *, auth: Authentication) -> web.Response:
         """RFC 9728: what this resource is and who issues tokens for it."""
-        auth = self.registry.auth
-        assert auth is not None, "the metadata route is only added with auth"
         return web.json_response(auth.metadata(), headers={"Cache-Control": "public, max-age=3600"})
 
-    async def verified(self, request: web.Request) -> Any:
-        """Who is calling, or `None` where nothing verifies tokens.
+    async def verified(self, request: web.Request) -> Principal | None:
+        """Return the verified caller, or None when no authentication is configured.
 
         Raises `Unauthorized`, which the caller turns into the refusal a
         client can act on. The namespace is set from what was verified, so
@@ -175,19 +183,34 @@ class Endpoint:
         checked rather than by a header the caller chose. An application that
         set its own namespace first keeps it.
         """
-        auth = self.registry.auth
-        if auth is None:
+        policies = self.registry.auth_policies
+        if not policies:
             return None
-        principal = await auth.principal(request.headers.get("Authorization"))
-        if auth.namespace_from_token and current() is None:
-            namespace.set(principal.identity)
-        return principal
+        refusals: list[Unauthorized] = []
+        for auth in policies:
+            try:
+                principal = auth.check(await auth.authenticate(request))
+            except Unauthorized as refusal:
+                refusals.append(refusal)
+                continue
+            request[AUTH_POLICY] = auth
+            if auth.namespace_from_token and current() is None:
+                namespace.set(
+                    principal.namespace if principal.namespace is not None else principal.identity
+                )
+            return principal
+        # Preserve scope failures when another policy merely found no credentials.
+        raise next((refusal for refusal in refusals if refusal.status == 403), refusals[-1])
 
-    def refuse(self, auth: Authorization, refusal: Unauthorized) -> web.Response:
+    def refuse(self, refusal: Unauthorized) -> web.Response:
         return web.json_response(
             {"error": refusal.error, "error_description": refusal.description},
             status=refusal.status,
-            headers={"WWW-Authenticate": auth.challenge(refusal)},
+            headers={
+                "WWW-Authenticate": ", ".join(
+                    auth.challenge(refusal) for auth in self.registry.auth_policies
+                )
+            },
         )
 
     def setup(
@@ -282,7 +305,7 @@ class Endpoint:
             principal = await self.verified(request)
         except Unauthorized as refusal:
             assert self.registry.auth is not None
-            return self.refuse(self.registry.auth, refusal)
+            return self.refuse(refusal)
 
         raw = await request.read()
         pre = Preamble.of(raw, request.headers, request.query)
@@ -395,7 +418,7 @@ class Endpoint:
             principal = await self.verified(request)
         except Unauthorized as refusal:
             assert self.registry.auth is not None
-            return self.refuse(self.registry.auth, refusal)
+            return self.refuse(refusal)
 
         try:
             record = await self.load_session(request, principal)
@@ -455,7 +478,9 @@ class Endpoint:
                 log.debug("ignoring Last-Event-ID %r: not from this hub", last)
         return await hub.subscribe(where, wait=wait)
 
-    def owns(self, record: SessionRecord | None, principal: Any) -> bool:
+    def owns(
+        self, record: SessionRecord | None, principal: Principal | None, request: web.Request
+    ) -> bool:
         """Whether this caller may use this session.
 
         A session id travels in a header, so a copied one is a credential.
@@ -463,7 +488,7 @@ class Endpoint:
         held in this process, which is what lets a session opened on one
         worker be used on another.
         """
-        auth = self.registry.auth
+        auth = request.get(AUTH_POLICY)
         if record is None or auth is None or not auth.bind_sessions:
             return True
         owner = stored_owner(record)
@@ -493,7 +518,7 @@ class Endpoint:
         if not session_id:
             return None
         record = await self.registry.session_store.get(scoped(session_id))
-        if record is None or not self.owns(record, principal):
+        if record is None or not self.owns(record, principal, request):
             raise Rejected(Failure(FailureKind.SESSION_NOT_FOUND, "session not found"))
         await self.registry.session_store.touch(
             scoped(session_id), ttl_seconds=self.registry.session_ttl_seconds

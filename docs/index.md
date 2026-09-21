@@ -20,8 +20,8 @@ automatically.
 2. [Tools, resources, and prompts](concepts.md) — choose what to expose.
 3. [How the server fits together](pieces.md) — understand `Exchange`,
    `SessionStore`, and `Hub` before deploying more than one worker.
-4. [Authentication](guide/auth.md) — protect a standalone endpoint or mount it
-   in an aiohttp application that already verifies JWTs.
+4. [Authentication](guide/auth.md) — configure Basic, Bearer, custom policies,
+   and permissions, or reuse existing application middleware.
 
 The library supports `2024-11-05`, `2025-03-26`, `2025-06-18`, `2025-11-25`,
 and `2026-07-28` from one set of handlers. Use the

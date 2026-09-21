@@ -227,9 +227,11 @@ bundled page uses, or the script has nothing to fill in.
 
 ## Before you mount it
 
-It authenticates nobody. A console reaches every tool the server offers, so put
-it behind whatever the rest of the deployment is behind, or leave it out where
-that is not true. See [Authentication](auth.md) for endpoint protection.
+The console is an HTTP client. MCP routes enforce their configured policies;
+the static HTML, JavaScript, and CSS have separate access rules. See the
+[authentication guide](auth.md) for endpoint protection and
+[credential handling](auth.md#sending-credentials). `Registry(auth=...)` does
+not protect the console's static routes or add a login UI.
 
 ## Three files, no build
 

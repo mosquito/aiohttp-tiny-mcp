@@ -77,7 +77,8 @@ Protocol metadata is available through `Exchange`; `_meta` is removed before
 validating handler arguments. Method fields, including `inputResponses` and
 `requestState`, remain available to the argument model. HTTP authentication, origin
 checks, and required protocol headers still apply. Apply any method-specific
-authorization in the handler using an injected `Principal`.
+authorization in the handler using an injected `Principal`; see
+[handler permissions](auth.md#handler-permissions).
 
 ## Bundle resources for older clients
 
@@ -444,6 +445,10 @@ Registering an identifier does not implement that extension's behavior:
 | [Apps](https://modelcontextprotocol.io/extensions/apps/overview) | HTML resources, tool UI metadata, CSP, and a host bridge. The viewer does not implement an Apps iframe host; the tool decorator has no `_meta` registration option. |
 | [OAuth Client Credentials](https://modelcontextprotocol.io/extensions/auth/oauth-client-credentials) | An authorization server, client registration, token acquisition/renewal, and token validation. The library's HTTP authorization hooks do not implement the grant. |
 | [Enterprise-Managed Authorization](https://modelcontextprotocol.io/extensions/auth/enterprise-managed-authorization) | IdP trust, ID-JAG issuance/exchange, identity mapping, and policy enforcement. Capability declarations do not perform those flows. |
+
+For the library's endpoint authentication API, see the
+[authentication guide](auth.md). Advertising an OAuth extension does not
+configure an authentication policy.
 
 Use `Exchange` to inspect client capabilities and request metadata. Method
 argument models can declare `inputResponses` and other extension-specific fields. The viewer does not declare Tasks, Apps, or

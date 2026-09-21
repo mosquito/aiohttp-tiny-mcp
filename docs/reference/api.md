@@ -146,13 +146,30 @@ Both backends on a PostgreSQL server. Needs `psycopg`: install
 
 ## Many tenants
 
+See [principal and storage namespaces](../guide/auth.md#principal-and-storage-namespaces)
+for verified identity mapping, and [multitenancy](../deployment/multitenancy.md)
+for storage behavior.
+
 ```{eval-rst}
 .. autofunction:: aiohttp_tiny_mcp.namespaces.scoped
 ```
 
 ## Authentication
 
+Start with the [authentication guide](../guide/auth.md) for configuration,
+subclass examples, multiple policies, client credentials, and permissions.
+The classes below provide the API reference.
+
 ```{eval-rst}
+.. autoclass:: aiohttp_tiny_mcp.auth.Authentication
+   :members:
+
+.. autoclass:: aiohttp_tiny_mcp.auth.BasicAuth
+   :members:
+
+.. autoclass:: aiohttp_tiny_mcp.auth.StaticBasicAuth
+   :members:
+
 .. autoclass:: aiohttp_tiny_mcp.auth.Authorization
    :members:
 

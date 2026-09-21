@@ -97,5 +97,5 @@ assert result.content[0].text == "example-42"
 ```
 
 The in-memory connect helper deliberately has no HTTP request, so use over_http
-for middleware, authentication, headers, sessions, response streams, and
+for middleware, [authentication policies](auth.md), headers, sessions, response streams, and
 origin checks.

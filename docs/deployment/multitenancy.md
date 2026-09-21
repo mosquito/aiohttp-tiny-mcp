@@ -6,38 +6,17 @@ construction rather than by remembering to check.
 
 ## Setting it
 
-One contextvar, set by one middleware. Where the name comes from is yours.
+Authentication policies return a `Principal`; its namespace selects the
+session and Hub keys used by the request. See the
+[authentication guide](../guide/auth.md#principal-and-storage-namespaces)
+for policy configuration, identity mapping, and trusted middleware.
+
+At the storage level, `namespace` is a context variable. An unset namespace
+leaves keys unprefixed:
 
 <!-- name: test_namespaces -->
 ```python
-from aiohttp import web
-
-from aiohttp_tiny_mcp.namespaces import namespace
-
-
-@web.middleware
-async def tenant(request: web.Request, handler):
-    namespace.set(request.headers.get("X-Tenant"))
-    return await handler(request)
-```
-
-Mount it ahead of the endpoint:
-
-<!-- name: test_namespaces -->
-```python
-from aiohttp_tiny_mcp import Endpoint, MemoryHub, MemorySessionStore, Registry
-
-registry = Registry("service", "1.0", hub=MemoryHub(), session_store=MemorySessionStore())
-app = web.Application(middlewares=[tenant])
-Endpoint(registry).setup(app, "/mcp")
-```
-
-Set nothing and every caller shares one namespace, which is what a
-single-tenant server wants.
-
-<!-- name: test_namespaces -->
-```python
-from aiohttp_tiny_mcp.namespaces import scoped
+from aiohttp_tiny_mcp.namespaces import namespace, scoped
 
 namespace.set(None)
 assert scoped("abc") == "abc"
@@ -71,18 +50,22 @@ from aiohttp_tiny_mcp import (
     MemoryHub,
     MemorySessionStore,
     Registry,
+    StaticBasicAuth,
 )
-from aiohttp_tiny_mcp.namespaces import namespace
 from aiohttp_tiny_mcp.protocol.selection import AdapterSet
 
 
-@web.middleware
-async def tenant(request, handler):
-    namespace.set(request.headers.get("X-Tenant"))
-    return await handler(request)
-
-
-registry = Registry("service", "1.0", hub=MemoryHub(), session_store=MemorySessionStore())
+# Each verified account gets its own storage namespace.
+registry = Registry(
+    "service",
+    "1.0",
+    auth=[
+        StaticBasicAuth("first", "example-password"),
+        StaticBasicAuth("second", "example-password"),
+    ],
+    hub=MemoryHub(),
+    session_store=MemorySessionStore(),
+)
 
 
 class Nothing(BaseModel):
@@ -108,7 +91,7 @@ async def read_box(args: Handle, ex: Exchange) -> str:
     return "unreachable" if session is None else session.get("secret")
 
 
-app = web.Application(middlewares=[tenant])
+app = web.Application()
 Endpoint(registry).setup(app, "/mcp")
 
 runner = web.AppRunner(app)
@@ -121,8 +104,10 @@ adapter = AdapterSet.default().by_version["2026-07-28"]
 
 try:
     import aiohttp
+    from aiohttp import encode_basic_auth
 
-    async with aiohttp.ClientSession(headers={"X-Tenant": "first"}) as http:
+    headers = {"Authorization": encode_basic_auth("first", "example-password")}
+    async with aiohttp.ClientSession(headers=headers) as http:
         async with Client(url, adapter, session=http) as client:
             await client.initialize()
             handle = (await client.call_tool("open_box", {})).content[0].text
@@ -130,7 +115,8 @@ try:
             assert mine.content[0].text == "kept"
 
     # The very same handle, from another tenant.
-    async with aiohttp.ClientSession(headers={"X-Tenant": "second"}) as http:
+    headers = {"Authorization": encode_basic_auth("second", "example-password")}
+    async with aiohttp.ClientSession(headers=headers) as http:
         async with Client(url, adapter, session=http) as client:
             await client.initialize()
             theirs = await client.call_tool("read_box", {"handle": handle})
@@ -144,20 +130,13 @@ quoted exactly.
 
 ## Where the name should come from
 
-Whatever your deployment already trusts. An authenticated subject, an API key's
-owner, a tenant claim in a token.
-
-For bearer tokens verified by this library or by aiohttp middleware, see
-[Authentication](../guide/auth.md).
-
-Not the client's own say-so unless you verify it, and not `request.remote` on a
-server behind a proxy -- every caller would then share the proxy's address. If
-you split by address, read the forwarded header your own gateway sets and fall
-back to the peer only where there is no gateway.
+Use verified identity or tenant information. The
+[authentication guide](../guide/auth.md#principal-and-storage-namespaces)
+defines how `Principal.namespace`, `Principal.identity`, and middleware interact.
+Do not derive tenant identity from an unverified client header.
 
 ## What it does not do
 
-It is isolation of *keys*, not authorization. It stops one tenant reaching
-another's sessions, states and events. It does not decide who may call which
-tool -- that is your middleware's job, and `ex.request` is where a handler
-reads what it decided.
+Namespaces separate storage keys. They do not grant access to tools or to
+application records. See [handler permissions](../guide/auth.md#handler-permissions)
+for scope checks and application-level authorization.

@@ -79,7 +79,7 @@ assert result.content[0].text == "processed 3 steps"
 | Report completed work | `await ex.progress(done, total, message=...)` | [Progress](notifications.md#progress) |
 | Send a diagnostic message to this client | `await ex.log("info", data)` | Requires a response stream and a client log level; see [Logging](notifications.md#logging) |
 | Ask for a decision or missing value | `await ex.ask("question_key", elicit(...))` | Returns an `Answer`; see [Asking the user](asking.md) |
-| Inspect client metadata | `ex.client_info` | Client-reported information and capabilities, not authenticated identity |
+| Inspect client metadata | `ex.client_info` | Client-reported information and capabilities; use [Principal injection](auth.md#handler-permissions) for verified identity |
 | Use a transport-provided session | `ex.session` | May be `None`; see [Sessions](sessions.md) |
 | Open or use an explicit session handle | `ex.sessions.open()` / `ex.sessions.use(handle)` | Async methods; the caller must send the handle on later calls |
 | Read saved state after a question | `ex.state` | State explicitly supplied through `NeedInput`, not a copy of local variables |

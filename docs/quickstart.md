@@ -82,7 +82,8 @@ list is separate application data; for a real notes service, replace it with
 your application's storage.
 
 Before exposing the endpoint beyond a trusted network, configure
-[Authentication](guide/auth.md).
+[authentication](guide/auth.md). The guide covers Basic credentials, Bearer
+tokens, custom policy subclasses, and client headers.
 
 ## Run it
 

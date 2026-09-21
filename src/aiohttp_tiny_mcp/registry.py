@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Iterable, Mapping
 from typing import Any
 
-from .auth import Authorization, Principal
+from .auth import Authentication, Principal
 from .exchange import Exchange, Instance
 from .extensions import Extension, ExtensionSpec
 from .hub import NOTIFICATIONS, Cursor, Hub, MemoryHub, topic
@@ -36,7 +36,7 @@ class Registry:
         *,
         hub: Hub | None = None,
         session_store: SessionStore | None = None,
-        auth: Authorization | None = None,
+        auth: Authentication | Iterable[Authentication] | None = None,
         instructions: str | None = None,
         session_ttl_seconds: int = DEFAULT_TTL_SECONDS,
         request_state_ttl_seconds: int = STATE_TTL_SECONDS,
@@ -63,6 +63,30 @@ class Registry:
         self.providers: dict[type, Any] = {}
         self.extensions: dict[str, ExtensionSpec] = {}
         self.resource_aliases: dict[str, ResourceSpec] = {}
+
+    @property
+    def auth(self) -> Authentication | tuple[Authentication, ...] | None:
+        """Configured authentication policies. Iterables are consumed once."""
+        return self._auth
+
+    @auth.setter
+    def auth(self, value: Authentication | Iterable[Authentication] | None) -> None:
+        if value is None or isinstance(value, Authentication):
+            self._auth = value
+            return
+        policies = tuple(value)
+        if not policies or not all(isinstance(policy, Authentication) for policy in policies):
+            raise ValueError("auth must contain at least one Authentication policy")
+        self._auth = policies
+
+    @property
+    def auth_policies(self) -> tuple[Authentication, ...]:
+        """Authentication alternatives in registration order."""
+        if self._auth is None:
+            return ()
+        if isinstance(self._auth, Authentication):
+            return (self._auth,)
+        return self._auth
 
     def extension(self, extension: Extension) -> None:
         """Install an extension and its resources after checking all declarations.
@@ -205,7 +229,7 @@ class Registry:
                 if self.auth is None:
                     raise TypeError(
                         f"{what}: parameter {name!r} wants a Principal, but this registry "
-                        f"has no auth= -- pass an Authorization to verify tokens first"
+                        f"has no auth= -- pass an Authentication policy to verify callers first"
                     )
                 continue
             if kind not in self.providers and kind is not Exchange:

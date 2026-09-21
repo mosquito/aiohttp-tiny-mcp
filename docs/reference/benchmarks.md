@@ -149,7 +149,7 @@ the same client the two servers are 6773 and 1870.
   thing to say about it: if a tool call spends 50 ms in a database, none of
   this matters.
 - **Not a feature comparison.** This package provides extensions, Skills,
-  aiohttp middleware, and bearer-token verification. It has no built-in sampling
+  aiohttp middleware, and [authentication policies](../guide/auth.md). It has no built-in sampling
   or roots API. See
   [how this compares with the official SDK](../concepts.md#official-python-sdk)
   for what each one does and does not do.

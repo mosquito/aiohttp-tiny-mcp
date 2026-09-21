@@ -139,6 +139,7 @@ deliberately and must not substitute cached content for a requested operation.
 
 The mapping exposes implemented handlers. It does not implement an extension's
 business logic, durable task storage, an Apps iframe host, or OAuth token flows.
+Configure endpoint protection through the [authentication guide](auth.md).
 It does not synthesize native extension notifications or teach older clients
 automatic polling or skill activation. An agent can read the manifest and use
 the complete registered request/resource interface through standard resource

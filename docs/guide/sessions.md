@@ -175,6 +175,9 @@ issued for `purge cache` cannot finish `purge database` -- its key carries the
 [namespace](../deployment/multitenancy.md), and it is dropped as soon as the
 round trip ends, so it cannot be replayed.
 
+See the [authentication guide](auth.md#principal-and-storage-namespaces) for
+verified namespace selection and session ownership.
+
 <!-- name: async test_request_state; fixtures: serve -->
 ```python
 import pytest

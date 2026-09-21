@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from .auth import Authentication, Authorization, BasicAuth, Principal, StaticBasicAuth, Unauthorized
 from .client import Client
 from .client_base import ClientError, Elicitor
 from .core import (
@@ -47,6 +48,9 @@ __all__ = [
     "Answer",
     "AnswerAction",
     "AudioContent",
+    "Authentication",
+    "Authorization",
+    "BasicAuth",
     "BlobResourceContents",
     "CallToolResult",
     "Client",
@@ -68,6 +72,7 @@ __all__ = [
     "NeedInput",
     "namespace",
     "PromptMessage",
+    "Principal",
     "Registry",
     "SseEndpoint",
     "RequestStates",
@@ -75,8 +80,10 @@ __all__ = [
     "SessionRecord",
     "SessionStore",
     "StdioClient",
+    "StaticBasicAuth",
     "TextContent",
     "TextResourceContents",
+    "Unauthorized",
     "elicit",
     "elicit_accept",
     "elicit_cancel",

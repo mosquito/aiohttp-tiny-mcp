@@ -152,67 +152,9 @@ request that asked, so they carry the prefix without being configured for it:
 the console prints its own paths into the page, and the HTTP+SSE stream names
 the path a client posts messages to.
 
-One address cannot work that way. Protected-resource metadata is computed by a
-client that has never seen it, from the resource URL, and RFC 8615 puts a
-well-known URI directly under the authority:
-
-<!-- name: test_mounting -->
-```python
-from aiohttp_tiny_mcp.auth import Authorization, Principal
-
-
-class Tokens:
-    async def verify(self, token: str) -> Principal | None:
-        return None
-
-
-auth = Authorization(
-    verifier=Tokens(),
-    resource="https://mcp.example.com/reports/mcp",
-    authorization_servers=["https://login.example.com"],
-)
-
-assert auth.metadata_path == "/.well-known/oauth-protected-resource/reports/mcp"
-assert auth.metadata_url == f"https://mcp.example.com{auth.metadata_path}"
-```
-
-Mounted flat, `routes` puts that path where the URL says it is, so give
-`resource` the endpoint's public URL and the two agree:
-
-<!-- name: test_mounting -->
-```python
-protected = web.Application()
-service = Endpoint(Registry("reports", "1.0", auth=auth))
-protected.add_routes(service.routes("/reports/mcp"))
-
-assert sorted(resource.canonical for resource in protected.router.resources()) == [
-    "/.well-known/oauth-protected-resource/reports/mcp",
-    "/reports/mcp",
-]
-```
-
-Under a prefix the same call would register
-`/reports/.well-known/oauth-protected-resource/reports/mcp`, which no client
-asks for. Split the two: `metadata=False` leaves that route out, and
-`metadata_routes` gives it to the application that owns the root.
-
-<!-- name: test_mounting -->
-```python
-section = web.Application()
-section.add_routes(service.routes("/mcp", metadata=False))
-
-host = web.Application()
-host.add_subapp("/reports/", section)
-host.add_routes(service.metadata_routes())
-
-assert [resource.canonical for resource in host.router.resources()] == [
-    "/reports",  # the subapplication, and the endpoint inside it
-    auth.metadata_path,
-]
-```
-
-`metadata_routes` is empty where nothing verifies tokens, so an application can
-add it without asking whether it applies.
+Authentication metadata must stay at the site root when MCP routes use a
+subapplication. See [metadata mounting](../guide/auth.md#where-the-metadata-has-to-be-served)
+for `metadata=False`, `metadata_routes()`, and complete examples.
 
 ### Remote deployment
 
@@ -221,9 +163,9 @@ HTTP gateway. Every worker needs the same logical
 [session store and hub](stores.md); separate memory instances cannot coordinate
 requests across workers.
 
-Protect a public endpoint before exposing it. Use the endpoint's OAuth
-protected-resource support or an existing application's JWT middleware; both
-are described in [Authentication](../guide/auth.md).
+Configure endpoint protection before deployment. The
+[authentication guide](../guide/auth.md) covers Basic, Bearer, custom policies,
+and existing application middleware.
 
 For streaming responses, disable proxy buffering and allow connections to stay
 open while a tool runs or waits for a user's answer. The endpoint sets
@@ -339,7 +281,7 @@ from aiohttp_tiny_mcp import SseEndpoint
 
 both = web.Application()
 Endpoint(registry).setup(both, "/mcp")
-# Endpoint already serves metadata when registry.auth is configured.
+# Endpoint already serves any metadata declared by registry.auth.
 SseEndpoint(registry).setup(both, "/sse", "/messages", metadata=False)
 ```
 
@@ -349,36 +291,11 @@ afterwards is a POST to that address, and every message the server sends --
 progress, log lines, results -- goes out on the stream it opened first. The
 stream is the session.
 
-With `Registry(auth=...)`, send `Authorization: Bearer <token>` on both
-`GET /sse` and every `POST /messages`. Missing, invalid, or expired tokens
-receive HTTP 401 with a Bearer challenge. Missing `required_scopes` receive
-HTTP 403. Authentication runs before session creation or message dispatch.
-Tool scopes use the verified principal; a missing tool scope produces an
-error result on the stream, as it does for Streamable HTTP.
-
-By default, the session belongs to the principal that opened the stream.
-Another principal receives HTTP 404 when posting to its address, including
-on another worker. The verified identity also scopes session and hub keys,
-unless trusted middleware already set a namespace.
-
-`SseEndpoint.setup()` and `routes()` include protected-resource metadata when
-authorization is configured. Register it only once when both transports share
-one protected resource, as above. For a subapplication, keep metadata at the
-site root:
-
-<!-- name: test_transports -->
-```python
-legacy = SseEndpoint(registry)
-section = web.Application()
-section.add_routes(legacy.routes(metadata=False))
-root = web.Application()
-root.add_subapp("/legacy", section)
-root.add_routes(legacy.metadata_routes())
-```
-
-Older clients can use a token acquired separately. These checks do not add
-OAuth discovery or login support to a client that lacks it. With
-`Registry.auth is None`, the transport keeps its unauthenticated behavior.
+Authentication applies separately to `GET /sse` and every `POST /messages`.
+See the [authentication guide](../guide/auth.md) for Basic, Bearer, custom
+policies, session ownership, and credential headers. The guide also explains
+[metadata mounting](../guide/auth.md#where-the-metadata-has-to-be-served)
+when both transports share one protected resource.
 
 Nothing pins that POST to the worker holding the stream, so the reply is
 published to the hub under a topic named for the connection and written out by

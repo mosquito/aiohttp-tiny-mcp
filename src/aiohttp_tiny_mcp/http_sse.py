@@ -106,7 +106,7 @@ class SseEndpoint:
             return self.origins.render_failure(self.adapter, e.failure)
         except Unauthorized as refusal:
             assert self.registry.auth is not None
-            return self.origins.refuse(self.registry.auth, refusal)
+            return self.origins.refuse(refusal)
 
         session_id = await self.open_session(principal.identity if principal is not None else None)
         where = topic(STREAM, session_id)
@@ -199,11 +199,11 @@ class SseEndpoint:
             return self.origins.render_failure(self.adapter, e.failure)
         except Unauthorized as refusal:
             assert self.registry.auth is not None
-            return self.origins.refuse(self.registry.auth, refusal)
+            return self.origins.refuse(refusal)
 
         session_id = request.query.get("session_id", "")
         record = await self.registry.session_store.get(scoped(session_id)) if session_id else None
-        if record is None or not self.origins.owns(record, principal):
+        if record is None or not self.origins.owns(record, principal, request):
             return web.json_response({"error": "no such session"}, status=404)
         await self.registry.session_store.touch(
             scoped(session_id), ttl_seconds=self.registry.session_ttl_seconds
@@ -295,7 +295,7 @@ class SseEndpoint:
         Either path may be set here or on the constructor. Both are kept,
         because the stream names the posting path to the client.
 
-        Protected endpoints include resource metadata. Use `metadata=False`
+        Policies that declare metadata include its routes. Use `metadata=False`
         when another endpoint serves it or when mounting under a subapplication.
         In a subapplication, add `metadata_routes()` to the root application.
         """

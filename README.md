@@ -193,7 +193,7 @@ Start with [the documentation overview](https://mosquito.github.io/aiohttp-tiny-
 2. [Quickstart](https://mosquito.github.io/aiohttp-tiny-mcp/quickstart.html): a complete server, launch command, and client call.
 3. [How the server fits together](https://mosquito.github.io/aiohttp-tiny-mcp/pieces.html): a conversation across two workers and each object's lifetime.
 4. [Using Exchange](https://mosquito.github.io/aiohttp-tiny-mcp/guide/exchange.html): request context, progress, questions, and state.
-5. [Authentication](https://mosquito.github.io/aiohttp-tiny-mcp/guide/auth.html): bearer-token verification and OAuth resource metadata.
+5. [Authentication](https://mosquito.github.io/aiohttp-tiny-mcp/guide/auth.html): Basic, Bearer, custom subclasses, multiple policies, and permissions.
 6. [Stores and hubs](https://mosquito.github.io/aiohttp-tiny-mcp/deployment/stores.html): shared backend contracts and deployment requirements.
 7. [Extensions and skills](https://mosquito.github.io/aiohttp-tiny-mcp/guide/extensions.html): custom methods, skill directories, and resources for older clients.
 

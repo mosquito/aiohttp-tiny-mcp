@@ -178,8 +178,9 @@ async def whoami(args: Nothing, ex: Exchange) -> str:
 
 `ex.request` is the aiohttp request, so anything a middleware put there is
 reachable. A provider can turn a middleware decision into a typed handler
-parameter. For bearer-token verification and an existing aiohttp application's
-JWT middleware, see [Authentication](auth.md).
+parameter. For verified identities, use the policies and `Principal` injection
+in the [authentication guide](auth.md). The example below only demonstrates
+request context; its fixed user is test data.
 
 <!-- name: test_dependencies -->
 ```python
@@ -187,8 +188,8 @@ USER: web.RequestKey[str] = web.RequestKey("user", str)
 
 
 @web.middleware
-async def authenticate(request: web.Request, handler):
-    request[USER] = request.headers.get("Authorization", "anonymous")
+async def example_context(request: web.Request, handler):
+    request[USER] = "ada"
     return await handler(request)
 
 
@@ -228,7 +229,7 @@ import aiohttp
 
 from aiohttp_tiny_mcp import Endpoint
 
-application = web.Application(middlewares=[authenticate])
+application = web.Application(middlewares=[example_context])
 Endpoint(registry).setup(application, "/mcp")
 runner = web.AppRunner(application)
 await runner.setup()
@@ -237,8 +238,7 @@ await site.start()
 host, port = runner.addresses[0]
 
 try:
-    headers = {"Authorization": "ada"}
-    async with aiohttp.ClientSession(headers=headers) as http:
+    async with aiohttp.ClientSession() as http:
         adapter = AdapterSet.default().by_version["2026-07-28"]
         async with Client(f"http://{host}:{port}/mcp", adapter, session=http) as client:
             await client.initialize()

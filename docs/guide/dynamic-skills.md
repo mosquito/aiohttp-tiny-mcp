@@ -114,6 +114,7 @@ The registration is a snapshot of declarations, not of callback results.
 files can use additional `extension.resource()` callbacks. Handlers may also
 receive `Exchange` or an authenticated `Principal` through dependency injection.
 Apply the same access rules to listings, skill details, and file reads.
+See [handler permissions](auth.md#handler-permissions) in the authentication guide.
 
 Install this extension instead of `Skills.from_directory()` in the same
 registry. Both use `io.modelcontextprotocol/skills`, and duplicate extension
