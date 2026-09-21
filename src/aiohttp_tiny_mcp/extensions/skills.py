@@ -13,9 +13,9 @@ from urllib.parse import quote
 
 from pydantic import BaseModel
 
-from .core import Failure, FailureKind, Rejected
-from .extensions import Extension
-from .models import CacheableResult, ListParams, Model, ReadResourceParams
+from aiohttp_tiny_mcp.extensions import Extension
+from aiohttp_tiny_mcp.protocol.core import Failure, FailureKind, Rejected
+from aiohttp_tiny_mcp.protocol.models import CacheableResult, ListParams, Model, ReadResourceParams
 
 SKILLS_EXTENSION = "io.modelcontextprotocol/skills"
 MAX_RESOURCES = 512

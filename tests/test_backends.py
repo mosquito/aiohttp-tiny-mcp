@@ -31,12 +31,12 @@ from aiohttp_tiny_mcp import (
     elicit,
     elicit_accept,
 )
-from aiohttp_tiny_mcp.hub import Hub
-from aiohttp_tiny_mcp.postgres import PostgresHub, PostgresSessionStore, PostgresStorage
 from aiohttp_tiny_mcp.protocol.selection import AdapterSet
-from aiohttp_tiny_mcp.redis import RedisHub, RedisSessionStore, RedisStorage
-from aiohttp_tiny_mcp.sessions import SessionStore
-from aiohttp_tiny_mcp.sqlite import SqliteHub, SqliteSessionStore, SqliteStorage
+from aiohttp_tiny_mcp.storage.hub import Hub
+from aiohttp_tiny_mcp.storage.postgres import PostgresHub, PostgresSessionStore, PostgresStorage
+from aiohttp_tiny_mcp.storage.redis import RedisHub, RedisSessionStore, RedisStorage
+from aiohttp_tiny_mcp.storage.sessions import SessionStore
+from aiohttp_tiny_mcp.storage.sqlite import SqliteHub, SqliteSessionStore, SqliteStorage
 
 pytestmark = pytest.mark.asyncio
 

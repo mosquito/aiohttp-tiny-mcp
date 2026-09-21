@@ -5,8 +5,8 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import TypeVar
 
-from aiohttp_tiny_mcp.adapter import Adapter
-from aiohttp_tiny_mcp.core import Failure, FailureKind, Preamble, Rejected
+from aiohttp_tiny_mcp.protocol.adapter import Adapter
+from aiohttp_tiny_mcp.protocol.core import Failure, FailureKind, Preamble, Rejected
 
 from .v2024_11_05 import Adapter2024_11_05
 from .v2025_03_26 import Adapter2025_03_26

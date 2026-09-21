@@ -8,7 +8,7 @@ from urllib.parse import quote
 import pytest
 
 from aiohttp_tiny_mcp import ClientError, Registry
-from aiohttp_tiny_mcp.skills import SKILLS_EXTENSION, Skills
+from aiohttp_tiny_mcp.extensions.skills import SKILLS_EXTENSION, Skills
 from aiohttp_tiny_mcp.testing import connect, over_http
 
 
@@ -166,10 +166,10 @@ def test_skill_limits_and_empty_directories(tmp_path, monkeypatch):
         Skills.from_directory(tmp_path)
     directory = write_skill(tmp_path)
     (directory / "extra").write_bytes(b"abc")
-    monkeypatch.setattr("aiohttp_tiny_mcp.skills.MAX_RESOURCES", 1)
+    monkeypatch.setattr("aiohttp_tiny_mcp.extensions.skills.MAX_RESOURCES", 1)
     with pytest.raises(ValueError, match="files"):
         Skills.from_directory(tmp_path)
-    monkeypatch.setattr("aiohttp_tiny_mcp.skills.MAX_RESOURCES", 512)
-    monkeypatch.setattr("aiohttp_tiny_mcp.skills.MAX_BYTES", 10)
+    monkeypatch.setattr("aiohttp_tiny_mcp.extensions.skills.MAX_RESOURCES", 512)
+    monkeypatch.setattr("aiohttp_tiny_mcp.extensions.skills.MAX_BYTES", 10)
     with pytest.raises(ValueError, match="bytes"):
         Skills.from_directory(tmp_path)

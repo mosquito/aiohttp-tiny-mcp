@@ -5,14 +5,15 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable, Iterable, Mapping
 from typing import Any
 
-from .auth import Authentication, Principal
+from aiohttp_tiny_mcp.auth import Authentication, Principal
+from aiohttp_tiny_mcp.extensions import Extension, ExtensionSpec
+from aiohttp_tiny_mcp.protocol.models import Implementation
+from aiohttp_tiny_mcp.storage.hub import NOTIFICATIONS, Cursor, Hub, MemoryHub, topic
+from aiohttp_tiny_mcp.storage.sessions import DEFAULT_TTL_SECONDS, MemorySessionStore, SessionStore
+
 from .exchange import Exchange, Instance
-from .extensions import Extension, ExtensionSpec
-from .hub import NOTIFICATIONS, Cursor, Hub, MemoryHub, topic
-from .models import Implementation
 from .request_state import DEFAULT_TTL_SECONDS as STATE_TTL_SECONDS
 from .request_state import RequestStates
-from .sessions import DEFAULT_TTL_SECONDS, MemorySessionStore, SessionStore
 from .specs import Bound, PromptSpec, ResourceSpec, ToolSpec
 
 
@@ -94,7 +95,7 @@ class Registry:
         Register dependency providers first. Duplicate identifiers, methods,
         resources, and attempts to replace base protocol methods are rejected.
         """
-        from .protocol.selection import AdapterSet
+        from aiohttp_tiny_mcp.protocol.selection import AdapterSet
 
         if extension.name in self.extensions:
             raise ValueError(f"duplicate extension: {extension.name}")

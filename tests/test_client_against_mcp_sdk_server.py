@@ -12,7 +12,7 @@ from mcp_types import Completion
 from pydantic import BaseModel
 
 from aiohttp_tiny_mcp import Client
-from aiohttp_tiny_mcp.models import CallToolResult, TextContent, TextResourceContents
+from aiohttp_tiny_mcp.protocol.models import CallToolResult, TextContent, TextResourceContents
 from aiohttp_tiny_mcp.protocol.selection import AdapterSet
 
 pytestmark = pytest.mark.asyncio

@@ -7,7 +7,7 @@ import asyncio
 import pytest
 
 from aiohttp_tiny_mcp import Client, elicit_accept, elicit_decline
-from aiohttp_tiny_mcp.models import CallToolResult, TextContent, TextResourceContents
+from aiohttp_tiny_mcp.protocol.models import CallToolResult, TextContent, TextResourceContents
 from aiohttp_tiny_mcp.protocol.selection import AdapterSet
 
 pytestmark = pytest.mark.asyncio
@@ -279,7 +279,7 @@ async def publish_until_heard(hub, heard):
     """Publish until the subscription receives an event, avoiding assumptions about connection
     timing.
     """
-    from aiohttp_tiny_mcp.hub import NOTIFICATIONS, topic
+    from aiohttp_tiny_mcp.storage.hub import NOTIFICATIONS, topic
 
     while not heard.done():
         await hub.publish(

@@ -9,8 +9,9 @@ from typing import Any, TypeVar
 
 from pydantic import BaseModel, ValidationError
 
-from .auth import Principal
-from .core import (
+from aiohttp_tiny_mcp.auth import Principal
+from aiohttp_tiny_mcp.extensions import ExtensionResult
+from aiohttp_tiny_mcp.protocol.core import (
     LOG_LEVELS,
     Failure,
     FailureKind,
@@ -21,9 +22,7 @@ from .core import (
     Rejected,
     Value,
 )
-from .exchange import Exchange
-from .extensions import ExtensionResult
-from .models import (
+from aiohttp_tiny_mcp.protocol.models import (
     CallToolResult,
     CompleteResult,
     Completion,
@@ -45,6 +44,8 @@ from .models import (
     TextContent,
     ToolDef,
 )
+
+from .exchange import Exchange
 from .registry import Registry
 from .request_state import RequestStates, protect_request_state, restore_request_state
 from .specs import ToolSpec

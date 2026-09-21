@@ -31,8 +31,8 @@ from typing import Any
 import aiohttp
 
 from aiohttp_tiny_mcp import Client
+from aiohttp_tiny_mcp.client.stdio import StdioClient
 from aiohttp_tiny_mcp.protocol.selection import AdapterSet
-from aiohttp_tiny_mcp.stdio_client import StdioClient
 from benchmarks import servers, wire
 from benchmarks.harness import Result, rounds, table
 

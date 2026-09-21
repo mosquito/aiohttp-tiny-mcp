@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from aiodocker import Docker
-from aiohttp_tiny_mcp.models import CompleteParams
+from aiohttp_tiny_mcp.protocol.models import CompleteParams
 
 from docker_mcp import daemon
 

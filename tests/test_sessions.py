@@ -7,9 +7,34 @@ from aiohttp.test_utils import TestClient, TestServer
 
 from aiohttp_tiny_mcp import Endpoint, Exchange, MemorySessionStore, Registry, namespace
 from aiohttp_tiny_mcp.protocol.selection import AdapterSet
-from aiohttp_tiny_mcp.sessions import SESSION_HEADER, new_session_id
+from aiohttp_tiny_mcp.storage.sessions import SESSION_HEADER, new_session_id
 
 pytestmark = pytest.mark.asyncio
+
+
+async def test_memory_store_reclaims_unread_expired_records():
+    now = [0.0]
+    store = MemorySessionStore(clock=lambda: now[0])
+    await store.create("abandoned-login", {"upstream": "private"}, ttl_seconds=5)
+    await store.create("active-session", {}, ttl_seconds=30)
+    now[0] = 6
+    assert await store.get("active-session") is not None
+    assert "abandoned-login" not in store.records
+
+
+async def test_memory_cleanup_respects_updated_expiry():
+    now = [0.0]
+    store = MemorySessionStore(clock=lambda: now[0])
+    await store.create("renewed", {}, ttl_seconds=5)
+    await store.touch("renewed", ttl_seconds=20)
+    await store.create("shortened", {}, ttl_seconds=30)
+    assert await store.save("shortened", {}, expected_version=1, ttl_seconds=3)
+    now[0] = 6
+    assert await store.get("renewed") is not None
+    assert "shortened" not in store.records
+    now[0] = 21
+    await store.create("next", {}, ttl_seconds=10)
+    assert set(store.records) == {"next"}
 
 
 class Clock:

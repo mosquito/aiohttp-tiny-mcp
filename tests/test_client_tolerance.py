@@ -13,7 +13,7 @@ from aiohttp_tiny_mcp import (
     Registry,
     TextResourceContents,
 )
-from aiohttp_tiny_mcp.models import ListToolsResult
+from aiohttp_tiny_mcp.protocol.models import ListToolsResult
 from aiohttp_tiny_mcp.protocol.selection import AdapterSet
 from aiohttp_tiny_mcp.testing import serving
 

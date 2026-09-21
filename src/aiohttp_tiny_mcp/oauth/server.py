@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import inspect
-import ipaddress
 import json
 import re
 import secrets
@@ -18,10 +17,12 @@ from typing import Any
 from aiohttp import ClientSession, ClientTimeout, DummyCookieJar, web
 from yarl import URL
 
-from ..auth import Authorization, Principal
-from ..metadata import metadata_route
-from ..sessions import MemorySessionStore, SessionRecord, SessionStore
-from .upstream import Identity, OAuth2, UpstreamAuthError
+from aiohttp_tiny_mcp.auth import Authorization, Principal
+from aiohttp_tiny_mcp.storage.sessions import MemorySessionStore, SessionRecord, SessionStore
+from aiohttp_tiny_mcp.transport.metadata import metadata_route
+
+from .provider import Identity, OAuthProvider, UpstreamAuthError, checked_url
+from .tokens import OpaqueTokens
 
 FLOW_TTL = 300
 OPAQUE = re.compile(r"[A-Za-z0-9_-]{43}\Z")
@@ -45,29 +46,6 @@ def digest(value: str) -> str:
     return hashlib.sha256(value.encode()).hexdigest()
 
 
-def checked_url(value: str, *, query: bool = False) -> URL:
-    """Require HTTPS, except for explicit loopback development addresses."""
-    url = URL(value)
-    host = url.host or ""
-    try:
-        loopback = ipaddress.ip_address(host).is_loopback
-    except ValueError:
-        loopback = host == "localhost"
-    if (
-        not host
-        or url.user is not None
-        or url.password is not None
-        or url.fragment
-        or (url.query_string and not query)
-        or (url.scheme != "https" and not (url.scheme == "http" and loopback))
-        or any(ord(char) <= 32 or ord(char) == 127 for char in value)
-    ):
-        raise ValueError(
-            "OAuth URLs require HTTPS (or HTTP on loopback), without credentials or fragments"
-        )
-    return url
-
-
 @dataclass(frozen=True)
 class OAuthClient:
     """Register a trusted public client with exact callback URLs.
@@ -89,18 +67,22 @@ class OAuthFailure(Exception):
         self.status = status
 
 
-class OAuthFacade:
+class OAuthServer:
     """Exchange upstream identity for short-lived MCP tokens.
 
     This implementation supports authorization_code, PKCE S256, and explicitly
     registered public clients. It does not register clients dynamically or issue
     refresh tokens. Supply a shared SessionStore for multiple workers.
+
+    The tokens object owns issuance and verification; OpaqueTokens is the default.
+    Provider credentials stay in private flow storage until code redemption or
+    expiry. Issue runs after PKCE validation and atomic code redemption.
     """
 
     def __init__(
         self,
         issuer: str,
-        upstream: OAuth2,
+        provider: OAuthProvider,
         *,
         resource: str,
         clients: Sequence[OAuthClient],
@@ -108,16 +90,13 @@ class OAuthFacade:
         identity: Callable[[Identity], Principal | None | Awaitable[Principal | None]]
         | None = None,
         store: SessionStore | None = None,
+        tokens: Any = None,
         access_token_ttl: int = 3600,
     ) -> None:
         issuer_url = checked_url(issuer)
         checked_url(resource)
-        checked_url(upstream.authorize_url, query=True)
-        checked_url(upstream.token_url)
         if issuer.endswith("/") or issuer_url.query_string:
             raise ValueError("issuer must not end in a slash or contain a query")
-        if not upstream.client_id or not upstream.client_secret:
-            raise ValueError("the upstream client ID and secret are required")
         if type(access_token_ttl) is not int or not 1 <= access_token_ttl <= 86400:
             raise ValueError("access_token_ttl must be between 1 and 86400 seconds")
         if not clients:
@@ -136,11 +115,20 @@ class OAuthFacade:
         if any(not SCOPE.fullmatch(scope) for scope in scopes):
             raise ValueError("scopes must be non-empty OAuth scope tokens")
         self.issuer = issuer
-        self.upstream = upstream
+        self.provider = provider
         self.resource_url = resource
         self.scopes = tuple(scopes)
         self.identity = identity
         self.store = store if store is not None else MemorySessionStore()
+        self.tokens = (
+            tokens
+            if tokens is not None
+            else OpaqueTokens(issuer=issuer, resource=resource, store=self.store)
+        )
+        if any(not callable(getattr(self.tokens, method, None)) for method in ("issue", "verify")):
+            raise TypeError(
+                "tokens must provide async issue(principal, upstream) and verify(token)"
+            )
         self.access_token_ttl = access_token_ttl
         self.prefix = f"oauth/{digest(issuer + '|' + resource)}/"
         self.base_path = issuer_url.path.rstrip("/")
@@ -151,7 +139,7 @@ class OAuthFacade:
     def resource(self, *, required_scopes: Sequence[str] = ()) -> Authorization:
         """Return the Registry authentication policy bound to this resource and issuer."""
         if set(required_scopes) - set(self.scopes):
-            raise ValueError("required scopes must be declared by the facade")
+            raise ValueError("required scopes must be declared by the server")
         return Authorization(
             verifier=self,
             resource=self.resource_url,
@@ -196,7 +184,7 @@ class OAuthFacade:
 
     async def cleanup_ctx(self, app: web.Application) -> AsyncIterator[None]:
         if self._http is not None:
-            raise RuntimeError("an OAuthFacade instance can run in only one application")
+            raise RuntimeError("an OAuthServer instance can run in only one application")
         async with ClientSession(
             timeout=ClientTimeout(total=15), cookie_jar=DummyCookieJar(), trust_env=False
         ) as http:
@@ -208,14 +196,14 @@ class OAuthFacade:
 
     @staticmethod
     def is_public(request: web.Request) -> bool:
-        """Identify facade routes for application authentication middleware.
+        """Identify server routes for application authentication middleware.
 
         These handlers enforce their own OAuth checks and must be reachable
         before the caller has an MCP token.
         """
         handler = request.match_info.handler
-        facade = getattr(handler, "__self__", None)
-        if not isinstance(facade, OAuthFacade):
+        server = getattr(handler, "__self__", None)
+        if not isinstance(server, OAuthServer):
             return False
         return any(
             handler == route.handler
@@ -223,18 +211,13 @@ class OAuthFacade:
                 request.method == route.method
                 or (request.method == "HEAD" and route.method == "GET")
             )
-            for route in facade.routes()
+            for route in server.routes()
         )
 
     def key(self, kind: str, token: str) -> str:
         return self.prefix + kind + "/" + digest(token)
 
     async def put(self, kind: str, data: Mapping[str, Any], ttl: int = FLOW_TTL) -> str:
-        # Remove expired rows in the default process-local store. Other backends own expiry.
-        if isinstance(self.store, MemorySessionStore):
-            for key in tuple(self.store.records):
-                if key.startswith(self.prefix):
-                    self.store.live(key)
         token = secrets.token_urlsafe(32)
         saved = await self.store.create(
             self.key(kind, token), {**data, "expires_at": time.time() + ttl}, ttl_seconds=ttl
@@ -261,20 +244,21 @@ class OAuthFacade:
         await self.store.delete(key)
 
     async def verify(self, token: str) -> Principal | None:
-        try:
-            record = await self.read("access", token)
-        except OAuthFailure:
+        principal = await self.tokens.verify(token)
+        if (
+            not isinstance(principal, Principal)
+            or principal.issuer != self.issuer
+            or principal.expired
+        ):
             return None
-        data = record.data
-        if data.get("resource") != self.resource_url or data.get("issuer") != self.issuer:
-            return None
-        principal = dict(data["principal"])
-        principal["scopes"] = frozenset(principal["scopes"])
-        return Principal(**principal)
+        return principal
 
     async def revoke(self, token: str) -> None:
-        """Revoke a locally issued access token without sending it to the provider."""
-        await self.store.delete(self.key("access", token))
+        """Revoke an access token. Custom token objects can supply async revoke(token)."""
+        revoke = getattr(self.tokens, "revoke", None)
+        if revoke is None:
+            raise NotImplementedError("the application's token object does not support revoke")
+        await revoke(token)
 
     def client(self, client_id: str) -> OAuthClient:
         found = self.clients.get(client_id)
@@ -333,7 +317,7 @@ class OAuthFacade:
     async def start_upstream(self, flow: Mapping[str, Any]) -> web.Response:
         verifier = secrets.token_urlsafe(32)
         state = await self.put("upstream", {**flow, "verifier": verifier})
-        target = self.upstream.authorization_url(
+        target = self.provider.authorization_url(
             redirect_uri=self.callback_url, state=state, challenge=challenge(verifier)
         )
         return web.Response(status=303, headers={**PRIVATE_HEADERS, "Location": target})
@@ -377,7 +361,7 @@ class OAuthFacade:
             form_origins = " ".join(
                 sorted(
                     {
-                        str(URL(self.upstream.authorize_url).origin()),
+                        str(URL(self.provider.authorize_url).origin()),
                         str(URL(redirect_uri).origin()),
                     }
                 )
@@ -390,7 +374,7 @@ class OAuthFacade:
                 f"{escape(self.resource_url)}.</p>"
                 f"<p>Return address: {escape(redirect_uri)}</p>"
                 f"<p>Permissions: {escape(flow['scope']) or 'Sign in'}</p>"
-                f"<p>Continue with {escape(self.upstream.name)} only if you trust this client.</p>"
+                f"<p>Continue with {escape(self.provider.name)} only if you trust this client.</p>"
                 f'<form method="post" action="{action}">'
                 f'<input type="hidden" name="ticket" value="{ticket}">'
                 '<button name="decision" value="allow">Continue</button> '
@@ -445,14 +429,14 @@ class OAuthFacade:
             if "error" in params or not params.get("code"):
                 raise OAuthFailure("access_denied", "Sign-in was not completed.")
             if self._http is None:
-                raise RuntimeError("use OAuthFacade.setup() or install its cleanup_ctx")
-            tokens = await self.upstream.exchange(
+                raise RuntimeError("use OAuthServer.setup() or install its cleanup_ctx")
+            tokens = await self.provider.exchange(
                 self._http,
                 code=params["code"],
                 redirect_uri=self.callback_url,
                 verifier=flow["verifier"],
             )
-            identity = await self.upstream.profile(tokens, self._http)
+            identity = await self.provider.profile(tokens, self._http)
             if not identity.sub or not identity.provider:
                 raise UpstreamAuthError("The identity provider returned an empty identity.")
             principal = (
@@ -485,7 +469,13 @@ class OAuthFacade:
             value["scopes"] = sorted(wanted)
             # Fail before storage if the application's mapper returns non-JSON claims.
             json.dumps(value, allow_nan=False)
-            code = await self.put("code", {**flow, "principal": value})
+            try:
+                if not isinstance(tokens, dict):
+                    raise ValueError("provider tokens must be a dictionary")
+                json.dumps(tokens, allow_nan=False)
+            except (ValueError, TypeError):
+                raise UpstreamAuthError("The provider response cannot be stored.") from None
+            code = await self.put("code", {**flow, "principal": value, "upstream": tokens})
             return self.clear_cookie(self.redirect(flow, code=code), flow)
         except UpstreamAuthError:
             error = OAuthFailure(
@@ -529,15 +519,21 @@ class OAuthFacade:
             if ttl <= 0:
                 raise OAuthFailure("invalid_grant", "The authenticated identity has expired.")
             await self.take("code", code, record)
-            token = await self.put(
-                "access",
-                {
-                    "principal": flow["principal"],
-                    "resource": self.resource_url,
-                    "issuer": self.issuer,
-                },
-                ttl,
-            )
+            value = dict(flow["principal"])
+            value["scopes"] = frozenset(value["scopes"])
+            principal = Principal(**value)
+            try:
+                token = await self.tokens.issue(principal, flow["upstream"])
+                if not isinstance(token, str) or not re.fullmatch(r"[A-Za-z0-9\-._~+/]+=*", token):
+                    raise ValueError("invalid Bearer token")
+            except Exception:
+                # Application errors can contain credentials. Keep them out of responses.
+                raise OAuthFailure(
+                    "server_error", "The access token could not be issued.", 500
+                ) from None
+            ttl = int(flow["principal"]["expires_at"] - time.time())
+            if ttl <= 0:
+                raise OAuthFailure("invalid_grant", "The authenticated identity has expired.")
             return web.json_response(
                 {
                     "access_token": token,

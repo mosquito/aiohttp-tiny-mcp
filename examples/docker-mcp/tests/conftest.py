@@ -8,7 +8,7 @@ import pytest
 from aiodocker import Docker
 from aiohttp import web
 from aiohttp_tiny_mcp import Endpoint, Registry
-from aiohttp_tiny_mcp.sqlite import SqliteHub, SqliteSessionStore, SqliteStorage
+from aiohttp_tiny_mcp.storage.sqlite import SqliteHub, SqliteSessionStore, SqliteStorage
 from fake_docker import FakeDocker
 
 from docker_mcp.server import build

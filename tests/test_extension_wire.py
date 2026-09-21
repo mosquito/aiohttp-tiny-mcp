@@ -7,7 +7,7 @@ import pytest
 from pydantic import BaseModel
 
 from aiohttp_tiny_mcp import Extension, Registry
-from aiohttp_tiny_mcp.core import Operation
+from aiohttp_tiny_mcp.protocol.core import Operation
 from aiohttp_tiny_mcp.testing import connect, over_http, pick
 
 VERSIONS = ("2024-11-05", "2025-03-26", "2025-06-18", "2025-11-25")

@@ -13,9 +13,9 @@ from typing import Any
 
 from aiohttp import web
 
-from .adapter import Adapter
-from .auth import Authentication, Principal, Unauthorized
-from .core import (
+from aiohttp_tiny_mcp.auth import Authentication, Principal, Unauthorized
+from aiohttp_tiny_mcp.protocol.adapter import Adapter
+from aiohttp_tiny_mcp.protocol.core import (
     Call,
     DecodeFailure,
     Failure,
@@ -26,14 +26,10 @@ from .core import (
     Rejected,
     Value,
 )
-from .dispatcher import Dispatcher
-from .exchange import Exchange, is_reply, relay_reply
-from .hub import NOTIFICATIONS, Subscription, topic
-from .metadata import metadata_route
-from .namespaces import current, namespace, scoped
-from .protocol.selection import AdapterSet
-from .registry import Registry
-from .sessions import (
+from aiohttp_tiny_mcp.protocol.selection import AdapterSet
+from aiohttp_tiny_mcp.storage.hub import NOTIFICATIONS, Subscription, topic
+from aiohttp_tiny_mcp.storage.namespaces import current, namespace, scoped
+from aiohttp_tiny_mcp.storage.sessions import (
     SESSION_HEADER,
     Session,
     SessionRecord,
@@ -44,7 +40,12 @@ from .sessions import (
     stored_owner,
     stored_version,
 )
-from .sse import SSEResponse
+from aiohttp_tiny_mcp.transport.metadata import metadata_route
+from aiohttp_tiny_mcp.transport.sse import SSEResponse
+
+from .dispatcher import Dispatcher
+from .exchange import Exchange, is_reply, relay_reply
+from .registry import Registry
 from .subscriptions import relays, wanted
 from .tasks import stop
 

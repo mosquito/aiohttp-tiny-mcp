@@ -14,7 +14,7 @@ from aiohttp_tiny_mcp import (
     Registry,
     TextResourceContents,
 )
-from aiohttp_tiny_mcp.models import CacheableResult
+from aiohttp_tiny_mcp.protocol.models import CacheableResult
 from aiohttp_tiny_mcp.testing import connect, over_http
 
 

@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import json
-import time
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
@@ -17,6 +17,29 @@ class UpstreamAuthError(Exception):
     """The identity provider refused the request or returned an invalid response."""
 
 
+def checked_url(value: str, *, query: bool = False) -> URL:
+    """Require HTTPS, except for explicit loopback development addresses."""
+    url = URL(value)
+    host = url.host or ""
+    try:
+        loopback = ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        loopback = host == "localhost"
+    if (
+        not host
+        or url.user is not None
+        or url.password is not None
+        or url.fragment
+        or (url.query_string and not query)
+        or (url.scheme != "https" and not (url.scheme == "http" and loopback))
+        or any(ord(char) <= 32 or ord(char) == 127 for char in value)
+    ):
+        raise ValueError(
+            "OAuth URLs require HTTPS (or HTTP on loopback), without credentials or fragments"
+        )
+    return url
+
+
 @dataclass(frozen=True)
 class Identity:
     """A stable provider identity. Claims must not contain credentials."""
@@ -24,16 +47,6 @@ class Identity:
     sub: str
     provider: str
     claims: Mapping[str, Any] = field(default_factory=dict)
-
-
-@dataclass(frozen=True)
-class UpstreamTokens:
-    """Provider credentials, separate from the MCP principal and access token."""
-
-    access_token: str = field(repr=False)
-    refresh_token: str | None = field(default=None, repr=False)
-    expires_at: float | None = None
-    scope: str = ""
 
 
 async def provider_json(http: ClientSession, method: str, url: str, **kwargs: Any) -> dict:
@@ -56,17 +69,23 @@ async def provider_json(http: ClientSession, method: str, url: str, **kwargs: An
 
 
 @dataclass(frozen=True)
-class OAuth2:
+class OAuthProvider:
     """Configure an OAuth authorization-code provider and its identity lookup."""
 
     name: str
     authorize_url: str
     token_url: str
     client_id: str
-    client_secret: str = field(repr=False)
     scopes: Sequence[str]
-    profile: Callable[[UpstreamTokens, ClientSession], Awaitable[Identity]]
+    profile: Callable[[dict[str, Any], ClientSession], Awaitable[Identity]]
+    client_secret: str = field(default="", repr=False)
     extra_authorize_params: Mapping[str, str] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        checked_url(self.authorize_url, query=True)
+        checked_url(self.token_url)
+        if not self.client_id:
+            raise ValueError("the provider client ID is required")
 
     def authorization_url(self, *, redirect_uri: str, state: str, challenge: str) -> str:
         params = {
@@ -83,20 +102,23 @@ class OAuth2:
 
     async def exchange(
         self, http: ClientSession, *, code: str, redirect_uri: str, verifier: str
-    ) -> UpstreamTokens:
+    ) -> dict[str, Any]:
+        """Exchange the code and return the complete provider response dictionary."""
+        form = {
+            "grant_type": "authorization_code",
+            "client_id": self.client_id,
+            "code": code,
+            "redirect_uri": redirect_uri,
+            "code_verifier": verifier,
+        }
+        if self.client_secret:
+            form["client_secret"] = self.client_secret
         data = await provider_json(
             http,
             "POST",
             self.token_url,
             headers={"Accept": "application/json"},
-            data={
-                "grant_type": "authorization_code",
-                "client_id": self.client_id,
-                "client_secret": self.client_secret,
-                "code": code,
-                "redirect_uri": redirect_uri,
-                "code_verifier": verifier,
-            },
+            data=form,
         )
         token = data.get("access_token")
         if not isinstance(token, str) or not token or len(token) > 8192:
@@ -109,9 +131,6 @@ class OAuth2:
         refresh = data.get("refresh_token")
         if refresh is not None and not isinstance(refresh, str):
             raise UpstreamAuthError("The identity provider returned an invalid refresh token.")
-        return UpstreamTokens(
-            access_token=token,
-            refresh_token=refresh,
-            expires_at=time.time() + expiry if expiry is not None else None,
-            scope=str(data.get("scope", "")),
-        )
+        if "scope" in data and not isinstance(data["scope"], str):
+            raise UpstreamAuthError("The identity provider returned an invalid scope.")
+        return data

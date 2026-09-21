@@ -71,7 +71,7 @@ async def test_disabled_console_does_not_exempt_routes():
 
 @pytest.mark.asyncio
 async def test_registry_auth_leaves_assets_public_and_protects_mcp():
-    app = Endpoint(Registry("private", "1", auth=StaticBasicAuth("alice", "secret"))).app()
+    app = Endpoint(Registry("private", "1", auth=StaticBasicAuth(("alice", "secret")))).app()
     Console().setup(app)
     async with TestClient(TestServer(app)) as client:
         for method in ("GET", "HEAD"):

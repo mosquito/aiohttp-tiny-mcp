@@ -6,14 +6,14 @@ from collections.abc import Mapping
 from types import MappingProxyType
 from typing import Any, ClassVar
 
-from aiohttp_tiny_mcp.adapter import Adapter, RegistryProtocol
-from aiohttp_tiny_mcp.core import (
+from aiohttp_tiny_mcp.protocol.adapter import Adapter, RegistryProtocol
+from aiohttp_tiny_mcp.protocol.core import (
     Call,
     ClientInfo,
     ClientProfile,
     Operation,
 )
-from aiohttp_tiny_mcp.models import (
+from aiohttp_tiny_mcp.protocol.models import (
     CallToolParams,
     CallToolResult,
     CompleteParams,
@@ -28,8 +28,8 @@ from aiohttp_tiny_mcp.models import (
     SubscribeParams,
     ToolDef,
 )
-from aiohttp_tiny_mcp.schema import simplify_legacy_schema
-from aiohttp_tiny_mcp.specs import ToolSpec
+from aiohttp_tiny_mcp.protocol.schema import simplify_legacy_schema
+from aiohttp_tiny_mcp.server.specs import ToolSpec
 
 METHODS: Mapping[str, Operation] = MappingProxyType(
     {

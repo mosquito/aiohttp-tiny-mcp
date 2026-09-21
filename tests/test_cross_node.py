@@ -6,7 +6,7 @@ import pytest
 from aiohttp.test_utils import TestClient, TestServer
 
 from aiohttp_tiny_mcp import Client, ClientError, Endpoint, elicit_accept
-from aiohttp_tiny_mcp.models import CallToolResult, TextContent
+from aiohttp_tiny_mcp.protocol.models import CallToolResult, TextContent
 from aiohttp_tiny_mcp.protocol.selection import AdapterSet
 
 pytestmark = pytest.mark.asyncio

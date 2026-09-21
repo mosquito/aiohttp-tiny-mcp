@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from aiohttp_tiny_mcp.core import Answer, AnswerAction
+from aiohttp_tiny_mcp.protocol.core import Answer, AnswerAction
 
 
 class FakeHub:

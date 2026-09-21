@@ -14,8 +14,8 @@ from test_auth import RESOURCE, TOKENS, Nothing, build
 from test_http_sse import OldClient
 
 from aiohttp_tiny_mcp import Endpoint, Registry, SseEndpoint
-from aiohttp_tiny_mcp.namespaces import current, namespace, scoped
-from aiohttp_tiny_mcp.sessions import stored_owner
+from aiohttp_tiny_mcp.storage.namespaces import current, namespace, scoped
+from aiohttp_tiny_mcp.storage.sessions import stored_owner
 
 pytestmark = pytest.mark.asyncio
 

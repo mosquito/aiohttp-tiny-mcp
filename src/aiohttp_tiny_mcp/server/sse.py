@@ -11,9 +11,9 @@ from typing import Any
 
 from aiohttp import web
 
-from .adapter import Adapter
-from .auth import Principal, Unauthorized
-from .core import (
+from aiohttp_tiny_mcp.auth import Principal, Unauthorized
+from aiohttp_tiny_mcp.protocol.adapter import Adapter
+from aiohttp_tiny_mcp.protocol.core import (
     Call,
     DecodeFailure,
     Failure,
@@ -23,14 +23,10 @@ from .core import (
     Rejected,
     Value,
 )
-from .dispatcher import Dispatcher
-from .endpoint import Endpoint
-from .exchange import Exchange
-from .hub import NOTIFICATIONS, Subscription, topic
-from .namespaces import scoped
-from .protocol.selection import AdapterSet
-from .registry import Registry
-from .sessions import (
+from aiohttp_tiny_mcp.protocol.selection import AdapterSet
+from aiohttp_tiny_mcp.storage.hub import NOTIFICATIONS, Subscription, topic
+from aiohttp_tiny_mcp.storage.namespaces import scoped
+from aiohttp_tiny_mcp.storage.sessions import (
     Session,
     SessionRecord,
     handshake_data,
@@ -39,7 +35,12 @@ from .sessions import (
     stored_log_level,
     stored_version,
 )
-from .sse import SSEResponse
+from aiohttp_tiny_mcp.transport.sse import SSEResponse
+
+from .dispatcher import Dispatcher
+from .exchange import Exchange
+from .http import Endpoint
+from .registry import Registry
 from .subscriptions import relays, wanted
 from .tasks import stop
 

@@ -17,10 +17,10 @@ from aiohttp import web
 from pydantic import BaseModel
 
 from aiohttp_tiny_mcp import Client, Extension, MemoryHub, MethodFilter, Registry, SseEndpoint
-from aiohttp_tiny_mcp.hub import NOTIFICATIONS, topic
 from aiohttp_tiny_mcp.protocol.selection import AdapterSet
-from aiohttp_tiny_mcp.sqlite import SqliteHub, SqliteSessionStore, SqliteStorage
-from aiohttp_tiny_mcp.subscriptions import SUBSCRIPTION_ID
+from aiohttp_tiny_mcp.server.subscriptions import SUBSCRIPTION_ID
+from aiohttp_tiny_mcp.storage.hub import NOTIFICATIONS, topic
+from aiohttp_tiny_mcp.storage.sqlite import SqliteHub, SqliteSessionStore, SqliteStorage
 from aiohttp_tiny_mcp.testing import connect, serving
 
 pytestmark = pytest.mark.timeout(20)

@@ -31,8 +31,8 @@ from aiohttp_tiny_mcp import (
     elicit,
     run_stdio,
 )
-from aiohttp_tiny_mcp.hub import NOTIFICATIONS, topic
-from aiohttp_tiny_mcp.models import CompleteParams
+from aiohttp_tiny_mcp.protocol.models import CompleteParams
+from aiohttp_tiny_mcp.storage.hub import NOTIFICATIONS, topic
 
 
 @dataclass
@@ -61,7 +61,7 @@ class NoteStore:
     """The notebook itself, on one SQLite file.
 
     This is the application's own data, not the protocol's: sessions and
-    events go to `aiohttp_tiny_mcp.sqlite`, which keeps its own tables.
+    events go to `aiohttp_tiny_mcp.storage.sqlite`, which keeps its own tables.
     """
 
     def __init__(self, path: str) -> None:

@@ -164,8 +164,8 @@ HTTP gateway. Every worker needs the same logical
 requests across workers.
 
 Configure endpoint protection before deployment. The
-[authentication guide](../guide/auth.md) covers Basic, Bearer, custom policies,
-and existing application middleware.
+[authentication guide](../guide/auth.md) covers Basic, Bearer, and custom
+policies through `Registry(auth=...)`. No authentication middleware is required.
 
 For streaming responses, disable proxy buffering and allow connections to stay
 open while a tool runs or waits for a user's answer. The endpoint sets

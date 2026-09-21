@@ -10,16 +10,16 @@ from typing import Any
 
 from aiohttp import web
 
-from .adapter import Adapter
-from .client import Client
-from .client_base import BaseClient, Elicitor
-from .core import elicit_accept, elicit_decline
-from .endpoint import Endpoint
-from .models import Implementation
+from .client.base import BaseClient, Elicitor
+from .client.http import Client
+from .client.stdio import StdioClient
+from .protocol.adapter import Adapter
+from .protocol.core import elicit_accept, elicit_decline
+from .protocol.models import Implementation
 from .protocol.selection import AdapterSet
-from .registry import Registry
-from .stdio import serve_stdio
-from .stdio_client import StdioClient
+from .server.http import Endpoint
+from .server.registry import Registry
+from .server.stdio import serve_stdio
 
 
 class Pipe:

@@ -6,7 +6,7 @@ import json
 from collections.abc import Mapping
 from typing import Any, ClassVar
 
-from aiohttp_tiny_mcp.core import (
+from aiohttp_tiny_mcp.protocol.core import (
     AnswerAction,
     Call,
     ClientProfile,
@@ -15,7 +15,7 @@ from aiohttp_tiny_mcp.core import (
     answer_actions,
     unwrap_answers,
 )
-from aiohttp_tiny_mcp.models import (
+from aiohttp_tiny_mcp.protocol.models import (
     CallToolParams,
     CallToolResult,
     Incoming,
@@ -25,7 +25,7 @@ from aiohttp_tiny_mcp.models import (
     TextContent,
     ToolDef,
 )
-from aiohttp_tiny_mcp.specs import ToolSpec
+from aiohttp_tiny_mcp.server.specs import ToolSpec
 
 from .v2025_06_18 import Adapter2025_06_18
 

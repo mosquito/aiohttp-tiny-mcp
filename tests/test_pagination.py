@@ -10,8 +10,8 @@ import pytest
 from pydantic import BaseModel
 
 from aiohttp_tiny_mcp import Client, Registry
-from aiohttp_tiny_mcp.core import Operation
-from aiohttp_tiny_mcp.models import ListParams
+from aiohttp_tiny_mcp.protocol.core import Operation
+from aiohttp_tiny_mcp.protocol.models import ListParams
 from aiohttp_tiny_mcp.protocol.selection import AdapterSet
 from aiohttp_tiny_mcp.testing import serving
 

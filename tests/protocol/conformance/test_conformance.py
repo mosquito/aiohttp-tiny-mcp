@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from aiohttp_tiny_mcp.core import FailureKind, Operation
+from aiohttp_tiny_mcp.protocol.core import FailureKind, Operation
 from aiohttp_tiny_mcp.protocol.selection import AdapterSet
 from aiohttp_tiny_mcp.protocol.v2026_07_28 import Adapter2026_07_28
 

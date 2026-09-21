@@ -21,7 +21,7 @@ automatically.
 3. [How the server fits together](pieces.md) — understand `Exchange`,
    `SessionStore`, and `Hub` before deploying more than one worker.
 4. [Authentication](guide/auth.md) — configure Basic, Bearer, custom policies,
-   and permissions, or reuse existing application middleware.
+   and permissions through `Registry(auth=...)`.
 
 The library supports `2024-11-05`, `2025-03-26`, `2025-06-18`, `2025-11-25`,
 and `2026-07-28` from one set of handlers. Use the

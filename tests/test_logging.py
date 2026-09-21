@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from aiohttp_tiny_mcp import Client
-from aiohttp_tiny_mcp.core import logs_at
+from aiohttp_tiny_mcp.protocol.core import logs_at
 from aiohttp_tiny_mcp.protocol.selection import AdapterSet
 
 pytestmark = pytest.mark.asyncio

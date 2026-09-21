@@ -13,9 +13,11 @@ from .auth import (
     Unauthorized,
     principal_from_claims,
 )
-from .client import Client
-from .client_base import ClientError, Elicitor
-from .core import (
+from .client.base import ClientError, Elicitor
+from .client.http import Client
+from .client.stdio import StdioClient
+from .extensions import Extension
+from .protocol.core import (
     Answer,
     AnswerAction,
     NeedInput,
@@ -24,12 +26,7 @@ from .core import (
     elicit_cancel,
     elicit_decline,
 )
-from .endpoint import Endpoint
-from .exchange import Exchange
-from .extensions import Extension
-from .http_sse import SseEndpoint
-from .hub import Hub, MemoryHub
-from .models import (
+from .protocol.models import (
     AudioContent,
     BlobResourceContents,
     CallToolResult,
@@ -44,14 +41,17 @@ from .models import (
     TextContent,
     TextResourceContents,
 )
-from .namespaces import namespace
 from .protocol.selection import AdapterSet
-from .registry import Registry
-from .request_state import RequestStates
-from .sessions import MemorySessionStore, SessionRecord, SessionStore
-from .sse import SSEResponse
-from .stdio import run_stdio, serve_stdio
-from .stdio_client import StdioClient
+from .server.exchange import Exchange
+from .server.http import Endpoint
+from .server.registry import Registry
+from .server.request_state import RequestStates
+from .server.sse import SseEndpoint
+from .server.stdio import run_stdio, serve_stdio
+from .storage.hub import Hub, MemoryHub
+from .storage.namespaces import namespace
+from .storage.sessions import MemorySessionStore, SessionRecord, SessionStore
+from .transport.sse import SSEResponse
 
 __all__ = [
     "AdapterSet",

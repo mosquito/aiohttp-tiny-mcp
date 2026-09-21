@@ -30,8 +30,8 @@ from aiohttp.test_utils import TestClient, TestServer
 from aiohttp_tiny_mcp import Endpoint, Registry, StaticBasicAuth
 from aiohttp_tiny_mcp.auth import Authorization, Principal
 from aiohttp_tiny_mcp.console import Console
-from aiohttp_tiny_mcp.http_sse import SseEndpoint
-from aiohttp_tiny_mcp.oauth import GitHub, OAuthClient, OAuthFacade
+from aiohttp_tiny_mcp.oauth import GitHub, OAuthClient, OAuthServer
+from aiohttp_tiny_mcp.server.sse import SseEndpoint
 
 pytestmark = pytest.mark.asyncio
 
@@ -174,7 +174,7 @@ async def test_nested_mount_warning_keeps_the_original_required_path(auth, prote
 @pytest.mark.parametrize("transport", [Endpoint, SseEndpoint])
 async def test_basic_auth_subapp_does_not_warn(transport, caplog):
     section = web.Application()
-    transport(Registry("basic", "1", auth=StaticBasicAuth("user", "password"))).setup(section)
+    transport(Registry("basic", "1", auth=StaticBasicAuth(("user", "password")))).setup(section)
     web.Application().add_subapp("/api", section)
     assert not caplog.records
 
@@ -182,7 +182,7 @@ async def test_basic_auth_subapp_does_not_warn(transport, caplog):
 @pytest.mark.parametrize("installation", ["routes", "setup"])
 @pytest.mark.parametrize("issuer_path", ["", "/oauth"])
 async def test_oauth_facade_warns_when_metadata_moves(installation, issuer_path, caplog):
-    facade = OAuthFacade(
+    server = OAuthServer(
         "https://mcp.example.com" + issuer_path,
         GitHub("test-id", "test-secret"),
         resource=RESOURCE,
@@ -190,9 +190,9 @@ async def test_oauth_facade_warns_when_metadata_moves(installation, issuer_path,
     )
     section = web.Application()
     if installation == "routes":
-        section.add_routes(facade.routes())
+        section.add_routes(server.routes())
     else:
-        facade.setup(section)
+        server.setup(section)
     assert not caplog.records
     host = web.Application()
     host.add_subapp("/api", section)
@@ -200,22 +200,22 @@ async def test_oauth_facade_warns_when_metadata_moves(installation, issuer_path,
     assert len(caplog.records) == 1
     assert f"belongs at {expected}" in caplog.text
     assert f"moved it to /api{expected}" in caplog.text
-    assert "mount OAuthFacade routes on the root application" in caplog.text
+    assert "mount OAuthServer routes on the root application" in caplog.text
     async with TestClient(TestServer(host)) as http:
         assert (await http.get(expected)).status == 404
         actual = await http.get("/api" + expected)
         assert actual.status == 200
-        assert (await actual.json())["issuer"] == facade.issuer
+        assert (await actual.json())["issuer"] == server.issuer
 
 
 async def test_oauth_facade_with_issuer_path_on_root_does_not_warn(caplog):
-    facade = OAuthFacade(
+    server = OAuthServer(
         "https://mcp.example.com/oauth",
         GitHub("test-id", "test-secret"),
         resource=RESOURCE,
         clients=[OAuthClient("test", ["https://client.example.com/callback"])],
     )
-    root = facade.setup(web.Application())
+    root = server.setup(web.Application())
     async with TestClient(TestServer(root)) as http:
         path = "/.well-known/oauth-authorization-server/oauth"
         assert (await http.get(path)).status == 200

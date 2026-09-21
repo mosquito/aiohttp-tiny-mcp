@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 
-from aiohttp_tiny_mcp.core import Preamble
+from aiohttp_tiny_mcp.protocol.core import Preamble
 
 
 def test_preamble_parses_header_and_meta_version():

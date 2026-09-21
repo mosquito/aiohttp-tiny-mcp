@@ -17,7 +17,7 @@ import pytest
 from pydantic import BaseModel
 
 from aiohttp_tiny_mcp import Client, Exchange, MemoryHub, MemorySessionStore, Registry, elicit
-from aiohttp_tiny_mcp.models import AudioContent, CallToolResult, TextContent
+from aiohttp_tiny_mcp.protocol.models import AudioContent, CallToolResult, TextContent
 from aiohttp_tiny_mcp.protocol.selection import AdapterSet
 
 pytestmark = pytest.mark.asyncio

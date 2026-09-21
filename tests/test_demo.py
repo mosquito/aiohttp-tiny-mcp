@@ -8,7 +8,7 @@ from aiohttp import web
 from aiohttp.test_utils import TestServer
 
 from aiohttp_tiny_mcp import Client, Endpoint, elicit_accept, elicit_decline
-from aiohttp_tiny_mcp.models import CallToolResult, TextContent
+from aiohttp_tiny_mcp.protocol.models import CallToolResult, TextContent
 from aiohttp_tiny_mcp.protocol.selection import AdapterSet
 
 

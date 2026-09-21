@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from aiohttp_tiny_mcp.core import Preamble, Rejected
+from aiohttp_tiny_mcp.protocol.core import Preamble, Rejected
 from aiohttp_tiny_mcp.protocol.selection import ASSUMED_VERSION, STABLE_REVISION, AdapterSet
 from aiohttp_tiny_mcp.protocol.v2025_03_26 import Adapter2025_03_26
 from aiohttp_tiny_mcp.protocol.v2025_06_18 import Adapter2025_06_18

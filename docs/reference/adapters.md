@@ -159,7 +159,7 @@ reported the way each client expects.
 
 <!-- name: test_adapters -->
 ```python
-from aiohttp_tiny_mcp.core import Failure, FailureKind
+from aiohttp_tiny_mcp.protocol.core import Failure, FailureKind
 
 modern = AdapterSet.default().by_version["2026-07-28"]
 legacy = AdapterSet.default().by_version["2025-11-25"]

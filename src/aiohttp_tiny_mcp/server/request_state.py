@@ -12,9 +12,9 @@ import secrets
 from dataclasses import dataclass
 from typing import Any
 
-from .core import Call, Failure, FailureKind, NeedsInput
-from .namespaces import scoped
-from .sessions import SessionStore
+from aiohttp_tiny_mcp.protocol.core import Call, Failure, FailureKind, NeedsInput
+from aiohttp_tiny_mcp.storage.namespaces import scoped
+from aiohttp_tiny_mcp.storage.sessions import SessionStore
 
 PREFIX = "state/"
 

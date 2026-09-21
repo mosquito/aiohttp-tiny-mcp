@@ -4,9 +4,9 @@ import pytest
 from pydantic import BaseModel
 
 from aiohttp_tiny_mcp import Exchange, MemorySessionStore, Registry
-from aiohttp_tiny_mcp.hub import MemoryHub
-from aiohttp_tiny_mcp.models import CompleteParams
-from aiohttp_tiny_mcp.registry import Registry as ModuleRegistry
+from aiohttp_tiny_mcp.protocol.models import CompleteParams
+from aiohttp_tiny_mcp.server.registry import Registry as ModuleRegistry
+from aiohttp_tiny_mcp.storage.hub import MemoryHub
 
 
 class NoArguments(BaseModel):

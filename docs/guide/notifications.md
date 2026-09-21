@@ -128,7 +128,7 @@ import asyncio
 from pydantic import BaseModel
 
 from aiohttp_tiny_mcp import Client, Registry
-from aiohttp_tiny_mcp.hub import NOTIFICATIONS, topic
+from aiohttp_tiny_mcp.storage.hub import NOTIFICATIONS, topic
 from aiohttp_tiny_mcp.protocol.selection import AdapterSet
 
 registry = Registry("watcher", "1.0")

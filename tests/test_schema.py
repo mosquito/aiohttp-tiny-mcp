@@ -3,7 +3,12 @@ from __future__ import annotations
 import pytest
 from pydantic import BaseModel, Field
 
-from aiohttp_tiny_mcp.schema import header_params, inline_refs, json_schema, simplify_legacy_schema
+from aiohttp_tiny_mcp.protocol.schema import (
+    header_params,
+    inline_refs,
+    json_schema,
+    simplify_legacy_schema,
+)
 
 
 class Inner(BaseModel):

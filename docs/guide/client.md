@@ -52,7 +52,7 @@ listing large enough to show as it arrives.
 <!-- name: async test_client_pages; fixtures: serve, registry -->
 ```python
 from aiohttp_tiny_mcp import Client
-from aiohttp_tiny_mcp.core import Operation
+from aiohttp_tiny_mcp.protocol.core import Operation
 from aiohttp_tiny_mcp.protocol.selection import AdapterSet
 
 url = await serve(registry)
@@ -136,7 +136,7 @@ one the client asked for is exactly what it does not have. A server that speaks
 from pydantic import BaseModel
 
 from aiohttp_tiny_mcp import Client, Registry, elicit_accept
-from aiohttp_tiny_mcp.models import Implementation
+from aiohttp_tiny_mcp.protocol.models import Implementation
 from aiohttp_tiny_mcp.protocol.selection import AdapterSet
 
 registry = Registry("demo", "1.0")
@@ -291,7 +291,7 @@ import asyncio
 import sys
 
 from aiohttp_tiny_mcp.protocol.selection import AdapterSet
-from aiohttp_tiny_mcp.stdio_client import StdioClient
+from aiohttp_tiny_mcp.client.stdio import StdioClient
 
 
 async def main(script: str):

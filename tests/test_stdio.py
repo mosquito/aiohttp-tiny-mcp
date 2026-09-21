@@ -10,7 +10,7 @@ from typing import Any
 import pytest
 
 from aiohttp_tiny_mcp.protocol.selection import AdapterSet
-from aiohttp_tiny_mcp.stdio import serve_stdio
+from aiohttp_tiny_mcp.server.stdio import serve_stdio
 
 pytestmark = [pytest.mark.asyncio, pytest.mark.timeout(10)]
 

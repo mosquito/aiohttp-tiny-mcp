@@ -12,7 +12,7 @@ from typing import Any, ClassVar, Literal, Protocol, get_type_hints
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from .models import (
+from aiohttp_tiny_mcp.protocol.models import (
     BlobResourceContents,
     CallToolResult,
     Hint,
@@ -24,7 +24,7 @@ from .models import (
     TextResourceContents,
     ToolDef,
 )
-from .schema import header_params, json_schema
+from aiohttp_tiny_mcp.protocol.schema import header_params, json_schema
 
 
 class Resolver(Protocol):

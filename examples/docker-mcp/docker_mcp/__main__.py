@@ -11,7 +11,7 @@ from aiodocker import Docker
 from aiohttp import web
 from aiohttp_tiny_mcp import Endpoint, Registry, run_stdio
 from aiohttp_tiny_mcp.console import Console
-from aiohttp_tiny_mcp.sqlite import SqliteHub, SqliteSessionStore, SqliteStorage
+from aiohttp_tiny_mcp.storage.sqlite import SqliteHub, SqliteSessionStore, SqliteStorage
 
 from .consent import LEVELS, Policy
 from .events import watch

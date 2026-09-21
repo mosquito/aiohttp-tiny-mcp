@@ -9,14 +9,14 @@ construction rather than by remembering to check.
 Authentication policies return a `Principal`; its namespace selects the
 session and Hub keys used by the request. See the
 [authentication guide](../guide/auth.md#principal-and-storage-namespaces)
-for policy configuration, identity mapping, and trusted middleware.
+for policy configuration and identity mapping.
 
 At the storage level, `namespace` is a context variable. An unset namespace
 leaves keys unprefixed:
 
 <!-- name: test_namespaces -->
 ```python
-from aiohttp_tiny_mcp.namespaces import namespace, scoped
+from aiohttp_tiny_mcp.storage.namespaces import namespace, scoped
 
 namespace.set(None)
 assert scoped("abc") == "abc"
@@ -59,10 +59,10 @@ from aiohttp_tiny_mcp.protocol.selection import AdapterSet
 registry = Registry(
     "service",
     "1.0",
-    auth=[
-        StaticBasicAuth("first", "example-password"),
-        StaticBasicAuth("second", "example-password"),
-    ],
+    auth=StaticBasicAuth(
+        ("first", "example-password"),
+        ("second", "example-password"),
+    ),
     hub=MemoryHub(),
     session_store=MemorySessionStore(),
 )
@@ -132,7 +132,8 @@ quoted exactly.
 
 Use verified identity or tenant information. The
 [authentication guide](../guide/auth.md#principal-and-storage-namespaces)
-defines how `Principal.namespace`, `Principal.identity`, and middleware interact.
+explains storage isolation through `Principal.namespace` and session ownership
+through `Principal.identity`.
 Do not derive tenant identity from an unverified client header.
 
 ## What it does not do

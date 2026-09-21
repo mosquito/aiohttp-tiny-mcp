@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from typing import Any, ClassVar
 
-from aiohttp_tiny_mcp.core import Call
-from aiohttp_tiny_mcp.models import AudioContent, CallToolResult, ToolDef
-from aiohttp_tiny_mcp.specs import ToolSpec
+from aiohttp_tiny_mcp.protocol.core import Call
+from aiohttp_tiny_mcp.protocol.models import AudioContent, CallToolResult, ToolDef
+from aiohttp_tiny_mcp.server.specs import ToolSpec
 
 from .v2025_03_26 import Adapter2025_03_26
 

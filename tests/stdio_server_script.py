@@ -15,7 +15,7 @@ from aiohttp_tiny_mcp import (  # noqa: E402
     elicit,
     run_stdio,
 )
-from aiohttp_tiny_mcp.models import CompleteParams
+from aiohttp_tiny_mcp.protocol.models import CompleteParams
 
 
 class Add(BaseModel):

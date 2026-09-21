@@ -7,7 +7,7 @@ import pytest
 from pydantic import BaseModel, ConfigDict
 
 from aiohttp_tiny_mcp import ClientError, Exchange, Extension, Registry, TextResourceContents
-from aiohttp_tiny_mcp.models import ListParams, ReadResourceParams
+from aiohttp_tiny_mcp.protocol.models import ListParams, ReadResourceParams
 from aiohttp_tiny_mcp.testing import connect, over_http
 
 VERSIONS = ["2024-11-05", "2025-03-26", "2025-06-18", "2025-11-25"]
@@ -183,7 +183,7 @@ class Job(BaseModel):
 async def test_complete_method_interface_including_state_changes_and_custom_results(
     version, transport
 ):
-    from aiohttp_tiny_mcp.core import Failure, FailureKind, Rejected
+    from aiohttp_tiny_mcp.protocol.core import Failure, FailureKind, Rejected
 
     extension = Extension("example.org/live")
     state = {}

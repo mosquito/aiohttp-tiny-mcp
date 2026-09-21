@@ -11,7 +11,7 @@ The verbs a server can perform. Protocol method names are an adapter concern;
 
 <!-- name: test_runtime -->
 ```python
-from aiohttp_tiny_mcp.core import Operation
+from aiohttp_tiny_mcp.protocol.core import Operation
 
 assert Operation.CALL_TOOL.value == "call_tool"
 ```

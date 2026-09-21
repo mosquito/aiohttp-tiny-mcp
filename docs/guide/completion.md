@@ -12,7 +12,7 @@ being completed and what has been typed so far, and returns what fits.
 from pydantic import BaseModel
 
 from aiohttp_tiny_mcp import MemoryHub, MemorySessionStore, Registry
-from aiohttp_tiny_mcp.models import CompleteParams
+from aiohttp_tiny_mcp.protocol.models import CompleteParams
 
 registry = Registry("catalog", "1.0", hub=MemoryHub(), session_store=MemorySessionStore())
 
@@ -98,7 +98,7 @@ shows that as "and 900 more" rather than pretending the list is complete.
 
 <!-- name: test_completion -->
 ```python
-from aiohttp_tiny_mcp.models import Completion
+from aiohttp_tiny_mcp.protocol.models import Completion
 
 
 async def complete_many(args: CompleteParams) -> Completion:

@@ -9,6 +9,10 @@ from typing import Any, ClassVar, Protocol, cast
 
 from pydantic import BaseModel, ValidationError
 
+from aiohttp_tiny_mcp.extensions import ExtensionSpec
+from aiohttp_tiny_mcp.server.specs import Bound, PromptSpec, ResourceSpec, ToolSpec
+from aiohttp_tiny_mcp.storage.hub import Hub
+
 from .core import (
     AnswerAction,
     Call,
@@ -26,8 +30,6 @@ from .core import (
     answer_actions,
     decode_failure_target,
 )
-from .extensions import ExtensionSpec
-from .hub import Hub
 from .models import (
     CallToolParams,
     CompleteParams,
@@ -44,7 +46,6 @@ from .models import (
     ResourceTemplateDef,
     ToolDef,
 )
-from .specs import Bound, PromptSpec, ResourceSpec, ToolSpec
 
 
 class RequestLike(Protocol):

@@ -229,8 +229,8 @@ bundled page uses, or the script has nothing to fill in.
 
 The console is an HTTP client. Its authentication dialog supports Basic, Bearer
 tokens, custom headers, and configured OAuth sign-in. See the [authentication guide](auth.md#console-authentication)
-for credential handling and public asset routing. Application-wide middleware
-can use `Console.is_public(request)` to identify public console requests.
+for credential handling. `Registry(auth=...)` leaves console assets public.
+Optional application middleware can use `Console.is_public(request)` to identify them.
 
 ## Static files, no build
 

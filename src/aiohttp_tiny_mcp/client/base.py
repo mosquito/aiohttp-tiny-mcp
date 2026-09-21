@@ -7,9 +7,9 @@ from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
 from typing import Any
 
-from .adapter import Adapter
-from .core import ClientProfile, InputRequest, Operation
-from .models import (
+from aiohttp_tiny_mcp.protocol.adapter import Adapter
+from aiohttp_tiny_mcp.protocol.core import ClientProfile, InputRequest, Operation
+from aiohttp_tiny_mcp.protocol.models import (
     CallToolParams,
     CallToolResult,
     CompleteArgument,

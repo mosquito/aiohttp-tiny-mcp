@@ -67,7 +67,7 @@ several turns, or an assistant turn that primes the answer.
 
 <!-- name: test_prompts -->
 ```python
-from aiohttp_tiny_mcp.models import PromptMessage, TextContent
+from aiohttp_tiny_mcp.protocol.models import PromptMessage, TextContent
 
 
 class Explain(BaseModel):

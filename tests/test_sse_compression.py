@@ -16,9 +16,9 @@ from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
 from aiohttp_tiny_mcp import Endpoint
-from aiohttp_tiny_mcp.http_sse import SseEndpoint
-from aiohttp_tiny_mcp.hub import NOTIFICATIONS, topic
-from aiohttp_tiny_mcp.sse import read_sse
+from aiohttp_tiny_mcp.server.sse import SseEndpoint
+from aiohttp_tiny_mcp.storage.hub import NOTIFICATIONS, topic
+from aiohttp_tiny_mcp.transport.sse import read_sse
 
 pytestmark = pytest.mark.asyncio
 

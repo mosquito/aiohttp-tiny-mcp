@@ -10,7 +10,7 @@ from aiohttp import web
 from pydantic import BaseModel
 
 from aiohttp_tiny_mcp import Endpoint, Exchange, Registry, elicit
-from aiohttp_tiny_mcp.hub import NOTIFICATIONS, topic
+from aiohttp_tiny_mcp.storage.hub import NOTIFICATIONS, topic
 from aiohttp_tiny_mcp.testing import serving
 
 

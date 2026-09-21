@@ -88,8 +88,27 @@ class MemorySessionStore(SessionStore):
     def __init__(self, *, clock: Callable[[], float] = time.monotonic) -> None:
         self.clock = clock
         self.records: dict[str, tuple[Mapping[str, Any], int, float]] = {}
+        self._next_cleanup = float("inf")
+
+    def _expiry(self, ttl_seconds: int) -> float:
+        expiry = self.clock() + ttl_seconds
+        self._next_cleanup = min(self._next_cleanup, expiry)
+        return expiry
+
+    def _purge_expired(self) -> None:
+        now = self.clock()
+        if now < self._next_cleanup:
+            return
+        next_cleanup = float("inf")
+        for key, (_, _, expiry) in tuple(self.records.items()):
+            if expiry <= now:
+                del self.records[key]
+            else:
+                next_cleanup = min(next_cleanup, expiry)
+        self._next_cleanup = next_cleanup
 
     def live(self, session_id: str) -> tuple[Mapping[str, Any], int, float] | None:
+        self._purge_expired()
         entry = self.records.get(session_id)
         if entry is None:
             return None
@@ -101,7 +120,7 @@ class MemorySessionStore(SessionStore):
     async def create(self, session_id: str, data: Mapping[str, Any], *, ttl_seconds: int) -> bool:
         if self.live(session_id) is not None:
             return False
-        self.records[session_id] = (dict(data), 1, self.clock() + ttl_seconds)
+        self.records[session_id] = (dict(data), 1, self._expiry(ttl_seconds))
         return True
 
     async def get(self, session_id: str) -> SessionRecord | None:
@@ -122,7 +141,7 @@ class MemorySessionStore(SessionStore):
         entry = self.live(session_id)
         if entry is None or entry[1] != expected_version:
             return False
-        self.records[session_id] = (dict(data), expected_version + 1, self.clock() + ttl_seconds)
+        self.records[session_id] = (dict(data), expected_version + 1, self._expiry(ttl_seconds))
         return True
 
     async def touch(self, session_id: str, *, ttl_seconds: int) -> bool:
@@ -130,7 +149,7 @@ class MemorySessionStore(SessionStore):
         if entry is None:
             return False
         data, version, _ = entry
-        self.records[session_id] = (data, version, self.clock() + ttl_seconds)
+        self.records[session_id] = (data, version, self._expiry(ttl_seconds))
         return True
 
     async def delete(self, session_id: str) -> None:
@@ -223,7 +242,7 @@ class Session:
         """Store the revision this client negotiated.
 
         Written where a handshake happens on a transport that keeps no header
-        to carry it -- see http_sse.py. The header path writes the same key when it
+        to carry it -- see server.sse. The header path writes the same key when it
         opens a session.
         """
         await self.write_value(PROTOCOL_VERSION_KEY, version)

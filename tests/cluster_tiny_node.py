@@ -21,7 +21,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 from cluster_storage import shared  # noqa: E402
 
 from aiohttp_tiny_mcp import Endpoint, Exchange, NeedInput, Registry, elicit  # noqa: E402
-from aiohttp_tiny_mcp.hub import NOTIFICATIONS, topic  # noqa: E402
+from aiohttp_tiny_mcp.storage.hub import NOTIFICATIONS, topic  # noqa: E402
 
 CONFIG_URI = "config://app"
 

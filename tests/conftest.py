@@ -23,7 +23,7 @@ from aiohttp_tiny_mcp import (  # noqa: E402
     elicit,
     elicit_decline,
 )
-from aiohttp_tiny_mcp.models import CompleteParams
+from aiohttp_tiny_mcp.protocol.models import CompleteParams
 from aiohttp_tiny_mcp.protocol.selection import AdapterSet
 from aiohttp_tiny_mcp.testing import serving
 
@@ -79,7 +79,7 @@ async def store_and_hub(
         yield MemorySessionStore(), MemoryHub()
         return
     if kind == "sqlite":
-        from aiohttp_tiny_mcp.sqlite import SqliteHub, SqliteSessionStore, SqliteStorage
+        from aiohttp_tiny_mcp.storage.sqlite import SqliteHub, SqliteSessionStore, SqliteStorage
 
         storage = SqliteStorage(str(tmp_path / "state.sqlite"))
         try:
@@ -90,7 +90,7 @@ async def store_and_hub(
     if kind == "redis":
         if redis_url_or_none is None:
             missing("redis", REDIS_URL)
-        from aiohttp_tiny_mcp.redis import RedisHub, RedisSessionStore, RedisStorage
+        from aiohttp_tiny_mcp.storage.redis import RedisHub, RedisSessionStore, RedisStorage
 
         pool = RedisStorage.from_url(redis_url_or_none, prefix=f"mcptest:{uuid.uuid4().hex[:12]}")
         try:
@@ -100,7 +100,7 @@ async def store_and_hub(
         return
     if postgres_url_or_none is None:
         missing("postgres", POSTGRES_URL)
-    from aiohttp_tiny_mcp.postgres import PostgresHub, PostgresSessionStore, PostgresStorage
+    from aiohttp_tiny_mcp.storage.postgres import PostgresHub, PostgresSessionStore, PostgresStorage
 
     pool = PostgresStorage.from_url(postgres_url_or_none)
     try:

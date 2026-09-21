@@ -23,7 +23,7 @@ from aiohttp_tiny_mcp import (
 )
 from aiohttp_tiny_mcp import auth as auth_module
 from aiohttp_tiny_mcp.protocol.selection import AdapterSet
-from aiohttp_tiny_mcp.sessions import SESSION_HEADER
+from aiohttp_tiny_mcp.storage.sessions import SESSION_HEADER
 from aiohttp_tiny_mcp.testing import over_http, pick
 
 

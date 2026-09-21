@@ -10,8 +10,8 @@ from typing import Any, ClassVar, Literal
 
 from pydantic import Field
 
-from aiohttp_tiny_mcp.adapter import Adapter, RegistryProtocol
-from aiohttp_tiny_mcp.core import (
+from aiohttp_tiny_mcp.protocol.adapter import Adapter, RegistryProtocol
+from aiohttp_tiny_mcp.protocol.core import (
     Call,
     ClientInfo,
     ClientProfile,
@@ -24,7 +24,7 @@ from aiohttp_tiny_mcp.core import (
     Rejected,
     unwrap_answers,
 )
-from aiohttp_tiny_mcp.models import (
+from aiohttp_tiny_mcp.protocol.models import (
     CallToolParams,
     CompleteParams,
     GetPromptParams,
@@ -38,8 +38,8 @@ from aiohttp_tiny_mcp.models import (
     ReadResourceResult,
     ToolDef,
 )
-from aiohttp_tiny_mcp.schema import header_params
-from aiohttp_tiny_mcp.specs import ToolSpec
+from aiohttp_tiny_mcp.protocol.schema import header_params
+from aiohttp_tiny_mcp.server.specs import ToolSpec
 
 # Modern subscriptions are independent long-lived requests, not MCP sessions.
 METHODS: Mapping[str, Operation] = MappingProxyType(

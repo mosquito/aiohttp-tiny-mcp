@@ -11,8 +11,8 @@ import hashlib
 from typing import Any
 
 from aiohttp_tiny_mcp import Exchange, elicit
-from aiohttp_tiny_mcp.namespaces import scoped
-from aiohttp_tiny_mcp.sessions import DATA_KEY, Session
+from aiohttp_tiny_mcp.storage.namespaces import scoped
+from aiohttp_tiny_mcp.storage.sessions import DATA_KEY, Session
 
 CONSENT_KEY = "consent"
 

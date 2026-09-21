@@ -17,7 +17,7 @@ try:
     import aiosqlite
 except ImportError as absent:  # pragma: no cover - depends on what is installed
     raise ImportError(
-        'aiohttp_tiny_mcp.sqlite needs aiosqlite. Install "aiohttp-tiny-mcp[sqlite]".'
+        'aiohttp_tiny_mcp.storage.sqlite needs aiosqlite. Install "aiohttp-tiny-mcp[sqlite]".'
     ) from absent
 
 log = logging.getLogger("aiohttp_tiny_mcp")

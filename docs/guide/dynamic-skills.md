@@ -32,8 +32,8 @@ provider when needed. No filesystem or YAML parser is required here.
 from pydantic import BaseModel
 
 from aiohttp_tiny_mcp import Extension, Registry
-from aiohttp_tiny_mcp.core import Failure, FailureKind, Rejected
-from aiohttp_tiny_mcp.models import CacheableResult, ListParams, ReadResourceParams
+from aiohttp_tiny_mcp.protocol.core import Failure, FailureKind, Rejected
+from aiohttp_tiny_mcp.protocol.models import CacheableResult, ListParams, ReadResourceParams
 from aiohttp_tiny_mcp.testing import connect
 
 URI = "skill://deploy/SKILL.md"
@@ -121,7 +121,7 @@ registry. Both use `io.modelcontextprotocol/skills`, and duplicate extension
 identifiers are rejected. To combine static and dynamic skills, serve both
 through one set of listing, detail, and resource handlers.
 
-The models in `aiohttp_tiny_mcp.skills` currently describe static manifests.
+The models in `aiohttp_tiny_mcp.extensions.skills` currently describe static manifests.
 For `resources: "dynamic"`, use your own `CacheableResult` subclasses as above,
 or dictionaries that include `ttlMs` and `cacheScope`.
 

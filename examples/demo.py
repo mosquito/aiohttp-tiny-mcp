@@ -41,8 +41,8 @@ from aiohttp_tiny_mcp import (
     run_stdio,
 )
 from aiohttp_tiny_mcp.console import Console
-from aiohttp_tiny_mcp.hub import NOTIFICATIONS, topic
-from aiohttp_tiny_mcp.models import CompleteParams
+from aiohttp_tiny_mcp.protocol.models import CompleteParams
+from aiohttp_tiny_mcp.storage.hub import NOTIFICATIONS, topic
 
 
 class Pool:

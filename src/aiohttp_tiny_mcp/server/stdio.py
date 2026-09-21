@@ -15,17 +15,18 @@ from contextlib import suppress
 from dataclasses import replace
 from typing import Any
 
-from .adapter import Adapter
-from .core import (
+from aiohttp_tiny_mcp.protocol.adapter import Adapter
+from aiohttp_tiny_mcp.protocol.core import (
     DecodeFailure,
     Failure,
     FailureKind,
     Preamble,
     Rejected,
 )
+from aiohttp_tiny_mcp.protocol.selection import AdapterSet
+
 from .dispatcher import Dispatcher
 from .exchange import Exchange, is_reply, relay_reply
-from .protocol.selection import AdapterSet
 from .registry import Registry
 from .tasks import stop
 

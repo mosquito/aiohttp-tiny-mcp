@@ -20,9 +20,9 @@ from pydantic import BaseModel
 
 from aiohttp_tiny_mcp import Client, Endpoint, MemoryHub, MemorySessionStore, Registry
 from aiohttp_tiny_mcp.auth import Authorization, Principal, StaticVerifier, Unauthorized
-from aiohttp_tiny_mcp.namespaces import current, namespace
 from aiohttp_tiny_mcp.protocol.selection import AdapterSet
-from aiohttp_tiny_mcp.sessions import SESSION_HEADER
+from aiohttp_tiny_mcp.storage.namespaces import current, namespace
+from aiohttp_tiny_mcp.storage.sessions import SESSION_HEADER
 from aiohttp_tiny_mcp.testing import over_http, serving
 
 pytestmark = pytest.mark.asyncio
@@ -229,7 +229,7 @@ async def test_a_server_wide_scope_is_refused_before_any_tool():
 async def test_a_scoped_tool_is_unreachable_without_a_verified_caller():
     """Over a transport that carries no token there is nobody to check, and
     allowing the call would make the scope a comment."""
-    from aiohttp_tiny_mcp.dispatcher import refusal
+    from aiohttp_tiny_mcp.server.dispatcher import refusal
 
     registry, _ = build()
     refused = refusal(registry.tools["report"], None)

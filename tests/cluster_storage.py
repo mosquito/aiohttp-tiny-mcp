@@ -14,7 +14,7 @@ import asyncio
 from collections.abc import Callable, Mapping
 from typing import Any
 
-from aiohttp_tiny_mcp.sqlite import SqliteHub, SqliteSessionStore, SqliteStorage
+from aiohttp_tiny_mcp.storage.sqlite import SqliteHub, SqliteSessionStore, SqliteStorage
 
 LOOK_AGAIN_SECONDS = 0.05
 

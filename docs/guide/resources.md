@@ -118,7 +118,7 @@ Publish once; whoever subscribed hears about it, whatever revision they speak.
 
 <!-- name: test_resources -->
 ```python
-from aiohttp_tiny_mcp.hub import NOTIFICATIONS, topic
+from aiohttp_tiny_mcp.storage.hub import NOTIFICATIONS, topic
 
 
 async def announce(uri: str) -> None:

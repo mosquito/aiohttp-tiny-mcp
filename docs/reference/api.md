@@ -13,7 +13,7 @@
 .. autoclass:: aiohttp_tiny_mcp.Extension
    :members: method, resource
 
-.. autoclass:: aiohttp_tiny_mcp.skills.Skills
+.. autoclass:: aiohttp_tiny_mcp.extensions.skills.Skills
    :members: from_directory
 ```
 
@@ -50,42 +50,42 @@ resource URIs. Loading directories requires `aiohttp-tiny-mcp[skills]`.
 
 .. autoclass:: aiohttp_tiny_mcp.NeedInput
 
-.. autoclass:: aiohttp_tiny_mcp.core.Answer
+.. autoclass:: aiohttp_tiny_mcp.protocol.core.Answer
    :members:
 ```
 
 ## Sessions and state
 
 ```{eval-rst}
-.. autoclass:: aiohttp_tiny_mcp.sessions.Session
+.. autoclass:: aiohttp_tiny_mcp.storage.sessions.Session
    :members:
 
-.. autoclass:: aiohttp_tiny_mcp.sessions.SessionAccess
+.. autoclass:: aiohttp_tiny_mcp.storage.sessions.SessionAccess
    :members:
 
-.. autoclass:: aiohttp_tiny_mcp.sessions.SessionStore
+.. autoclass:: aiohttp_tiny_mcp.storage.sessions.SessionStore
    :members:
 
 .. autoclass:: aiohttp_tiny_mcp.MemorySessionStore
 
-.. autoclass:: aiohttp_tiny_mcp.request_state.RequestStates
+.. autoclass:: aiohttp_tiny_mcp.server.request_state.RequestStates
    :members:
 ```
 
 ## Events
 
 ```{eval-rst}
-.. autoclass:: aiohttp_tiny_mcp.hub.Hub
+.. autoclass:: aiohttp_tiny_mcp.storage.hub.Hub
    :members:
 
-.. autoclass:: aiohttp_tiny_mcp.hub.Event
+.. autoclass:: aiohttp_tiny_mcp.storage.hub.Event
 
-.. autoclass:: aiohttp_tiny_mcp.hub.Subscription
+.. autoclass:: aiohttp_tiny_mcp.storage.hub.Subscription
    :members:
 
 .. autoclass:: aiohttp_tiny_mcp.MemoryHub
 
-.. autofunction:: aiohttp_tiny_mcp.hub.topic
+.. autofunction:: aiohttp_tiny_mcp.storage.hub.topic
 ```
 
 ## On SQLite
@@ -94,12 +94,12 @@ Both backends on one file, for workers on one machine. Needs `aiosqlite`:
 install `aiohttp-tiny-mcp[sqlite]`. See [Stores and hubs](../deployment/stores.md#on-sqlite).
 
 ```{eval-rst}
-.. autoclass:: aiohttp_tiny_mcp.sqlite.SqliteStorage
+.. autoclass:: aiohttp_tiny_mcp.storage.sqlite.SqliteStorage
    :members:
 
-.. autoclass:: aiohttp_tiny_mcp.sqlite.SqliteSessionStore
+.. autoclass:: aiohttp_tiny_mcp.storage.sqlite.SqliteSessionStore
 
-.. autoclass:: aiohttp_tiny_mcp.sqlite.SqliteHub
+.. autoclass:: aiohttp_tiny_mcp.storage.sqlite.SqliteHub
 ```
 
 ## Streams
@@ -108,10 +108,10 @@ install `aiohttp-tiny-mcp[sqlite]`. See [Stores and hubs](../deployment/stores.m
 .. autoclass:: aiohttp_tiny_mcp.SSEResponse
    :members: send, send_json, comment, close, closed
 
-.. autoclass:: aiohttp_tiny_mcp.sse.SSEEvent
+.. autoclass:: aiohttp_tiny_mcp.transport.sse.SSEEvent
    :members: to_bytes
 
-.. autofunction:: aiohttp_tiny_mcp.sse.read_sse
+.. autofunction:: aiohttp_tiny_mcp.transport.sse.read_sse
 ```
 
 ## On Redis
@@ -121,12 +121,12 @@ Both backends on a Redis server, for workers on more than one machine. Needs
 [Stores and hubs](../deployment/stores.md#on-redis).
 
 ```{eval-rst}
-.. autoclass:: aiohttp_tiny_mcp.redis.RedisStorage
+.. autoclass:: aiohttp_tiny_mcp.storage.redis.RedisStorage
    :members:
 
-.. autoclass:: aiohttp_tiny_mcp.redis.RedisSessionStore
+.. autoclass:: aiohttp_tiny_mcp.storage.redis.RedisSessionStore
 
-.. autoclass:: aiohttp_tiny_mcp.redis.RedisHub
+.. autoclass:: aiohttp_tiny_mcp.storage.redis.RedisHub
 ```
 
 ## On PostgreSQL
@@ -136,12 +136,12 @@ Both backends on a PostgreSQL server. Needs `psycopg`: install
 [Stores and hubs](../deployment/stores.md#on-postgresql-1).
 
 ```{eval-rst}
-.. autoclass:: aiohttp_tiny_mcp.postgres.PostgresStorage
+.. autoclass:: aiohttp_tiny_mcp.storage.postgres.PostgresStorage
    :members:
 
-.. autoclass:: aiohttp_tiny_mcp.postgres.PostgresSessionStore
+.. autoclass:: aiohttp_tiny_mcp.storage.postgres.PostgresSessionStore
 
-.. autoclass:: aiohttp_tiny_mcp.postgres.PostgresHub
+.. autoclass:: aiohttp_tiny_mcp.storage.postgres.PostgresHub
 ```
 
 ## Many tenants
@@ -151,7 +151,7 @@ for verified identity mapping, and [multitenancy](../deployment/multitenancy.md)
 for storage behavior.
 
 ```{eval-rst}
-.. autofunction:: aiohttp_tiny_mcp.namespaces.scoped
+.. autofunction:: aiohttp_tiny_mcp.storage.namespaces.scoped
 ```
 
 ## Authentication
@@ -183,19 +183,30 @@ The classes below provide the API reference.
 
 .. autofunction:: aiohttp_tiny_mcp.auth.principal_from_claims
 
-.. autoclass:: aiohttp_tiny_mcp.jwt.JWTVerifier
+.. autoclass:: aiohttp_tiny_mcp.auth.jwt.JWTVerifier
    :members:
 
-.. autoclass:: aiohttp_tiny_mcp.jwt.HMACJWTVerifier
+.. autoclass:: aiohttp_tiny_mcp.auth.jwt.HMACJWTVerifier
 
-.. autoclass:: aiohttp_tiny_mcp.jwt.PublicKeyJWTVerifier
+.. autoclass:: aiohttp_tiny_mcp.auth.jwt.PublicKeyJWTVerifier
 
-.. autoclass:: aiohttp_tiny_mcp.oauth.OAuthFacade
+.. autoclass:: aiohttp_tiny_mcp.oauth.OAuthServer
    :members: resource, routes, setup, cleanup_ctx, is_public, revoke
 
 .. autoclass:: aiohttp_tiny_mcp.oauth.OAuthClient
 
-.. autoclass:: aiohttp_tiny_mcp.oauth.OAuth2
+.. autoclass:: aiohttp_tiny_mcp.oauth.OpaqueTokens
+   :members: issue, verify, revoke
+
+.. autoclass:: aiohttp_tiny_mcp.oauth.AbstractCipher
+   :members: encode, decode
+
+.. autoclass:: aiohttp_tiny_mcp.oauth.KECCAKCipher
+
+.. autoclass:: aiohttp_tiny_mcp.oauth.EncryptedTokens
+   :members: issue, verify, decode
+
+.. autoclass:: aiohttp_tiny_mcp.oauth.OAuthProvider
 
 .. autoclass:: aiohttp_tiny_mcp.oauth.Identity
 
@@ -209,7 +220,7 @@ The classes below provide the API reference.
    :members: initialize, list_tools, call_tool, list_resources, read_resource,
              list_prompts, get_prompt, complete, listen, set_log_level, request_method
 
-.. autoclass:: aiohttp_tiny_mcp.stdio_client.StdioClient
+.. autoclass:: aiohttp_tiny_mcp.client.stdio.StdioClient
    :members: spawn
 
 .. autoclass:: aiohttp_tiny_mcp.ClientError
@@ -218,7 +229,7 @@ The classes below provide the API reference.
 ## Revisions
 
 ```{eval-rst}
-.. autoclass:: aiohttp_tiny_mcp.adapter.Adapter
+.. autoclass:: aiohttp_tiny_mcp.protocol.adapter.Adapter
    :members: version, can_ask, can_push_ask, asks_in_arguments, has_handshake,
              allows_batch, carries_state, decode, encode, describe_tool,
              capabilities
@@ -230,21 +241,21 @@ The classes below provide the API reference.
 ## The normalized core
 
 ```{eval-rst}
-.. autoclass:: aiohttp_tiny_mcp.core.Operation
+.. autoclass:: aiohttp_tiny_mcp.protocol.core.Operation
    :members:
    :undoc-members:
 
-.. autoclass:: aiohttp_tiny_mcp.core.FailureKind
+.. autoclass:: aiohttp_tiny_mcp.protocol.core.FailureKind
    :members:
    :undoc-members:
 
-.. autoclass:: aiohttp_tiny_mcp.core.Call
+.. autoclass:: aiohttp_tiny_mcp.protocol.core.Call
 
-.. autoclass:: aiohttp_tiny_mcp.core.Value
+.. autoclass:: aiohttp_tiny_mcp.protocol.core.Value
 
-.. autoclass:: aiohttp_tiny_mcp.core.NeedsInput
+.. autoclass:: aiohttp_tiny_mcp.protocol.core.NeedsInput
 
-.. autoclass:: aiohttp_tiny_mcp.core.Failure
+.. autoclass:: aiohttp_tiny_mcp.protocol.core.Failure
 
-.. autoclass:: aiohttp_tiny_mcp.core.ClientProfile
+.. autoclass:: aiohttp_tiny_mcp.protocol.core.ClientProfile
 ```

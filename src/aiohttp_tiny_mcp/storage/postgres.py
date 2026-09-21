@@ -17,7 +17,7 @@ try:
     from psycopg_pool import AsyncConnectionPool
 except ImportError as absent:  # pragma: no cover - depends on what is installed
     raise ImportError(
-        'aiohttp_tiny_mcp.postgres needs psycopg. Install "aiohttp-tiny-mcp[postgres]".'
+        'aiohttp_tiny_mcp.storage.postgres needs psycopg. Install "aiohttp-tiny-mcp[postgres]".'
     ) from absent
 
 log = logging.getLogger("aiohttp_tiny_mcp")

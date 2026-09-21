@@ -8,7 +8,7 @@ import logging
 from aiodocker import Docker
 from aiodocker.exceptions import DockerError
 from aiohttp_tiny_mcp import Registry
-from aiohttp_tiny_mcp.hub import NOTIFICATIONS, topic
+from aiohttp_tiny_mcp.storage.hub import NOTIFICATIONS, topic
 
 log = logging.getLogger(__name__)
 

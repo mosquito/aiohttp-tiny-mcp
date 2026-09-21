@@ -18,10 +18,10 @@ import pytest
 from pydantic import BaseModel
 
 from aiohttp_tiny_mcp import Client, Registry
-from aiohttp_tiny_mcp.hub import START, Hub
 from aiohttp_tiny_mcp.protocol.selection import AdapterSet
-from aiohttp_tiny_mcp.redis import RedisHub, RedisSessionStore, RedisStorage
-from aiohttp_tiny_mcp.sessions import SessionStore
+from aiohttp_tiny_mcp.storage.hub import START, Hub
+from aiohttp_tiny_mcp.storage.redis import RedisHub, RedisSessionStore, RedisStorage
+from aiohttp_tiny_mcp.storage.sessions import SessionStore
 from aiohttp_tiny_mcp.testing import serving
 
 pytestmark = pytest.mark.asyncio

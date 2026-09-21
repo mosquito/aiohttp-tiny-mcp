@@ -85,7 +85,7 @@ async def test_a_subscription_reaches_the_real_sdk_client(real_server_url, regis
     """Verify resource changes through the independent SDK client."""
     import asyncio
 
-    from aiohttp_tiny_mcp.hub import NOTIFICATIONS, topic
+    from aiohttp_tiny_mcp.storage.hub import NOTIFICATIONS, topic
 
     heard: asyncio.Queue = asyncio.Queue()
 

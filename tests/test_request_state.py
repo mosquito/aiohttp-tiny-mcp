@@ -5,10 +5,10 @@ from __future__ import annotations
 import pytest
 
 from aiohttp_tiny_mcp import MemorySessionStore
-from aiohttp_tiny_mcp.core import Call, ClientInfo, Operation
-from aiohttp_tiny_mcp.models import Params
-from aiohttp_tiny_mcp.namespaces import namespace
-from aiohttp_tiny_mcp.request_state import RequestStates
+from aiohttp_tiny_mcp.protocol.core import Call, ClientInfo, Operation
+from aiohttp_tiny_mcp.protocol.models import Params
+from aiohttp_tiny_mcp.server.request_state import RequestStates
+from aiohttp_tiny_mcp.storage.namespaces import namespace
 
 pytestmark = pytest.mark.asyncio
 

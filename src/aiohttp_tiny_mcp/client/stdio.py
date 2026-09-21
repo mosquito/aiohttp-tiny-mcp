@@ -8,9 +8,10 @@ from collections.abc import AsyncIterator, Callable, Mapping
 from contextlib import asynccontextmanager
 from typing import Any, Protocol, runtime_checkable
 
-from .adapter import Adapter
-from .client_base import BaseClient, ClientError, Elicitor
-from .models import Implementation
+from aiohttp_tiny_mcp.protocol.adapter import Adapter
+from aiohttp_tiny_mcp.protocol.models import Implementation
+
+from .base import BaseClient, ClientError, Elicitor
 
 
 @runtime_checkable

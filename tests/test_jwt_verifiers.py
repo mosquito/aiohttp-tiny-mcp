@@ -16,7 +16,7 @@ from cryptography.hazmat.primitives.asymmetric import ec, ed448, ed25519, rsa
 from test_basic_auth import registry_for
 
 from aiohttp_tiny_mcp import Authorization, Principal, TokenVerifier, principal_from_claims
-from aiohttp_tiny_mcp.jwt import HMACJWTVerifier, PublicKeyJWTVerifier
+from aiohttp_tiny_mcp.auth.jwt import HMACJWTVerifier, PublicKeyJWTVerifier
 from aiohttp_tiny_mcp.testing import over_http
 
 PSK = "test-pre-shared-key-with-at-least-32-bytes"
@@ -236,7 +236,7 @@ assert principal_from_claims({}) == Principal()
 StaticVerifier({"test": Principal()})
 assert "jwt" not in sys.modules
 try:
-    from aiohttp_tiny_mcp.jwt import HMACJWTVerifier
+    from aiohttp_tiny_mcp.auth.jwt import HMACJWTVerifier
 except ImportError as error:
     assert "aiohttp-tiny-mcp[jwt]" in str(error)
 else:

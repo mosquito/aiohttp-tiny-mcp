@@ -16,7 +16,7 @@ try:
 except ImportError as error:
     raise ImportError("JWT verification requires aiohttp-tiny-mcp[jwt]") from error
 
-from .auth import Principal, principal_from_claims
+from aiohttp_tiny_mcp.auth import Principal, principal_from_claims
 
 VerificationKey = (
     bytes

@@ -39,9 +39,9 @@ one. The bundled backends are written that way.
 
 <!-- name: async test_stores_subclass -->
 ```python
-from aiohttp_tiny_mcp.hub import Hub
-from aiohttp_tiny_mcp.sessions import SessionStore
-from aiohttp_tiny_mcp.sqlite import SqliteHub, SqliteSessionStore
+from aiohttp_tiny_mcp.storage.hub import Hub
+from aiohttp_tiny_mcp.storage.sessions import SessionStore
+from aiohttp_tiny_mcp.storage.sqlite import SqliteHub, SqliteSessionStore
 
 assert issubclass(SqliteHub, Hub)
 assert issubclass(SqliteSessionStore, SessionStore)
@@ -72,7 +72,7 @@ a session can remain usable after the event that announced it has expired.
 ## On SQLite
 
 `pip install "aiohttp-tiny-mcp[sqlite]"` adds `aiosqlite` and with it
-`aiohttp_tiny_mcp.sqlite`, which is the whole of what several workers on one
+`aiohttp_tiny_mcp.storage.sqlite`, which is the whole of what several workers on one
 machine need:
 
 <!-- name: async test_stores_sqlite -->
@@ -80,7 +80,7 @@ machine need:
 from aiohttp import web
 
 from aiohttp_tiny_mcp import Endpoint, Registry
-from aiohttp_tiny_mcp.sqlite import SqliteHub, SqliteSessionStore, SqliteStorage
+from aiohttp_tiny_mcp.storage.sqlite import SqliteHub, SqliteSessionStore, SqliteStorage
 
 storage = SqliteStorage("mcp.sqlite")
 registry = Registry(
@@ -157,14 +157,14 @@ removed by the cleanup task. `await storage.sweep()` performs one pass now;
 ## On Redis
 
 `pip install "aiohttp-tiny-mcp[redis]"` adds `redis` and with it
-`aiohttp_tiny_mcp.redis`, which is what a deployment across machines needs:
+`aiohttp_tiny_mcp.storage.redis`, which is what a deployment across machines needs:
 
 <!-- name: async test_stores_redis -->
 ```python
 from aiohttp import web
 
 from aiohttp_tiny_mcp import Endpoint, Registry
-from aiohttp_tiny_mcp.redis import RedisHub, RedisSessionStore, RedisStorage
+from aiohttp_tiny_mcp.storage.redis import RedisHub, RedisSessionStore, RedisStorage
 
 pool = RedisStorage.from_url("redis://localhost")
 registry = Registry(
@@ -212,7 +212,7 @@ and that long after the last publish. `prefix=` sets the key prefix, which is
 ## On PostgreSQL
 
 `pip install "aiohttp-tiny-mcp[postgres]"` adds `psycopg` and with it
-`aiohttp_tiny_mcp.postgres`, the other way to serve workers on several
+`aiohttp_tiny_mcp.storage.postgres`, the other way to serve workers on several
 machines:
 
 <!-- name: async test_stores_postgres -->
@@ -220,7 +220,7 @@ machines:
 from aiohttp import web
 
 from aiohttp_tiny_mcp import Endpoint, Registry
-from aiohttp_tiny_mcp.postgres import PostgresHub, PostgresSessionStore, PostgresStorage
+from aiohttp_tiny_mcp.storage.postgres import PostgresHub, PostgresSessionStore, PostgresStorage
 
 pool = PostgresStorage.from_url("postgresql://mcp@localhost/mcp")
 registry = Registry(
@@ -242,7 +242,7 @@ it, so a deployment has somewhere to keep its own small settings beside them. `P
 names them -- `<prefix>_sessions` and `<prefix>_events`, `mcp` by default -- so
 one database holds two deployments, or this package beside something else.
 `create_tables=False` leaves the schema to your migrations, which then have to
-produce what `aiohttp_tiny_mcp.postgres.SCHEMA` describes. Pass the pool an application already has
+produce what `aiohttp_tiny_mcp.storage.postgres.SCHEMA` describes. Pass the pool an application already has
 to the constructor -- `PostgresStorage(pool)` -- and it stays the
 application's to close; `from_url` makes one for callers who keep none,
 because a second pool is a second set of connections to one server.
@@ -357,7 +357,7 @@ talking rather than for a fixed time after the handshake.
 from collections.abc import Mapping
 from typing import Any, Protocol
 
-from aiohttp_tiny_mcp.sessions import SessionRecord
+from aiohttp_tiny_mcp.storage.sessions import SessionRecord
 
 
 class SessionStoreProtocol(Protocol):
@@ -409,7 +409,7 @@ how it counts.
 
 ### On PostgreSQL
 
-`aiohttp_tiny_mcp.postgres` implements this; see [On PostgreSQL](#on-postgresql-1)
+`aiohttp_tiny_mcp.storage.postgres` implements this; see [On PostgreSQL](#on-postgresql-1)
 below. One table is enough, and `version` does the compare-and-set while
 `expires_at` does the expiry:
 
@@ -440,7 +440,7 @@ backend can implement it with database records and optional wake-up signals.
 ```python
 from collections.abc import Sequence
 
-from aiohttp_tiny_mcp.hub import START, Cursor, Event
+from aiohttp_tiny_mcp.storage.hub import START, Cursor, Event
 
 
 class HubProtocol(Protocol):
@@ -512,7 +512,7 @@ cannot may sleep and look again. Neither is visible from here.
 import asyncio
 
 from aiohttp_tiny_mcp import MemoryHub
-from aiohttp_tiny_mcp.hub import START
+from aiohttp_tiny_mcp.storage.hub import START
 
 hub = MemoryHub()
 changes = await hub.subscribe("demo")

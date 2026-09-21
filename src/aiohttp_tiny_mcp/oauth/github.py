@@ -3,20 +3,21 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from typing import Any
 
 from aiohttp import ClientSession
 
-from .upstream import Identity, OAuth2, UpstreamAuthError, UpstreamTokens, provider_json
+from .provider import Identity, OAuthProvider, UpstreamAuthError, provider_json
 
 
-async def github_identity(tokens: UpstreamTokens, http: ClientSession) -> Identity:
+async def github_identity(tokens: dict[str, Any], http: ClientSession) -> Identity:
     data = await provider_json(
         http,
         "GET",
         "https://api.github.com/user",
         headers={
             "Accept": "application/vnd.github+json",
-            "Authorization": f"Bearer {tokens.access_token}",
+            "Authorization": f"Bearer {tokens['access_token']}",
             "User-Agent": "aiohttp-tiny-mcp",
         },
     )
@@ -29,9 +30,13 @@ async def github_identity(tokens: UpstreamTokens, http: ClientSession) -> Identi
     )
 
 
-def GitHub(client_id: str, client_secret: str, *, scopes: Sequence[str] = ("read:user",)) -> OAuth2:
-    """GitHub.com OAuth App sign-in. Register the facade's callback URL in GitHub."""
-    return OAuth2(
+def GitHub(
+    client_id: str, client_secret: str, *, scopes: Sequence[str] = ("read:user",)
+) -> OAuthProvider:
+    """GitHub.com OAuth App sign-in. Register the server's callback URL in GitHub."""
+    if not client_secret:
+        raise ValueError("the GitHub client secret is required")
+    return OAuthProvider(
         name="GitHub",
         authorize_url="https://github.com/login/oauth/authorize",
         token_url="https://github.com/login/oauth/access_token",

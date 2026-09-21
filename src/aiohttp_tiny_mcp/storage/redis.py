@@ -13,7 +13,7 @@ try:
     from redis.asyncio import Redis
 except ImportError as absent:  # pragma: no cover - depends on what is installed
     raise ImportError(
-        'aiohttp_tiny_mcp.redis needs redis. Install "aiohttp-tiny-mcp[redis]".'
+        'aiohttp_tiny_mcp.storage.redis needs redis. Install "aiohttp-tiny-mcp[redis]".'
     ) from absent
 
 BEGINNING = "0-0"

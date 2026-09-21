@@ -13,9 +13,9 @@ from typing import TYPE_CHECKING, Any
 
 from aiohttp import web
 
-from .adapter import Adapter, RequestLike
-from .auth import Principal
-from .core import (
+from aiohttp_tiny_mcp.auth import Principal
+from aiohttp_tiny_mcp.protocol.adapter import Adapter, RequestLike
+from aiohttp_tiny_mcp.protocol.core import (
     Answer,
     AnswerAction,
     Call,
@@ -25,10 +25,10 @@ from .core import (
     answer_of,
     logs_at,
 )
-from .hub import ASK, Hub, topic
-from .sessions import Session, SessionAccess
-from .sessions import new_session_id as new_id
-from .sse import SSEResponse
+from aiohttp_tiny_mcp.storage.hub import ASK, Hub, topic
+from aiohttp_tiny_mcp.storage.sessions import Session, SessionAccess
+from aiohttp_tiny_mcp.storage.sessions import new_session_id as new_id
+from aiohttp_tiny_mcp.transport.sse import SSEResponse
 
 if TYPE_CHECKING:
     from .registry import Registry

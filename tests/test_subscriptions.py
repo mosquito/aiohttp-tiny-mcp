@@ -8,10 +8,10 @@ from aiohttp.test_utils import TestClient, TestServer
 from pydantic import BaseModel
 
 from aiohttp_tiny_mcp import Endpoint, Exchange
-from aiohttp_tiny_mcp.hub import Event
-from aiohttp_tiny_mcp.hub import Hub as HubProtocol
-from aiohttp_tiny_mcp.stdio import serve_stdio
-from aiohttp_tiny_mcp.subscriptions import SUBSCRIPTION_ID
+from aiohttp_tiny_mcp.server.stdio import serve_stdio
+from aiohttp_tiny_mcp.server.subscriptions import SUBSCRIPTION_ID
+from aiohttp_tiny_mcp.storage.hub import Event
+from aiohttp_tiny_mcp.storage.hub import Hub as HubProtocol
 
 pytestmark = pytest.mark.asyncio
 VERSION = "2026-07-28"

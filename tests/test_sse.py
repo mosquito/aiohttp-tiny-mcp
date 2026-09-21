@@ -15,7 +15,7 @@ from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 from multidict import CIMultiDict, CIMultiDictProxy
 
-from aiohttp_tiny_mcp.sse import Gone, SSEEvent, SSEResponse, read_sse
+from aiohttp_tiny_mcp.transport.sse import Gone, SSEEvent, SSEResponse, read_sse
 
 
 def test_one_line_of_data():

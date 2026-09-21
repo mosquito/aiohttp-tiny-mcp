@@ -13,10 +13,10 @@ from urllib.parse import unquote
 
 from pydantic import BaseModel
 
-from .core import Failure, FailureKind, Rejected
-from .models import ResultModel
-from .schema import json_schema
-from .specs import Bound, ResourceSpec
+from aiohttp_tiny_mcp.protocol.core import Failure, FailureKind, Rejected
+from aiohttp_tiny_mcp.protocol.models import ResultModel
+from aiohttp_tiny_mcp.protocol.schema import json_schema
+from aiohttp_tiny_mcp.server.specs import Bound, ResourceSpec
 
 RESERVED_NOTIFICATIONS = frozenset(
     {
@@ -210,7 +210,7 @@ class Extension:
 
     def method_resources(self) -> tuple[dict[str, ResourceSpec], dict[str, Any]]:
         """Build legacy resource routes around every registered method."""
-        from .exchange import Exchange
+        from aiohttp_tiny_mcp.server.exchange import Exchange
 
         resources = [spec.model_copy(deep=True) for spec in self.resources.values()]
         routes: dict[str, ResourceSpec] = {}

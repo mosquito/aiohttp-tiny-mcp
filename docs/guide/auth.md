@@ -1,24 +1,13 @@
 # Authentication
 
-Pass an `Authentication` subclass to `Registry(auth=...)`. The policy receives
-the HTTP request and returns a verified `Principal`. Both `Endpoint` and
-`SseEndpoint` use the same policy. The endpoints check expiry and required
-scopes, inject the principal into handlers, and enforce session ownership.
+Pass an authentication policy to `Registry(auth=...)`. HTTP and SSE endpoints
+use its `Principal` for permissions, namespaces, and session ownership.
+Custom authentication middleware is not required.
 
 ## Policies and token verifiers
 
-`Authorization` is a concrete subclass of `Authentication` for OAuth Bearer
-requests. A `TokenVerifier` is a separate component passed to that policy;
-it is not a subclass of `Authorization`.
-
-| Component | Input | Responsibility |
-| --- | --- | --- |
-| `Authentication` | HTTP request | Defines the policy interface: authenticate the request and build a challenge. |
-| `Authorization` | HTTP request with a Bearer header | Extracts the token, calls its verifier, checks expiry and required scopes, and supplies OAuth metadata and challenges. |
-| `TokenVerifier` | Token string | Verifies the credential and returns `Principal` or `None`. It has no HTTP responsibilities. |
-| `Principal` | Verified identity and permissions | Carries the result to scope checks, namespace selection, session ownership checks, and handlers. |
-
-An accepted OAuth Bearer request follows this flow:
+`Authentication` is the policy base class. `Authorization` implements OAuth
+Bearer authentication and delegates token verification to a `TokenVerifier`:
 
 ```{mermaid}
 flowchart TD
@@ -29,57 +18,46 @@ flowchart TD
     C --> E["Endpoint<br/>Select namespace and check session ownership"]
 ```
 
-Use `Authorization(verifier=..., resource=...)` when only the token verification
-method changes. For example, `StaticVerifier`, `HMACJWTVerifier`, and
-`PublicKeyJWTVerifier` share the same Bearer handling and metadata behavior.
-
-Subclass `Authentication` when you also need different credential extraction,
-challenges, or metadata behavior. A custom policy can reuse a token verifier,
-or perform verification itself. This separation avoids repeating HTTP handling
-for each token format. Despite its name, `Authorization` is the OAuth Bearer
-policy, not the base class for all authentication methods.
+Replace the verifier to change token validation. Subclass `Authentication`
+to change credential extraction, challenges, or metadata.
 
 ## Choose an integration
 
-| Requirement | Integration | Application code |
-| --- | --- | --- |
-| One Basic account | `StaticBasicAuth` | Configure the account and scopes. |
-| Basic with a user database | Subclass `BasicAuth` | Implement async `verify(username, password)`. |
-| API key, cookie, or existing request identity | Subclass `Authentication` | Implement async `authenticate(request)` and `challenge(refusal)`. |
-| Fixed development tokens | `Authorization` with `StaticVerifier` | Map tokens to principals. |
-| JWT Bearer tokens | `Authorization` with a JWT verifier | Install `[jwt]`; configure a key, issuer, and audience. |
-| Other OAuth Bearer tokens | `Authorization` | Supply an object with async `verify(token)`. Inheritance is optional. |
-| GitHub browser login | `OAuthFacade` with `GitHub` | Supply `identity=` to map verified accounts to permissions. |
-| Another OAuth provider | `OAuth2` with `OAuthFacade` | Configure endpoints and an async `profile(tokens, http)` callback. |
+| Requirement | Integration |
+| --- | --- |
+| Fixed accounts or a user database | [Basic authentication](#basic-authentication) |
+| API key, cookie, or existing identity | [Custom authentication](#custom-authentication) |
+| Static tokens, JWT, or introspection | [OAuth Bearer authentication](#oauth-bearer-authentication) |
+| GitHub browser login | [GitHub sign-in](#github-sign-in) |
+| Another OAuth provider | [Provider adapters](#oauth-provider-adapters) |
 
-Use [Basic authentication](#basic-authentication) or
-[custom authentication](#custom-authentication) for subclass examples.
-[GitHub sign-in](#github-sign-in) covers application registration and console setup.
-[OAuth provider adapters](#oauth-provider-adapters) covers other providers.
-[Mapping accounts and roles](#mapping-accounts-and-roles) explains permission mapping;
-[handler permissions](#handler-permissions) covers operation and record checks.
-See [Token lifetime and refresh](#token-lifetime-and-refresh) for current lifecycle support.
+See [permissions](#handler-permissions) and [token handling](#application-token-handling)
+for access checks and refresh behavior.
 
 ## Basic authentication
 
-Use `StaticBasicAuth` for one configured account:
+Use `StaticBasicAuth` for one or more configured accounts with individual scopes:
 
 <!-- name: async test_basic_auth -->
 ```python
 from aiohttp_tiny_mcp import Registry, StaticBasicAuth
 
-auth = StaticBasicAuth("alice", "example-password", realm="reports", scopes=["reports:read"])
+auth = StaticBasicAuth(
+    ("alice", "alice-example-password", {"reports:read"}),
+    ("bob", "bob-example-password", {"reports:read", "reports:write"}),
+    realm="reports",
+)
 registry = Registry("reports", "1.0", auth=auth)
 ```
 
-Clients send `Authorization: Basic <base64(username:password)>`. The policy
-expects UTF-8 and returns a Basic challenge on rejection. Use HTTPS: Base64
-does not encrypt credentials. See [RFC 7617](https://www.rfc-editor.org/rfc/rfc7617.html).
-Basic authentication publishes no OAuth metadata and does not implement OAuth
-login. Client support for Basic authentication is required.
+Each tuple holds `(username, password, scopes)`; omit scopes for an account
+without permissions. Supply at least one account with unique usernames.
+`required_scopes=` restricts access for all accounts.
 
-For a user database or another credential source, subclass `BasicAuth` and
-implement only `verify`. It receives the decoded username and password:
+Clients send UTF-8 credentials in the Basic Authorization header. Use HTTPS;
+Base64 does not encrypt passwords. Basic authentication publishes no OAuth metadata.
+
+For a user database, subclass `BasicAuth` and implement `verify`:
 
 <!-- name: async test_basic_auth -->
 ```python
@@ -108,10 +86,9 @@ principal = await registry.auth.authenticate(request)
 assert principal is not None and principal.subject == "alice"
 ```
 
-Basic policies read the Authorization header only. They reject malformed
-Base64, invalid UTF-8, missing separators, and control characters. Passwords
-may contain colons; usernames cannot. `StaticBasicAuth` rejects empty configured
-credentials and keeps the password out of its object representation.
+`StaticBasicAuth` rejects empty credentials. Custom `verify()` implementations
+decide whether to accept them. Control characters are rejected; colons separate
+the username from the password. Passwords may contain colons. Query credentials are not read.
 
 ## Custom authentication
 
@@ -238,7 +215,7 @@ permissions for projects or database records.
 
 For a subject, `identity` is `"<issuer>|<subject>"`; a missing issuer becomes an
 empty string. For a client without a subject, it is `"<issuer>|client:<client_id>"`.
-Matching usernames alone do not unify identities across issuers. The OAuth facade
+Matching usernames alone do not unify identities across issuers. The OAuth server
 sets the issuer to its configured URL and the client ID to the registered MCP client.
 
 ## Handler permissions
@@ -267,7 +244,7 @@ from aiohttp_tiny_mcp import CallToolResult, Principal, Registry, StaticBasicAut
 registry = Registry(
     "reports",
     "1.0",
-    auth=StaticBasicAuth("alice", "example-password", scopes=["reports:read"]),
+    auth=StaticBasicAuth(("alice", "example-password", ["reports:read"])),
 )
 REPORTS = {"quarterly": {"owner": "alice", "text": "Quarterly results"}}
 
@@ -311,7 +288,7 @@ from aiohttp import ClientSession, encode_basic_auth
 from aiohttp_tiny_mcp import Client, Registry, StaticBasicAuth
 from aiohttp_tiny_mcp.protocol.selection import AdapterSet
 
-registry = Registry("reports", "1.0", auth=StaticBasicAuth("alice", "example-password"))
+registry = Registry("reports", "1.0", auth=StaticBasicAuth(("alice", "example-password")))
 url = await serve(registry)
 headers = {"Authorization": encode_basic_auth("alice", "example-password")}
 async with ClientSession(headers=headers) as http:
@@ -365,54 +342,19 @@ metadata remains available through
 `Authorization`; it does not define a Basic login form. No additional discovery
 endpoint is required for the console.
 
-### Application middleware and public assets
-
-Application-wide authentication middleware must explicitly allow console assets.
-Use `Console.is_public(request)` before its existing authentication checks:
-
-<!-- name: async test_public_console_middleware -->
-```python
-from aiohttp import web
-
-from aiohttp_tiny_mcp.console import Console
-
-
-def allow_console(authentication_middleware):
-    @web.middleware
-    async def middleware(request, handler):
-        if Console.is_public(request):
-            return await handler(request)
-        return await authentication_middleware(request, handler)
-
-    return middleware
-```
-
-Install `allow_console(your_authentication_middleware)` in the application's
-middleware list. The check uses the resolved console handler and the asset
-allowlist. It permits only GET and HEAD. It supports root mounts, custom prefixes,
-and subapplications. An unmounted console grants no exemptions. Other routes,
-unknown files, asset path suffixes, and unsupported methods remain protected.
-Console setup cannot bypass arbitrary application middleware or proxy rules.
-
-For Backlog, replace the `CONSOLE_ASSETS` path check with
-`Console.is_public(request)`. Keep its existing checks for all other requests.
-Mount the console only when enabled; no separate disabled-console exception is
-needed. Middleware must return the appropriate `WWW-Authenticate` challenge on
-rejection so the dialog can select Basic or Bearer automatically.
-
 ## OAuth provider adapters
 
 Provider integration has two independent callbacks:
 
-1. `OAuth2.profile(tokens, http)` calls the provider and returns a verified `Identity`.
-2. `OAuthFacade(identity=...)` maps that identity to an application `Principal`.
+1. `OAuthProvider.profile(tokens, http)` calls the provider and returns a verified `Identity`.
+2. `OAuthServer(identity=...)` maps that identity to an application `Principal`.
 
 Keep provider response parsing in the first callback and application permissions
 in the second. The same mapper can serve multiple providers by looking up
 `(identity.provider, identity.sub)`.
 
 For a provider with an authorization-code flow, PKCE S256, and a JSON profile API,
-configure `OAuth2` directly. This example expects a profile object with a stable
+configure `OAuthProvider` directly. This example expects a profile object with a stable
 string `id` and an optional `display_name`:
 
 <!-- name: async test_custom_oauth_provider -->
@@ -421,14 +363,14 @@ import asyncio
 
 from aiohttp import ClientError, ClientSession
 
-from aiohttp_tiny_mcp.oauth import Identity, OAuth2, UpstreamAuthError, UpstreamTokens
+from aiohttp_tiny_mcp.oauth import Identity, OAuthProvider, UpstreamAuthError
 
 
-async def company_profile(tokens: UpstreamTokens, http: ClientSession) -> Identity:
+async def company_profile(tokens: dict, http: ClientSession) -> Identity:
     try:
         async with http.get(
             "https://identity.example.com/api/me",
-            headers={"Authorization": f"Bearer {tokens.access_token}"},
+            headers={"Authorization": f"Bearer {tokens['access_token']}"},
             allow_redirects=False,
         ) as response:
             if response.status != 200:
@@ -447,7 +389,7 @@ async def company_profile(tokens: UpstreamTokens, http: ClientSession) -> Identi
     )
 
 
-provider = OAuth2(
+provider = OAuthProvider(
     name="Company login",
     authorize_url="https://identity.example.com/oauth/authorize",
     token_url="https://identity.example.com/oauth/token",
@@ -459,21 +401,22 @@ provider = OAuth2(
 assert provider.profile is company_profile
 ```
 
-Pass this object as `upstream=provider` to `OAuthFacade`. Configure the facade,
-registered MCP clients, and console as in the GitHub example below. The facade
+Pass this object as `provider=provider` to `OAuthServer`. Configure the server,
+registered MCP clients, and console as in the GitHub example below. The server
 owns the HTTP session passed to `profile`; do not close it. Raise
 `UpstreamAuthError` for expected provider failures. Its internal error text is
 not sent to the browser. Return only verified identity data, never credentials.
 
-The default exchange sends the client ID and secret in form data. It expects a
+The provider validates its URLs and client ID. The default exchange sends the
+client ID and optional `client_secret` in form data. It expects a
 JSON response with a Bearer access token and accepts optional `expires_in` and
 `refresh_token` fields. Providers that require different token authentication
-or response formats need an `OAuth2` subclass with these extension points:
+or response formats need an `OAuthProvider` subclass with these extension points:
 
 | Extension point | Contract |
 | --- | --- |
 | `authorization_url(*, redirect_uri, state, challenge) -> str` | Build the provider redirect. Preserve state, the exact callback, and PKCE S256. |
-| `async exchange(http, *, code, redirect_uri, verifier) -> UpstreamTokens` | Exchange the code using the provider's required authentication and parse its response. |
+| `async exchange(http, *, code, redirect_uri, verifier) -> dict` | Exchange the code using the provider's required authentication and parse its response. |
 | `profile(tokens, http)` constructor argument | Fetch and validate the account, then return `Identity`. |
 | `extra_authorize_params` constructor argument | Add provider-specific authorization parameters; reserved OAuth parameters retain the library's values. |
 
@@ -486,10 +429,10 @@ application login or another credential scheme, use
 
 ## GitHub sign-in
 
-Use `OAuthFacade` with the provider from `aiohttp_tiny_mcp.oauth.github` to sign
-in through a GitHub OAuth App. The facade acts as the authorization server for
-MCP. GitHub supplies the identity. The facade issues a separate, short-lived
-MCP token; it never accepts a GitHub access token as an MCP credential.
+Use `OAuthServer` with the provider from `aiohttp_tiny_mcp.oauth.github` to sign
+in through a GitHub OAuth App. The server acts as the authorization server for
+MCP. GitHub supplies the identity. The server issues a separate MCP token through
+its default implementation or your token object. A GitHub token is not an MCP credential.
 
 Create an OAuth App in GitHub and set its **Authorization callback URL** to
 `https://mcp.example.com/oauth/callback`. Load the app's client ID and secret
@@ -502,7 +445,7 @@ This example permits one GitHub account, identified by its numeric user ID:
 ```python
 from aiohttp_tiny_mcp import Endpoint, Principal, Registry
 from aiohttp_tiny_mcp.console import Console
-from aiohttp_tiny_mcp.oauth import Identity, OAuthClient, OAuthFacade
+from aiohttp_tiny_mcp.oauth import Identity, OAuthClient, OAuthServer
 from aiohttp_tiny_mcp.oauth.github import GitHub
 
 
@@ -516,9 +459,9 @@ def allow_user(identity: Identity) -> Principal | None:
     )
 
 
-oauth = OAuthFacade(
+oauth = OAuthServer(
     issuer="https://mcp.example.com/oauth",
-    upstream=GitHub(client_id="YOUR_CLIENT_ID", client_secret="YOUR_CLIENT_SECRET"),
+    provider=GitHub(client_id="YOUR_CLIENT_ID", client_secret="YOUR_CLIENT_SECRET"),
     resource="https://mcp.example.com/mcp",
     clients=[
         OAuthClient(
@@ -555,29 +498,26 @@ callback validation.
 
 `identity` can be synchronous or asynchronous. Return `None` to deny access,
 or return a `Principal` with the account's allowed MCP scopes and namespace.
-The facade rejects requests for scopes that the principal does not hold.
+The server rejects requests for scopes that the principal does not hold.
 Without this callback, every successfully authenticated provider account is
 allowed. GitHub identities use numeric IDs, so login renames do not change
 session ownership. GitHub permissions (`read:user` by default) and MCP scopes
 are separate configuration values.
 
-Mount facade routes at the origin root, even when MCP is in a subapplication.
+Mount server routes at the origin root, even when MCP is in a subapplication.
 For the example issuer, metadata is served at
 `/.well-known/oauth-authorization-server/oauth`. `issuer` and `resource` are
-explicit public URLs; the facade never derives them from a request's Host header.
+explicit public URLs; the server never derives them from a request's Host header.
 HTTPS is required, with HTTP permitted for loopback development addresses.
-Use `OAuthFacade.is_public(request)` alongside `Console.is_public(request)` in
+Use `OAuthServer.is_public(request)` alongside `Console.is_public(request)` in
 application-wide middleware. Facade routes enforce their own OAuth checks.
 The protected-resource metadata route must also remain reachable without an
 MCP token, as described below.
 
-The default store is process-local. Pass `store=shared_session_store` and use
-the same issuer, resource, and client registrations on every worker. The facade
-uses a separate key prefix and atomic compare-and-swap for single-use codes.
-Stored access tokens are indexed by a digest. `await oauth.revoke(token)` removes
-a locally issued token. Configure `access_token_ttl` to set its lifetime; the
-default is one hour, with a maximum of one day. Apply deployment rate limits to
-login routes and bound storage capacity for the expected workload.
+By default, access tokens are opaque, stored by digest, and valid for one hour.
+Set `access_token_ttl` to change this, up to one day. `await oauth.revoke(token)`
+revokes a default token. See [application token handling](#application-token-handling)
+for custom formats and deployments on several computers.
 
 Current limits:
 
@@ -585,8 +525,8 @@ Current limits:
 - Only the authorization-code grant with PKCE S256 is implemented. Sign in again
   after an MCP token expires; MCP refresh tokens are not issued.
 - The console supports OAuth metadata and token endpoints on its own origin.
-- Provider access and optional refresh tokens are used for identity lookup and
-  then discarded. GitHub API access and installation tokens are not exposed to tools.
+- Default `OpaqueTokens` discards provider credentials when issuing the MCP token.
+  Provider tokens are not automatically injected into tools.
 - GitHub revocation or account changes do not invalidate an issued MCP token
   immediately. Its local expiry or explicit revocation controls its lifetime.
 - The preset targets GitHub.com OAuth Apps. GitHub Enterprise and GitHub App
@@ -599,8 +539,8 @@ for application registration and provider settings.
 
 ## Mapping accounts and roles
 
-Use `OAuthFacade(identity=...)` to translate a verified provider identity into
-your application's account. You do not need to subclass `GitHub` or `OAuthFacade`.
+Use `OAuthServer(identity=...)` to translate a verified provider identity into
+your application's account. You do not need to subclass `GitHub` or `OAuthServer`.
 `GitHub` is a provider factory. The mapper accepts one `Identity` and returns a
 `Principal` or `None`; an async mapper can query your account database.
 
@@ -655,7 +595,7 @@ assert await map_identity(Identity(sub="7654321", provider="github")) is None
 assert await map_identity(Identity(sub="unknown", provider="github")) is None
 ```
 
-Pass `identity=map_identity` to the earlier `OAuthFacade` configuration. Declare
+Pass `identity=map_identity` to the earlier `OAuthServer` configuration. Declare
 the available MCP scopes with `scopes=["reports:read", "reports:write"]`.
 Use `oauth.resource(required_scopes=["reports:read"])` for endpoint access, and
 `@registry.tool(scopes=["reports:write"])` for tools that change reports.
@@ -665,15 +605,15 @@ The permission layers have separate roles:
 | Configuration | Meaning |
 | --- | --- |
 | `GitHub(scopes=["read:user"])` | Permissions requested from GitHub for provider API access. |
-| `OAuthFacade(scopes=[...])` | MCP scope names the authorization server accepts. |
+| `OAuthServer(scopes=[...])` | MCP scope names the authorization server accepts. |
 | Mapper's `Principal.scopes` | Maximum MCP permissions allowed for this account. |
 | Client's OAuth `scope` parameter | Permissions requested for this MCP token. |
 | `required_scopes` / tool `scopes` | Permissions required to accept a request or call a tool. |
 
-The facade rejects a request if any requested scope is unavailable or exceeds
+The server rejects a request if any requested scope is unavailable or exceeds
 the mapped account's permissions. It does not silently reduce the request.
 The issued principal contains the requested scopes, which can be fewer than
-the mapper returned. Omitting `scope` requests every scope configured on the facade.
+the mapper returned. Omitting `scope` requests every scope configured on the server.
 The console currently requests every scope advertised by the protected resource;
 it has no scope selector. With the two-scope configuration above, a reader cannot
 complete console login. A client that requests only `reports:read` can log in.
@@ -682,66 +622,96 @@ The mapper receives the verified profile, not the provider token. The GitHub
 preset supplies `login`, `name`, and `email` claims when available; it does not
 load organization membership, teams, or repository permissions. Use your account
 database for application roles. For extra provider lookups, supply a custom
-`OAuth2.profile` callback that returns `Identity`, then apply the same mapper.
-Keep credentials out of claims; facade principals must be JSON-serializable.
+`OAuthProvider.profile` callback that returns `Identity`, then apply the same mapper.
+Keep credentials out of claims; server principals must be JSON-serializable.
 
-Mapping runs at login. The facade stores the resulting principal with the MCP
-token; later account or role changes do not automatically update that token.
-Use a short `access_token_ttl` or `await oauth.revoke(token)` for known tokens.
+Mapping runs at login. Later account or role changes do not automatically update
+the issued token's permissions. Use a short `access_token_ttl`, or call
+`await oauth.revoke(token)` when the token backend supports revocation.
+`EncryptedTokens` does not support individual revocation.
 For immediate account or record restrictions, check current application data in
-handlers or an authentication policy on each request. The facade sets token expiry
+handlers or an authentication policy on each request. The server sets token expiry
 to the earlier of its configured lifetime and the mapper's `expires_at`.
 
-## Token lifetime and refresh
+## Application token handling
 
-MCP tokens and provider tokens have separate issuers, consumers, and lifetimes.
-A refresh token is optional; when issued, it is exchanged at the issuing server's
-token endpoint. See [RFC 6749, section 6](https://www.rfc-editor.org/rfc/rfc6749#section-6).
+`OAuthServer` uses `OpaqueTokens` by default: revocable tokens stored by digest.
+Pass `OpaqueTokens(issuer=..., resource=..., store=...)` to use a separate token
+store. For tokens that carry encrypted provider credentials, use `EncryptedTokens`:
 
-| Credential | Current library behavior |
+<!-- name: test_encrypted_tokens_configuration -->
+```python
+from aiohttp_tiny_mcp.oauth import EncryptedTokens, KECCAKCipher
+
+
+def token_codec(saved_key: bytes) -> EncryptedTokens:
+    return EncryptedTokens(
+        KECCAKCipher(saved_key),
+        issuer="https://mcp.example.com/oauth",
+        resource="https://mcp.example.com/mcp",
+    )
+```
+
+Pass `tokens=token_codec(saved_key)` to `OAuthServer`. Generate at least 32 random
+key bytes once, then load the same saved key on each instance.
+`KECCAKCipher` uses zlib compression, a random 16-byte nonce, SHAKE-256 XOR
+encryption, and HMAC-SHA256. It needs no extra package or access-token database.
+Its `compression_level` defaults to `9`; use `0` to disable compression.
+Supply another `AbstractCipher` to change encryption. Its `encode(dict) -> bytes`
+and `decode(bytes) -> dict` own serialization and integrity checks; invalid blobs
+must raise `ValueError`. `EncryptedTokens` handles base64 and issuer/resource/expiry checks.
+
+`tokens.decode(token)["upstream"]` retrieves the provider dictionary in server
+code after those checks; invalid tokens raise `ValueError`. Individual revocation
+is unavailable. Replacing the key invalidates all tokens issued with the old key.
+
+Pass `tokens=your_object` to `OAuthServer`. It needs two async methods; no base
+class or token model is required:
+
+| Method | Contract |
 | --- | --- |
-| MCP access token issued by `OAuthFacade` | Stored under a digest, checked on each MCP HTTP request, rejected after expiry or local revocation. |
-| MCP refresh token | Not issued or accepted. The console and Python client do not refresh tokens. Sign in again after expiry. |
-| Provider access token | Used during the callback to fetch identity, then discarded. No periodic checks or retention for later tool calls. |
-| Provider refresh token | Parsed when present, then discarded with the provider access token. No refresh request is made. |
-| Token verified by an application `Authorization` verifier | The verifier runs per request. Its implementation owns signature checks, introspection, revocation checks, and any caching. |
+| `issue(principal, upstream) -> str` | Receive the approved MCP principal and the complete provider response as a dictionary. Return your MCP bearer token. |
+| `verify(token) -> Principal \| None` | Verify your token's integrity, issuer, resource and expiry. Return its principal, or `None` when invalid. |
 
-For login-only integrations, retaining and refreshing provider tokens is unnecessary
-after identity lookup. The MCP session then follows the application's own expiry
-and revocation policy. Checking local expiry does not detect upstream revocation
-or changed roles; the facade does not poll the provider or rerun its mapper.
+Your object can save credentials in PostgreSQL, or return an AES-encrypted,
+base64-encoded payload. The library does not select your storage or encryption
+format. Keep provider credentials out of `Principal` and tool responses.
+An optional `async revoke(token)` enables `oauth.revoke(token)`; without it,
+that call raises `NotImplementedError`.
 
-If tools must call the provider later, the application currently needs a separate
-credential store and token manager. Check expiry before use and refresh shortly
-before expiry when supported. A fixed background interval alone cannot guarantee
-that a token remains usable between checks. Revalidate account permissions using
-current application data or a provider-supported check; refreshing a token alone
-does not update the stored MCP principal.
+The callback stores the approved principal and provider response with the
+authorization code for at most five minutes. This private flow store contains
+provider credentials. `issue()` runs only after PKCE verification and atomic
+code redemption. An abandoned login issues no token. If issuance fails, the
+client must restart login; the code has already been consumed.
+Honor the supplied principal's expiry and scopes. The server uses that expiry
+in the token endpoint response and also rejects expired or wrong-issuer principals.
 
-Coordinate refresh across workers and atomically store rotated refresh tokens.
-Treat a rejected refresh grant as requiring sign-in; distinguish it from temporary
-network failures. Avoid replaying an entire state-changing tool merely because
-token renewal failed. Refresh-token protection and rotation requirements are
-described in [RFC 9700, section 4.14](https://www.rfc-editor.org/rfc/rfc9700#section-4.14).
-This lifecycle is application-owned today; `UpstreamTokens` is a response model,
-not an automatically refreshed tool dependency.
+For several computers, configure the same public issuer, resource, clients and
+provider credentials on each instance:
+
+| State | What instances must share |
+| --- | --- |
+| Pending login and authorization codes | `store=` backed by Redis or PostgreSQL, with atomic compare-and-swap. |
+| Opaque tokens | The token object's store; defaults to the server's `store=`. |
+| Application tokens | Your database, or your encryption keys and verification settings for self-contained tokens. |
+
+The default memory store serves one process. SQLite can share state between
+processes on one computer. OAuth records have their own TTL and are independent
+of MCP session closure. Self-contained tokens still need shared pending-login
+state for this authorization-code flow.
+
+MCP refresh tokens are not implemented. Provider refresh and retention belong
+to your token object. Coordinate refresh across instances and atomically replace
+rotated refresh tokens; see [RFC 6749, section 6](https://www.rfc-editor.org/rfc/rfc6749#section-6).
+Refreshing provider tokens does not update MCP permissions. The account mapper
+runs at login; use current application data when permissions need revalidation.
 
 ## OAuth Bearer authentication
 
-```{mermaid}
-flowchart TD
-    start[Where does MCP run?]
-    start --> facade[MCP facade over an existing API]
-    start --> embedded[MCP inside your aiohttp application]
-    facade --> oauth[OAuth protected resource]
-    oauth --> metadata[Authorization publishes metadata and verifies Bearer tokens]
-    embedded --> middleware[Application middleware]
-    middleware --> jwt[Middleware verifies JWT and injects the application user]
-```
-
 Use `Authorization` when this MCP endpoint is an OAuth protected resource.
 Your application supplies token verification through JWT validation,
-introspection, or `OAuthFacade.resource()`. `Authorization` itself does not
+introspection, or `OAuthServer.resource()`. `Authorization` itself does not
 run an authorization server or register clients.
 
 Give resource the public MCP URL, including its path. Endpoint publishes RFC
@@ -814,15 +784,12 @@ for mounting both transports with one metadata route.
 
 ### Static tokens and custom verifiers
 
-`StaticVerifier(mapping)` supports development and tests without extra dependencies.
-It snapshots a mapping from non-empty token strings to `Principal` objects.
-It compares SHA-256 digests with `compare_digest` for every entry, including after
-finding a match. `Authorization` checks expiry and scopes on the returned principal.
+`StaticVerifier(mapping)` maps non-empty tokens to principals for development
+and tests, without extra dependencies.
 
-Custom verifiers implement `async verify(token: str) -> Principal | None`.
-Return `None` for invalid tokens. Inheritance from `TokenVerifier` is optional.
-Keep token parsing and verification inside the verifier. Return identity and
-permissions through `Principal`; do not place credentials in its claims.
+Custom verifiers implement `async verify(token: str) -> Principal | None`;
+return `None` for invalid tokens. Keep token parsing inside the verifier and
+credentials out of `Principal`.
 
 ### JWT verifiers
 
@@ -832,22 +799,16 @@ Install the optional dependency:
 pip install 'aiohttp-tiny-mcp[jwt]'
 ```
 
-Import JWT verifiers from `aiohttp_tiny_mcp.jwt`. Core imports, `StaticVerifier`,
-and claims mapping work without PyJWT or cryptography. Importing the JWT module
-without these dependencies raises an `ImportError` that names the required extra.
+| Verifier | Key |
+| --- | --- |
+| `HMACJWTVerifier` | HS256 secret, at least 32 bytes |
+| `PublicKeyJWTVerifier` | PEM public key or file: RSA ≥2048 bits, EC P-256/P-384/P-521, or EdDSA |
 
-`HMACJWTVerifier(pre_shared_key, ...)` accepts HS256 with a secret of at least
-32 bytes. `PublicKeyJWTVerifier(public_key, ...)` accepts a PEM public key or a
-path to a PEM file. It selects RSA, EC, or EdDSA algorithms from that key.
-RSA keys must contain at least 2048 bits. EC keys use P-256, P-384, or P-521.
-The verifiers never select an algorithm from an unverified token header.
-This follows [PyJWT's algorithm configuration guidance](https://pyjwt.readthedocs.io/en/stable/api.html#jwt.decode).
-
-Both verifiers require `exp` and validate the signature and time claims.
-Set `issuer=` and `audience=` explicitly for an OAuth resource. Empty defaults
-disable those comparisons; `Authorization.resource` does not configure them.
-An audience claim can be a string or a list containing the configured audience.
-These classes use configured keys; they do not fetch JWKS or perform discovery.
+Both require `exp` and validate signatures and time claims. Algorithms follow
+the configured key. Set `issuer=` and `audience=` explicitly: empty defaults
+disable those checks, and `Authorization.resource` does not configure them.
+Audience lists are supported. JWKS fetching and discovery are not included.
+Core imports and claims mapping work without `[jwt]`.
 
 <!-- name: async test_jwt_verifiers -->
 ```python
@@ -856,7 +817,7 @@ import time
 import jwt
 
 from aiohttp_tiny_mcp import Authorization
-from aiohttp_tiny_mcp.jwt import HMACJWTVerifier
+from aiohttp_tiny_mcp.auth.jwt import HMACJWTVerifier
 
 secret = "replace-this-example-secret-with-random-bytes"
 verifier = HMACJWTVerifier(
@@ -883,12 +844,9 @@ assert principal.scopes == frozenset({"reports:read"})
 
 ### Map verified claims to a principal
 
-Both JWT verifiers accept `principal=`, a synchronous callable with the signature
-`Callable[[Mapping[str, Any]], Principal]`. It receives claims only after token
-verification. Raise `ValueError` to reject an account. Verification then returns
-`None`. Use the same mapping function inside an application introspection verifier.
-
-The default `principal_from_claims` maps these fields:
+Both JWT verifiers accept a synchronous `principal(claims) -> Principal`
+callback, called after verification. Raise `ValueError` to reject the account.
+The default `principal_from_claims` maps:
 
 | Claim | Principal field | Default |
 | --- | --- | --- |
@@ -898,17 +856,13 @@ The default `principal_from_claims` maps these fields:
 | `scope`, otherwise `scp` | `scopes` | Empty frozenset |
 | `exp` | `expires_at` | `None` |
 
-Scopes can be a whitespace-separated string or a list of strings. An explicit
-empty `scope` takes precedence over `scp`. The mapper copies claims into
-`Principal.claims` and rejects malformed identity, scope, and expiry values.
-It does not verify signatures, issuer, audience, or token activity.
+Scopes accept a space-separated string or a list; `scope` takes precedence
+over `scp`, including when empty. Claims are copied to `Principal.claims`;
+malformed identity, scope, and expiry values are rejected.
 
-Empty claims produce `Principal()`. This permits opaque token integrations, but
-does not assign a distinct user identity. An application that needs separate
-session owners must supply a stable subject or client ID.
-
-The default mapper leaves `namespace=None`; it does not trust a namespace claim.
-Use a custom mapper to choose an application namespace from verified claims:
+The mapper does not verify tokens. Empty claims produce `Principal()`;
+separate session owners need a stable subject or client ID. Namespace defaults
+to `None`. Override it through a custom mapper:
 
 <!-- name: async test_jwt_verifiers -->
 ```python
@@ -936,16 +890,15 @@ assert await verifier.verify(token) is None  # This token has no allowed organiz
 assert principal_from_claims({}) == Principal()
 ```
 
-A shared namespace does not change session ownership: owners still use
-`Principal.identity`, derived from issuer and subject or client ID. Applications
-that need shared storage can explicitly set `namespace=""` in their mapper.
+Use `namespace=""` for shared storage. Session ownership still uses the
+issuer-qualified subject or client ID, independently of namespace.
 
 ## Where the metadata has to be served
 
 The library logs a warning when `add_subapp()` adds a prefix to a `.well-known`
 metadata route. The warning includes the required path and the prefixed path.
 It applies to protected-resource metadata from both HTTP transports and to
-authorization-server metadata from `OAuthFacade`. It also works with `routes()`
+authorization-server metadata from `OAuthServer`. It also works with `routes()`
 and `app.add_routes()`. The warning does not move routes or prevent startup.
 
 An MCP path such as `/reports/mcp` on the root application is valid and does not
@@ -1006,138 +959,32 @@ SseEndpoint(registry).setup(both, "/sse", "/messages", metadata=False)
 that declare no metadata. General mounting rules are in
 [Transports](../deployment/transports.md#under-a-subapplication).
 
-## JWT middleware in an existing aiohttp application
+## Optional application middleware
 
-Use this path when the aiohttp application already owns login and access
-policy. Do not pass auth= to Registry: the MCP endpoint then does not publish
-OAuth resource metadata or enforce tool scopes itself. The application
-middleware authenticates every request, and handlers receive the resulting
-application user as an ordinary dependency.
+To manage authentication entirely in your application, omit `Registry.auth`
+and use aiohttp middleware. Your code then owns permissions, identity injection,
+and namespace/session isolation. See [request context](dependencies.md#what-middleware-decided).
 
-Install [PyJWT](https://pyjwt.readthedocs.io/) as an application dependency.
-The example uses a symmetric key only to keep the code small. With an external
-issuer, validate a signature from its JWKS with a fixed algorithm, issuer, and
-audience; never select the algorithm from the unverified token header.
+`Registry(auth=...)` leaves console assets public. For application middleware,
+wrap its authentication checks to keep the console open:
 
-<!-- name: async test_auth_jwt; fixtures: __name__ -->
+<!-- name: test_public_console_middleware -->
 ```python
-import jwt
 from aiohttp import web
-from aiohttp.test_utils import make_mocked_request
-from pydantic import BaseModel
 
-from aiohttp_tiny_mcp import CallToolResult, Endpoint, Registry
-from aiohttp_tiny_mcp.namespaces import namespace
+from aiohttp_tiny_mcp.console import Console
 
 
-SECRET = "replace-this-example-secret-with-32-bytes"
+def allow_console(authenticate):
+    @web.middleware
+    async def middleware(request, handler):
+        if Console.is_public(request):
+            return await handler(request)
+        return await authenticate(request, handler)
 
-
-class User:
-    def __init__(self, subject: str, organization: str, scopes: frozenset[str]) -> None:
-        self.subject = subject
-        self.organization = organization
-        self.scopes = scopes
-
-    def holds(self, scope: str) -> bool:
-        return scope in self.scopes
-
-
-USER: web.RequestKey[User] = web.RequestKey("user", User)
-
-
-@web.middleware
-async def authenticate(request: web.Request, handler):
-    header = request.headers.get("Authorization", "")
-    scheme, _, token = header.partition(" ")
-    if scheme.lower() != "bearer" or not token:
-        raise web.HTTPUnauthorized()
-    try:
-        claims = jwt.decode(
-            token,
-            SECRET,
-            algorithms=["HS256"],
-            audience="mcp-api",
-            issuer="https://login.example.com",
-        )
-    except jwt.InvalidTokenError as error:
-        raise web.HTTPUnauthorized(text="invalid token") from error
-
-    user = User(
-        claims["sub"],
-        claims["organization"],
-        frozenset(claims.get("scope", "").split()),
-    )
-    request[USER] = user
-    reset = namespace.set(user.organization)
-    try:
-        return await handler(request)
-    finally:
-        namespace.reset(reset)
-
-
-async def current_user(ex) -> User:
-    return ex.request[USER]
-
-
-registry = Registry("reports", "1.0")
-registry.provide(User, current_user)
-
-
-class Nothing(BaseModel):
-    pass
-
-
-@registry.tool
-async def report(args: Nothing, user: User) -> str | CallToolResult:
-    """Return a report in the caller's organization."""
-    if not user.holds("reports:read"):
-        return CallToolResult.failure("missing scope: reports:read")
-    return f"report for {user.subject}"
-
-
-app = web.Application(middlewares=[authenticate])
-Endpoint(registry).setup(app, "/mcp")
-
-token = jwt.encode(
-    {
-        "sub": "alice",
-        "organization": "acme",
-        "scope": "reports:read",
-        "aud": "mcp-api",
-        "iss": "https://login.example.com",
-    },
-    SECRET,
-    algorithm="HS256",
-)
-request = make_mocked_request("POST", "/mcp", headers={"Authorization": f"Bearer {token}"})
-
-
-async def next_handler(request):
-    assert request[USER].subject == "alice"
-    assert namespace.get() == "acme"
-    return web.Response()
-
-
-assert (await authenticate(request, next_handler)).status == 200
-assert await report(Nothing(), User("alice", "acme", frozenset())) == CallToolResult.failure(
-    "missing scope: reports:read"
-)
+    return middleware
 ```
 
-The middleware must run before Endpoint. It should reject an unauthenticated
-request before MCP parses it, and reset the namespace after the request. The
-organization is a suitable namespace when every MCP session, subscription, and
-pending question must stay inside that organization. Use the user subject
-instead for per-user isolation.
-
-JWT issuers commonly encode scopes as a space-separated scope claim; adapt the
-extraction to your issuer if it uses a roles array or a custom claim. Unlike
-Authorization, this application-owned route does not make tool(scopes=...)
-automatic: check User.scopes in the handler, or enforce it in a provider for a
-whole group of tools.
-
-This application-owned route works over every transport that carries the
-application identity. The bundled stdio transport has no HTTP Authorization
-header, so use it only when the process launcher is the authentication boundary
-and installs an equivalent trusted identity.
+Install `allow_console(your_auth_middleware)` in `web.Application(middlewares=[...])`.
+The exemption covers mounted console assets for GET and HEAD, including prefixed
+routes. MCP requests still pass through your authentication checks.

@@ -17,8 +17,8 @@ from aiohttp.test_utils import TestClient, TestServer
 from pydantic import BaseModel
 
 from aiohttp_tiny_mcp import Endpoint, MemoryHub, MemorySessionStore, Registry, SseEndpoint
-from aiohttp_tiny_mcp.sse import read_sse
-from aiohttp_tiny_mcp.tasks import stop
+from aiohttp_tiny_mcp.server.tasks import stop
+from aiohttp_tiny_mcp.transport.sse import read_sse
 
 pytestmark = pytest.mark.timeout(15)
 

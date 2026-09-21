@@ -16,7 +16,7 @@ import pytest
 from pydantic import BaseModel
 
 from aiohttp_tiny_mcp import Client, MemoryHub, MemorySessionStore, Registry
-from aiohttp_tiny_mcp.models import CallToolResult, ResourceLink, TextContent
+from aiohttp_tiny_mcp.protocol.models import CallToolResult, ResourceLink, TextContent
 from aiohttp_tiny_mcp.protocol.selection import AdapterSet
 
 pytestmark = pytest.mark.asyncio

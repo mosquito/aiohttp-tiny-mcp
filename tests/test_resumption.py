@@ -16,9 +16,9 @@ from aiohttp.test_utils import TestClient, TestServer
 from pydantic import BaseModel
 
 from aiohttp_tiny_mcp import Client, Endpoint, MemoryHub, Registry
-from aiohttp_tiny_mcp.hub import NOTIFICATIONS, START, Event, topic
 from aiohttp_tiny_mcp.protocol.selection import AdapterSet
-from aiohttp_tiny_mcp.sse import read_sse
+from aiohttp_tiny_mcp.storage.hub import NOTIFICATIONS, START, Event, topic
+from aiohttp_tiny_mcp.transport.sse import read_sse
 
 pytestmark = [pytest.mark.asyncio, pytest.mark.timeout(10)]
 

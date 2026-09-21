@@ -6,8 +6,8 @@ import asyncio
 
 import pytest
 from aiohttp_tiny_mcp import Client
-from aiohttp_tiny_mcp.hub import NOTIFICATIONS, topic
 from aiohttp_tiny_mcp.protocol.selection import AdapterSet
+from aiohttp_tiny_mcp.storage.hub import NOTIFICATIONS, topic
 from fake_exchange import FakeExchange
 
 from docker_mcp.consent import Policy

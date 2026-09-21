@@ -209,11 +209,11 @@ client = Docker(url=parser.docker_url) if parser.docker_url else Docker()
 return build(registry, client, Policy(parser.confirm)), storage, client
 ```
 
-**State is SQLite.** `aiohttp_tiny_mcp.sqlite` holds the sessions and the
+**State is SQLite.** `aiohttp_tiny_mcp.storage.sqlite` holds the sessions and the
 events in one file, which is what several workers on one machine share. This
 example used to carry its own copy of that; the package ships it now, and
 `aiohttp-tiny-mcp[sqlite]` is what brings it. Across machines the same two
-contracts are served by `aiohttp_tiny_mcp.redis` or `.postgres`.
+contracts are served by `aiohttp_tiny_mcp.storage.redis` or `.postgres`.
 
 **The daemon's own events become notifications.** A container that dies is
 published to the hub, and whoever subscribed hears about it.

@@ -190,7 +190,7 @@ class BasicAuth(Authentication):
     """Subclass `verify` to authenticate Basic credentials against your user store.
 
     Credentials use standard Base64 and UTF-8. Query credentials are not read.
-    Use `StaticBasicAuth` for one configured username and password.
+    Use `StaticBasicAuth` for configured accounts with individual scopes.
     """
 
     def __init__(
@@ -234,15 +234,17 @@ class BasicAuth(Authentication):
 
 
 class StaticBasicAuth(BasicAuth):
-    """Basic authentication for one configured account. Use HTTPS in production."""
+    """Basic authentication for configured accounts with individual scopes.
+
+    Pass each account as (username, password, scopes), or (username, password)
+    for an account without scopes. Usernames must be unique. Use HTTPS in
+    production.
+    """
 
     def __init__(
         self,
-        username: str,
-        password: str,
-        *,
+        *accounts: tuple[str, str] | tuple[str, str, Iterable[str]],
         realm: str = "mcp",
-        scopes: Iterable[str] = (),
         bind_sessions: bool = True,
         namespace_from_token: bool = True,
         required_scopes: Sequence[str] = (),
@@ -253,20 +255,52 @@ class StaticBasicAuth(BasicAuth):
             namespace_from_token=namespace_from_token,
             required_scopes=required_scopes,
         )
-        if ":" in username or any(
-            ord(char) < 32 or ord(char) == 127 for char in username + password
-        ):
-            raise ValueError("Basic credentials cannot contain controls or a colon in the username")
-        if not username or not password:
-            raise ValueError("username and password must be non-empty")
-        self._username = username.encode("utf-8")
-        self._password = password.encode("utf-8")
-        self._principal = Principal(subject=username, scopes=frozenset(scopes))
+        if not accounts:
+            raise ValueError("at least one Basic account is required")
+        entries: list[tuple[bytes, bytes, Principal]] = []
+        usernames: set[str] = set()
+        for account in accounts:
+            if not isinstance(account, tuple) or len(account) not in (2, 3):
+                raise TypeError("accounts must be (username, password[, scopes]) tuples")
+            username, password = account[:2]
+            if not isinstance(username, str) or not isinstance(password, str):
+                raise TypeError("username and password must be strings")
+            if not username or not password:
+                raise ValueError("username and password must be non-empty")
+            if ":" in username or any(
+                ord(char) < 32 or ord(char) == 127 for char in username + password
+            ):
+                raise ValueError(
+                    "Basic credentials cannot contain controls or a colon in the username"
+                )
+            if username in usernames:
+                raise ValueError("Basic account usernames must be unique")
+            usernames.add(username)
+            scopes = account[2] if len(account) == 3 else ()
+            if isinstance(scopes, str):
+                raise TypeError("account scopes must be an iterable of strings, not a string")
+            granted = frozenset(scopes)
+            if any(not isinstance(scope, str) for scope in granted):
+                raise TypeError("account scopes must contain only strings")
+            entries.append(
+                (
+                    sha256(username.encode("utf-8")).digest(),
+                    sha256(password.encode("utf-8")).digest(),
+                    Principal(subject=username, scopes=granted),
+                )
+            )
+        self._entries = tuple(entries)
 
     async def verify(self, username: str, password: str) -> Principal | None:
-        matched = compare_digest(username.encode("utf-8"), self._username)
-        matched &= compare_digest(password.encode("utf-8"), self._password)
-        return self._principal if matched else None
+        given_username = sha256(username.encode("utf-8")).digest()
+        given_password = sha256(password.encode("utf-8")).digest()
+        found = None
+        for expected_username, expected_password, principal in self._entries:
+            matched = compare_digest(given_username, expected_username)
+            matched &= compare_digest(given_password, expected_password)
+            if matched:
+                found = principal
+        return found
 
 
 @dataclass(frozen=True)

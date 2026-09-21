@@ -1,4 +1,4 @@
-"""HTTP transport for BaseClient. See stdio_client.py for the stdio transport."""
+"""HTTP transport for BaseClient. The stdio transport lives in client.stdio."""
 
 from __future__ import annotations
 
@@ -9,10 +9,11 @@ from typing import Any
 
 import aiohttp
 
-from .adapter import Adapter
-from .client_base import BaseClient, Elicitor
-from .models import Implementation
-from .sse import read_sse
+from aiohttp_tiny_mcp.protocol.adapter import Adapter
+from aiohttp_tiny_mcp.protocol.models import Implementation
+from aiohttp_tiny_mcp.transport.sse import read_sse
+
+from .base import BaseClient, Elicitor
 
 ANSWER_METHOD = "elicitation/create"
 

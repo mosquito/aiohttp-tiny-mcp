@@ -41,7 +41,7 @@ Issues = "https://github.com/mosquito/aiohttp-tiny-mcp/issues"
 [project.optional-dependencies]
 jwt = ["PyJWT[crypto]>=2.13"]
 skills = ["PyYAML>=6"]
-# A hub and a session store on one SQLite file: aiohttp_tiny_mcp.sqlite.
+# A hub and a session store on one SQLite file: aiohttp_tiny_mcp.storage.sqlite.
 sqlite = ["aiosqlite>=0.20"]
 redis = [
     "redis>=5",
@@ -105,7 +105,10 @@ line-length = 100
 target-version = "py310"
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "UP", "B"]
+select = ["E", "F", "I", "UP", "B", "TID"]
+
+[tool.ruff.lint.flake8-tidy-imports]
+ban-relative-imports = "parents"
 
 [tool.ty.environment]
 root = ["src", "examples"]

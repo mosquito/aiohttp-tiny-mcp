@@ -46,6 +46,27 @@ progress, log messages, questions, session access, cancellation, and the
 response stream to this invocation. Do not retain it after the handler returns.
 The complete API is in [Using Exchange](guide/exchange.md).
 
+## Package layout
+
+Import the main classes from `aiohttp_tiny_mcp`. Their implementations are
+grouped by responsibility:
+
+| Package | Contents |
+| --- | --- |
+| `server` | Registration, dispatch, handler context, HTTP and stdio endpoints |
+| `client` | Shared client logic, HTTP and stdio clients |
+| `protocol` | Wire models, schemas, adapters, and protocol revisions |
+| `storage` | Session stores, event hubs, namespaces, and database backends |
+| `auth` | Authentication policies and optional JWT verification |
+| `oauth` | OAuth providers, authorization server, and tokens |
+| `extensions` | Extension declarations and Skills |
+| `transport` | Shared HTTP routing and SSE framing |
+| `console` | Browser console and its assets |
+
+`aiohttp_tiny_mcp.testing` provides test clients. Optional backends use explicit
+imports, such as `aiohttp_tiny_mcp.storage.postgres` and
+`aiohttp_tiny_mcp.auth.jwt`.
+
 ## Why Store and Hub exist
 
 They matter when requests can land on different workers.

@@ -22,10 +22,10 @@ from aiohttp_tiny_mcp import (
     StaticBasicAuth,
     Unauthorized,
 )
-from aiohttp_tiny_mcp.hub import NOTIFICATIONS, topic
-from aiohttp_tiny_mcp.namespaces import current
 from aiohttp_tiny_mcp.protocol.selection import AdapterSet
-from aiohttp_tiny_mcp.sessions import SESSION_HEADER
+from aiohttp_tiny_mcp.storage.hub import NOTIFICATIONS, topic
+from aiohttp_tiny_mcp.storage.namespaces import current
+from aiohttp_tiny_mcp.storage.sessions import SESSION_HEADER
 from aiohttp_tiny_mcp.testing import over_http, pick
 
 pytestmark = pytest.mark.asyncio
@@ -86,7 +86,7 @@ def bearer():
 @pytest.mark.parametrize("kind", ["static", "subclass", "custom", "mixed"])
 async def test_public_authentication_api(adapter, kind):
     policies = {
-        "static": StaticBasicAuth("alice", "secret", scopes=["read"]),
+        "static": StaticBasicAuth(("alice", "secret", ["read"])),
         "subclass": Users(),
         "custom": ApiKey(),
         "mixed": (policy for policy in [Users(), bearer()]),
@@ -120,7 +120,7 @@ async def test_public_authentication_api(adapter, kind):
 )
 @pytest.mark.parametrize("route", ["post-mcp", "get-mcp", "get-sse", "post-messages"])
 async def test_invalid_basic_credentials_fail_before_dispatch(header, route):
-    registry = registry_for(StaticBasicAuth("alice", "secret", scopes=["read"]))
+    registry = registry_for(StaticBasicAuth(("alice", "secret", ["read"])))
     app = Endpoint(registry).app()
     SseEndpoint(registry).setup(app)
     method, path = route.split("-", 1)
@@ -144,7 +144,7 @@ async def test_invalid_basic_credentials_fail_before_dispatch(header, route):
 
 
 async def test_basic_utf8_password_colons_and_escaped_realm():
-    policy = StaticBasicAuth("алиса", "секрет:пароль", realm='a"b\\c')
+    policy = StaticBasicAuth(("алиса", "секрет:пароль"), realm='a"b\\c')
     request = make_mocked_request("GET", "/", headers=basic("алиса", "секрет:пароль"))
     assert policy.check(await policy.authenticate(request)).subject == "алиса"
     assert policy.challenge(Unauthorized("x", "x")) == 'Basic realm="a\\"b\\\\c", charset="UTF-8"'
@@ -164,7 +164,8 @@ async def test_basic_utf8_password_colons_and_escaped_realm():
 )
 async def test_static_basic_rejects_invalid_configuration(options):
     with pytest.raises(ValueError):
-        StaticBasicAuth(**{"username": "alice", "password": "secret", **options})
+        supplied = {"username": "alice", "password": "secret", **options}
+        StaticBasicAuth((supplied.pop("username"), supplied.pop("password")), **supplied)
 
 
 async def test_abstract_classes_require_application_hooks():
@@ -263,7 +264,7 @@ async def test_common_checks_apply_to_custom_policy_and_preserve_scope_failure(k
 
 
 async def test_tool_scope_check_applies_to_basic_principal():
-    registry = registry_for(StaticBasicAuth("alice", "secret"))
+    registry = registry_for(StaticBasicAuth(("alice", "secret")))
     async with over_http(registry, headers=basic()) as client:
         result = await client.call_tool("who", {})
         assert result.is_error
@@ -339,3 +340,160 @@ async def test_hub_namespace_follows_principal_across_policies():
             assert one.content[0].text == two.content[0].text
             events = await registry.hub.poll(one.content[0].text, "", timeout=0)
             assert len(events) == 2
+
+
+@pytest.mark.parametrize(
+    ("username", "password", "expected_scopes"),
+    [
+        ("alice", "alice-secret", frozenset({"read"})),
+        ("bob", "bob-secret", frozenset({"write"})),
+        ("guest", "guest-secret", frozenset()),
+        ("alice", "bob-secret", None),
+        ("bob", "alice-secret", None),
+        ("missing", "alice-secret", None),
+        ("alice", "invalid", None),
+    ],
+)
+async def test_static_basic_accounts_keep_credentials_and_scopes_separate(
+    username, password, expected_scopes, monkeypatch
+):
+    from unittest.mock import Mock
+
+    from aiohttp_tiny_mcp import auth as auth_module
+
+    policy = StaticBasicAuth(
+        ("alice", "alice-secret", {"read"}),
+        ("bob", "bob-secret", {"write"}),
+        ("guest", "guest-secret"),
+    )
+    compare = Mock(wraps=auth_module.compare_digest)
+    monkeypatch.setattr(auth_module, "compare_digest", compare)
+    principal = await policy.verify(username, password)
+    if expected_scopes is None:
+        assert principal is None
+    else:
+        assert principal.subject == username
+        assert principal.scopes == expected_scopes
+        assert principal.identity == f"|{username}"
+    assert compare.call_count == 6
+    assert all(len(arg) == 32 for call in compare.call_args_list for arg in call.args)
+    assert "secret" not in repr(policy)
+
+
+async def test_static_basic_copies_each_accounts_scope_iterable():
+    alice_scopes = ["read"]
+    policy = StaticBasicAuth(
+        ("alice", "secret", alice_scopes),
+        ("bob", "secret", (scope for scope in ["write", "write"])),
+    )
+    alice_scopes.append("write")
+    assert (await policy.verify("alice", "secret")).scopes == frozenset({"read"})
+    assert (await policy.verify("bob", "secret")).scopes == frozenset({"write"})
+    assert (await policy.verify("bob", "secret")).scopes == frozenset({"write"})
+
+
+@pytest.mark.parametrize(
+    ("accounts", "error"),
+    [
+        ((), ValueError),
+        (("alice", "secret"), TypeError),
+        ((("alice",),), TypeError),
+        ((("alice", "secret", [], "extra"),), TypeError),
+        (((1, "secret"),), TypeError),
+        ((("alice", None),), TypeError),
+        ((("alice", "secret", "read"),), TypeError),
+        ((("alice", "secret", [1]),), TypeError),
+        ((("alice", "secret", None),), TypeError),
+        ((("alice", "secret"), ("bob", "")), ValueError),
+        ((("alice", "secret"), ("alice", "other", ["write"])), ValueError),
+    ],
+)
+async def test_static_basic_rejects_invalid_account_collections(accounts, error):
+    with pytest.raises(error):
+        StaticBasicAuth(*accounts)
+
+
+@pytest.mark.parametrize("transport", ["http", "sse"])
+@pytest.mark.parametrize("username", ["alice", "bob", "guest"])
+async def test_static_basic_account_permissions_over_both_transports(transport, username):
+    policy = StaticBasicAuth(
+        ("alice", "alice-secret", {"read"}),
+        ("bob", "bob-secret", {"write"}),
+        ("guest", "guest-secret"),
+    )
+    registry = registry_for(policy)
+
+    @registry.tool(scopes=["write"])
+    async def write(args: Nothing, principal: Principal) -> str:
+        return f"{principal.subject}:{current()}"
+
+    @registry.tool
+    async def identity(args: Nothing, principal: Principal) -> str:
+        return f"{principal.subject}:{current()}"
+
+    expected = f"{username}:|{username}"
+    headers = basic(username, f"{username}-secret")
+    if transport == "http":
+        async with over_http(registry, headers=headers) as client:
+            for tool, allowed in [
+                ("identity", True),
+                ("who", username == "alice"),
+                ("write", username == "bob"),
+            ]:
+                result = await client.call_tool(tool, {})
+                assert bool(result.is_error) is not allowed
+                if allowed:
+                    assert result.content[0].text == expected
+    else:
+        async with TestServer(SseEndpoint(registry).setup(web.Application())) as server:
+            client = OldClient(str(server.make_url("")), headers=headers)
+            try:
+                await client.open()
+                await client.call(
+                    "initialize",
+                    {
+                        "protocolVersion": "2024-11-05",
+                        "capabilities": {},
+                        "clientInfo": {"name": "old", "version": "1"},
+                    },
+                )
+                for request_id, (tool, allowed) in enumerate(
+                    [
+                        ("identity", True),
+                        ("who", username == "alice"),
+                        ("write", username == "bob"),
+                    ],
+                    start=2,
+                ):
+                    response = await client.call(
+                        "tools/call", {"name": tool, "arguments": {}}, request_id
+                    )
+                    result = response["result"]
+                    assert bool(result.get("isError")) is not allowed
+                    if allowed:
+                        assert result["content"][0]["text"] == expected
+            finally:
+                await client.close()
+
+
+async def test_required_scopes_apply_to_each_static_account():
+    policy = StaticBasicAuth(
+        ("alice", "secret", {"read"}),
+        ("bob", "secret", {"write"}),
+        required_scopes=["read"],
+    )
+    async with TestClient(TestServer(Endpoint(registry_for(policy)).app())) as client:
+        for username, expected in [("alice", 200), ("bob", 403)]:
+            response = await client.post(
+                "/mcp",
+                headers=basic(username),
+                json={
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "ping",
+                    "params": {},
+                },
+            )
+            assert response.status == expected
+            if expected == 403:
+                assert (await response.json())["error"] == "insufficient_scope"

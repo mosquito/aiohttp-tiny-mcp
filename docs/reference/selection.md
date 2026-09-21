@@ -36,7 +36,7 @@ overrides the original.
 
 <!-- name: test_selection -->
 ```python
-from aiohttp_tiny_mcp.core import Preamble
+from aiohttp_tiny_mcp.protocol.core import Preamble
 from aiohttp_tiny_mcp.protocol.selection import AdapterSet
 
 adapters = AdapterSet.default()
@@ -109,7 +109,7 @@ was asked for, so a client can pick again rather than guess.
 ```python
 import pytest
 
-from aiohttp_tiny_mcp.core import FailureKind, Rejected
+from aiohttp_tiny_mcp.protocol.core import FailureKind, Rejected
 
 with pytest.raises(Rejected) as raised:
     adapters.select(

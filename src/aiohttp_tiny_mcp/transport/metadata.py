@@ -21,7 +21,7 @@ class WellKnownResource(PlainResource):
             "OAuth metadata belongs at %s, but a subapplication moved it to %s. "
             "Clients cannot discover this metadata at the prefixed path. "
             "Mount metadata_routes() on the root application and use metadata=False "
-            "in the subapplication; mount OAuthFacade routes on the root application.",
+            "in the subapplication; mount OAuthServer routes on the root application.",
             self.expected_path,
             self.canonical,
         )

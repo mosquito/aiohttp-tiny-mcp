@@ -10,7 +10,7 @@ from typing import Any
 import aiohttp
 
 from aiohttp_tiny_mcp import Client
-from aiohttp_tiny_mcp.adapter import Adapter
+from aiohttp_tiny_mcp.protocol.adapter import Adapter
 
 
 @dataclass

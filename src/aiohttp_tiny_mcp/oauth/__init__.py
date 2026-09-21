@@ -1,15 +1,19 @@
 """OAuth sign-in for registered MCP clients, with server-side identity providers."""
 
-from .facade import OAuthClient, OAuthFacade
 from .github import GitHub
-from .upstream import Identity, OAuth2, UpstreamAuthError, UpstreamTokens
+from .provider import Identity, OAuthProvider, UpstreamAuthError
+from .server import OAuthClient, OAuthServer
+from .tokens import AbstractCipher, EncryptedTokens, KECCAKCipher, OpaqueTokens
 
 __all__ = [
+    "AbstractCipher",
+    "EncryptedTokens",
     "GitHub",
     "Identity",
-    "OAuth2",
+    "KECCAKCipher",
+    "OAuthProvider",
     "OAuthClient",
-    "OAuthFacade",
+    "OAuthServer",
+    "OpaqueTokens",
     "UpstreamAuthError",
-    "UpstreamTokens",
 ]

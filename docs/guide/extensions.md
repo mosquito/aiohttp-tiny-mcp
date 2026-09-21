@@ -63,13 +63,13 @@ capability declaration from earlier revisions.
 ## Results and errors
 
 Return a dictionary, a Pydantic model, or a subclass of
-`aiohttp_tiny_mcp.models.ResultModel`. For cacheable methods, subclass
+`aiohttp_tiny_mcp.protocol.models.ResultModel`. For cacheable methods, subclass
 `CacheableResult`; the adapter supplies `ttlMs: 0` and `cacheScope: "private"`
 unless the handler sets them. The adapter also supplies `resultType` and server
 identity metadata.
 
 Invalid handler arguments produce JSON-RPC error `-32602`. To report a specific
-protocol failure, raise `Rejected(Failure(...))` from `aiohttp_tiny_mcp.core`.
+protocol failure, raise `Rejected(Failure(...))` from `aiohttp_tiny_mcp.protocol.core`.
 Unexpected exceptions produce `-32603`. Extension methods are requests and require
 an id; extension notification handlers are not supported.
 
@@ -205,7 +205,7 @@ uses pytest's `tmp_path`; an application can pass `"skills"` instead.
 <!-- name: async test_extension_skills; fixtures: tmp_path -->
 ```python
 from aiohttp_tiny_mcp import Registry
-from aiohttp_tiny_mcp.skills import Skills
+from aiohttp_tiny_mcp.extensions.skills import Skills
 from aiohttp_tiny_mcp.testing import connect
 
 directory = tmp_path / "skills" / "deploy"

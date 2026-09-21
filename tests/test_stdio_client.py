@@ -10,9 +10,9 @@ from pathlib import Path
 import pytest
 
 from aiohttp_tiny_mcp import ClientError, elicit_accept
-from aiohttp_tiny_mcp.models import CallToolResult, TextContent, TextResourceContents
+from aiohttp_tiny_mcp.client.stdio import StdioClient
+from aiohttp_tiny_mcp.protocol.models import CallToolResult, TextContent, TextResourceContents
 from aiohttp_tiny_mcp.protocol.selection import AdapterSet
-from aiohttp_tiny_mcp.stdio_client import StdioClient
 
 pytestmark = [pytest.mark.asyncio, pytest.mark.timeout(10)]
 
