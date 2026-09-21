@@ -5,6 +5,40 @@ the HTTP request and returns a verified `Principal`. Both `Endpoint` and
 `SseEndpoint` use the same policy. The endpoints check expiry and required
 scopes, inject the principal into handlers, and enforce session ownership.
 
+## Policies and token verifiers
+
+`Authorization` is a concrete subclass of `Authentication` for OAuth Bearer
+requests. A `TokenVerifier` is a separate component passed to that policy;
+it is not a subclass of `Authorization`.
+
+| Component | Input | Responsibility |
+| --- | --- | --- |
+| `Authentication` | HTTP request | Defines the policy interface: authenticate the request and build a challenge. |
+| `Authorization` | HTTP request with a Bearer header | Extracts the token, calls its verifier, checks expiry and required scopes, and supplies OAuth metadata and challenges. |
+| `TokenVerifier` | Token string | Verifies the credential and returns `Principal` or `None`. It has no HTTP responsibilities. |
+| `Principal` | Verified identity and permissions | Carries the result to scope checks, namespace selection, session ownership checks, and handlers. |
+
+An accepted OAuth Bearer request follows this flow:
+
+```{mermaid}
+flowchart TD
+    A["Authorization<br/>Extract the Bearer token"]
+    A --> V["TokenVerifier<br/>Verify the token"]
+    V --> P["Principal<br/>Identity and permissions"]
+    P --> C["Authorization<br/>Check expiry and required scopes"]
+    C --> E["Endpoint<br/>Select namespace and check session ownership"]
+```
+
+Use `Authorization(verifier=..., resource=...)` when only the token verification
+method changes. For example, `StaticVerifier`, `HMACJWTVerifier`, and
+`PublicKeyJWTVerifier` share the same Bearer handling and metadata behavior.
+
+Subclass `Authentication` when you also need different credential extraction,
+challenges, or metadata behavior. A custom policy can reuse a token verifier,
+or perform verification itself. This separation avoids repeating HTTP handling
+for each token format. Despite its name, `Authorization` is the OAuth Bearer
+policy, not the base class for all authentication methods.
+
 ## Choose an integration
 
 | Requirement | Integration | Application code |
