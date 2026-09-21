@@ -83,9 +83,9 @@ async def served(offered):
 class OldClient:
     """A 2024-11-05 client, in as few lines as the transport allows."""
 
-    def __init__(self, base: str) -> None:
+    def __init__(self, base: str, *, headers: dict[str, str] | None = None) -> None:
         self.base = base
-        self.http = aiohttp.ClientSession()
+        self.http = aiohttp.ClientSession(headers=headers)
         self.stream = None
         self.post_to = ""
         self.seen: asyncio.Queue = asyncio.Queue()

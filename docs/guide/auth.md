@@ -82,12 +82,24 @@ bind_sessions=True is also the default: a legacy HTTP session belongs to the
 principal that opened it. Do not disable it unless a separate trusted layer
 binds session IDs to callers.
 
+These checks also apply to the legacy `SseEndpoint`: both `GET /sse` and
+every `POST /messages` require the Bearer header. Verification occurs before
+opening a stream or dispatching a message. The stored session owner is checked
+on each POST, including requests handled by another worker. Historical clients
+must acquire a token separately if they lack OAuth discovery and login support.
+See [HTTP+SSE deployment](../deployment/transports.md#httpsse-for-2024-11-05-clients)
+for mounting both transports with one metadata route.
+
 ## Where the metadata has to be served
 
 Endpoint.routes includes the metadata route along with the endpoint, and
 Endpoint.metadata_routes returns it alone. The path comes from resource, not
 from where you mounted anything, and RFC 8615 places a well-known URI directly
 under the authority. Give resource the endpoint's public URL, so the two agree.
+
+`SseEndpoint.routes()` and `metadata_routes()` follow the same rule. When both
+transports share one protected resource, pass `metadata=False` to one endpoint
+to avoid registering the metadata route twice.
 
 <!-- name: async test_auth -->
 ```python

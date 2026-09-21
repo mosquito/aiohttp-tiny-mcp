@@ -339,7 +339,8 @@ from aiohttp_tiny_mcp import SseEndpoint
 
 both = web.Application()
 Endpoint(registry).setup(both, "/mcp")
-SseEndpoint(registry).setup(both, "/sse", "/messages")
+# Endpoint already serves metadata when registry.auth is configured.
+SseEndpoint(registry).setup(both, "/sse", "/messages", metadata=False)
 ```
 
 It works the other way round. The client opens one long stream with `GET /sse`
@@ -347,6 +348,37 @@ and is told, in an `endpoint` event, where to post; every message it sends
 afterwards is a POST to that address, and every message the server sends --
 progress, log lines, results -- goes out on the stream it opened first. The
 stream is the session.
+
+With `Registry(auth=...)`, send `Authorization: Bearer <token>` on both
+`GET /sse` and every `POST /messages`. Missing, invalid, or expired tokens
+receive HTTP 401 with a Bearer challenge. Missing `required_scopes` receive
+HTTP 403. Authentication runs before session creation or message dispatch.
+Tool scopes use the verified principal; a missing tool scope produces an
+error result on the stream, as it does for Streamable HTTP.
+
+By default, the session belongs to the principal that opened the stream.
+Another principal receives HTTP 404 when posting to its address, including
+on another worker. The verified identity also scopes session and hub keys,
+unless trusted middleware already set a namespace.
+
+`SseEndpoint.setup()` and `routes()` include protected-resource metadata when
+authorization is configured. Register it only once when both transports share
+one protected resource, as above. For a subapplication, keep metadata at the
+site root:
+
+<!-- name: test_transports -->
+```python
+legacy = SseEndpoint(registry)
+section = web.Application()
+section.add_routes(legacy.routes(metadata=False))
+root = web.Application()
+root.add_subapp("/legacy", section)
+root.add_routes(legacy.metadata_routes())
+```
+
+Older clients can use a token acquired separately. These checks do not add
+OAuth discovery or login support to a client that lacks it. With
+`Registry.auth is None`, the transport keeps its unauthenticated behavior.
 
 Nothing pins that POST to the worker holding the stream, so the reply is
 published to the hub under a topic named for the connection and written out by

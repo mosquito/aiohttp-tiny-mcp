@@ -12,6 +12,7 @@ from typing import Any
 from aiohttp import web
 
 from .adapter import Adapter
+from .auth import Principal, Unauthorized
 from .core import (
     Call,
     DecodeFailure,
@@ -100,10 +101,14 @@ class SseEndpoint:
         """Open a stream and send its POST address."""
         try:
             self.origins.check_origin(request)
+            principal = await self.origins.verified(request)
         except Rejected as e:
             return self.origins.render_failure(self.adapter, e.failure)
+        except Unauthorized as refusal:
+            assert self.registry.auth is not None
+            return self.origins.refuse(self.registry.auth, refusal)
 
-        session_id = await self.open_session()
+        session_id = await self.open_session(principal.identity if principal is not None else None)
         where = topic(STREAM, session_id)
         hub = self.registry.hub
         wait = self.registry.hub_poll_seconds
@@ -126,12 +131,12 @@ class SseEndpoint:
             await self.registry.session_store.delete(scoped(session_id))
         return response
 
-    async def open_session(self) -> str:
+    async def open_session(self, owner: str | None = None) -> str:
         """Create the short-lived session represented by an open stream."""
         session_id = new_session_id()
         await self.registry.session_store.create(
             scoped(session_id),
-            handshake_data(VERSION, {}),
+            handshake_data(VERSION, {}, owner),
             ttl_seconds=self.registry.session_ttl_seconds,
         )
         return session_id
@@ -189,13 +194,20 @@ class SseEndpoint:
         """Take one message and answer 202. The reply goes to the stream."""
         try:
             self.origins.check_origin(request)
+            principal = await self.origins.verified(request)
         except Rejected as e:
             return self.origins.render_failure(self.adapter, e.failure)
+        except Unauthorized as refusal:
+            assert self.registry.auth is not None
+            return self.origins.refuse(self.registry.auth, refusal)
 
         session_id = request.query.get("session_id", "")
         record = await self.registry.session_store.get(scoped(session_id)) if session_id else None
-        if record is None:
+        if record is None or not self.origins.owns(record, principal):
             return web.json_response({"error": "no such session"}, status=404)
+        await self.registry.session_store.touch(
+            scoped(session_id), ttl_seconds=self.registry.session_ttl_seconds
+        )
 
         raw = await request.read()
         log.debug("<- [%s] %s", VERSION, raw.decode("utf-8", "replace"))
@@ -210,7 +222,9 @@ class SseEndpoint:
             return web.Response(status=202)
 
         for item in items:
-            await self.serve(adapter, item, session_id, record, where)
+            await self.serve(
+                adapter, item, session_id, record, where, request=request, principal=principal
+            )
         return web.Response(status=202)
 
     async def serve(
@@ -220,6 +234,9 @@ class SseEndpoint:
         session_id: str,
         record: SessionRecord,
         where: str,
+        *,
+        request: web.Request,
+        principal: Principal | None,
     ) -> None:
         hub = self.registry.hub
         if isinstance(item, DecodeFailure):
@@ -237,7 +254,8 @@ class SseEndpoint:
         session = Session(
             self.registry.session_store, session_id, record, self.registry.session_ttl_seconds
         )
-        ex = Exchange(self.registry, self.origins, adapter, item, session=session)
+        ex = Exchange(self.registry, request, adapter, item, session=session)
+        ex.principal = principal
         ex.send = lambda payload: hub.publish(where, payload)
 
         try:
@@ -266,31 +284,48 @@ class SseEndpoint:
         return path[: -len(self.sse_path)] if path.endswith(self.sse_path) else ""
 
     def routes(
-        self, sse_path: str | None = None, message_path: str | None = None
+        self,
+        sse_path: str | None = None,
+        message_path: str | None = None,
+        *,
+        metadata: bool = True,
     ) -> list[web.RouteDef]:
         """One route to listen on, one to post to.
 
         Either path may be set here or on the constructor. Both are kept,
         because the stream names the posting path to the client.
+
+        Protected endpoints include resource metadata. Use `metadata=False`
+        when another endpoint serves it or when mounting under a subapplication.
+        In a subapplication, add `metadata_routes()` to the root application.
         """
         if sse_path is not None:
             self.sse_path = sse_path
         if message_path is not None:
             self.message_path = message_path
         log.debug("HTTP+SSE stream at %s, messages at %s", self.sse_path, self.message_path)
-        return [
+        found = [
             web.get(self.sse_path, self.listen),
             web.post(self.message_path, self.receive),
         ]
+        if metadata:
+            found.extend(self.metadata_routes())
+        return found
+
+    def metadata_routes(self, *, name: str | None = "mcp-sse") -> list[web.RouteDef]:
+        """Return protected-resource metadata routes for the root application."""
+        return self.origins.metadata_routes(name=name)
 
     def setup(
         self,
         app: web.Application,
         sse_path: str | None = None,
         message_path: str | None = None,
+        *,
+        metadata: bool = True,
     ) -> web.Application:
         log.debug("adding the HTTP+SSE routes to %r", app)
-        app.add_routes(self.routes(sse_path, message_path))
+        app.add_routes(self.routes(sse_path, message_path, metadata=metadata))
         return app
 
 
