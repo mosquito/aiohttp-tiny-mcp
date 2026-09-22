@@ -1039,10 +1039,18 @@ function readFields(fields) {
       return;
     }
     const raw = input.value.trim();
+    if (kind === "integer" || kind === "number") {
+      if (input.validity.badInput) throw new Error(`${name}: enter a valid number.`);
+      if (raw === "") return;
+      const value = input.valueAsNumber;
+      if (!Number.isFinite(value) || (kind === "integer" && !Number.isInteger(value))) {
+        throw new Error(`${name}: enter a valid ${kind}.`);
+      }
+      values[name] = value;
+      return;
+    }
     if (raw === "") return; // absent, which is not the same as empty
     if (kind === "choice") values[name] = JSON.parse(raw);
-    else if (kind === "integer") values[name] = parseInt(raw, 10);
-    else if (kind === "number") values[name] = parseFloat(raw);
     else if (kind === "object" || kind === "array") {
       try {
         values[name] = JSON.parse(raw);

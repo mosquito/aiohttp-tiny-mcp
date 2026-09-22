@@ -349,3 +349,33 @@ process.stdout.write(JSON.stringify({malformed, changed: form()}));
     result = subprocess.run([NODE, "-e", driver], capture_output=True, text=True, check=True)
     state = json.loads(result.stdout)
     assert state["malformed"] == state["changed"] == {"choice": "new", "count": 2}
+
+
+@pytest.mark.parametrize("kind", ["integer", "number"])
+def test_numeric_exponent_uses_browser_value(kind):
+    assert render({"type": kind, "default": "1e3"})["values"] == {"value": 1000}
+
+
+@pytest.mark.parametrize(
+    "kind,raw,bad_input",
+    [("integer", "1.5", False), ("number", "1e999", False), ("number", "", True)],
+)
+def test_invalid_numbers_are_not_truncated_or_sent_as_null(kind, raw, bad_input):
+    source = CONSOLE.read_text()
+    functions = source[source.index("function buildFields(") : source.index("function show(")]
+    driver = (
+        DOM
+        + functions
+        + f"""
+const input = buildField("value", {{type: {json.dumps(kind)}}}, false, element("div"));
+input.value = {json.dumps(raw)};
+input.validity.badInput = {json.dumps(bad_input)};
+try {{
+  readFields([input]);
+  throw Error("invalid input was accepted");
+}} catch (error) {{
+  if (!error.message.startsWith("value: enter a valid")) throw error;
+}}
+"""
+    )
+    subprocess.run([NODE, "-e", driver], capture_output=True, text=True, check=True)
