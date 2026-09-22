@@ -87,7 +87,9 @@ the next visit as long as the path is still the configured one.
 **Offered** lists the tools, resources, resource templates and prompts, with
 what each says about itself. A tool that declared `destructiveHint` is marked.
 On `2026-07-28`, it also lists declared extensions and skills. Listings follow
-pagination cursors, including skill catalogs.
+pagination cursors, including skill catalogs. Selecting a tool saves its name
+in the page URL as `#toolName`. Reloading selects it again if the server still
+offers it.
 
 **The middle** renders the description as the markdown it is -- headings,
 lists, code spans and blocks, links -- and builds a form from the selected

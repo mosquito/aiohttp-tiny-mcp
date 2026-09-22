@@ -1054,7 +1054,8 @@ function readFields(fields) {
 
 
 function show(items, title, into, describe, pick) {
-  if (!items.length) return;
+  if (!items.length) return [];
+  const buttons = [];
   const group = element("div", "group");
   group.append(element("h3", null, title));
   items.forEach((item) => {
@@ -1073,8 +1074,10 @@ function show(items, title, into, describe, pick) {
       pick(item);
     };
     group.append(button);
+    buttons.push(button);
   });
   into.append(group);
+  return buttons;
 }
 
 function firstLine(text) {
@@ -1222,7 +1225,8 @@ function plain(text) {
 
 
 function show(items, title, into, describe, pick) {
-  if (!items.length) return;
+  if (!items.length) return [];
+  const buttons = [];
   const group = element("div", "group");
   group.append(element("h3", null, title));
   items.forEach((item) => {
@@ -1241,8 +1245,10 @@ function show(items, title, into, describe, pick) {
       pick(item);
     };
     group.append(button);
+    buttons.push(button);
   });
   into.append(group);
+  return buttons;
 }
 
 function hints(tool) {
@@ -1258,7 +1264,7 @@ async function loadCatalogue() {
   const into = document.createDocumentFragment();
 
   const tools = await client.listTools();
-  show(tools, `Tools (${tools.length})`, into, {
+  const toolButtons = show(tools, `Tools (${tools.length})`, into, {
     label: (tool) => tool.name,
     note: (tool) => firstLine(tool.description),
     tags: hints,
@@ -1306,11 +1312,29 @@ async function loadCatalogue() {
   } else {
     page.catalogue.append(into);
   }
+  restoreTool(tools, toolButtons);
 }
 
+function restoreTool(tools, buttons) {
+  let name;
+  try {
+    name = decodeURIComponent(location.hash.slice(1));
+  } catch {
+    return;
+  }
+  const index = tools.findIndex((tool) => tool.name === name);
+  if (index !== -1) buttons[index].click();
+}
+
+function rememberTool(name) {
+  const url = new URL(location.href);
+  url.hash = name === null ? "" : encodeURIComponent(name);
+  history.replaceState(history.state, "", url);
+}
 
 function choose(what) {
   chosen = what;
+  rememberTool(what.kind === "tool" ? what.item.name : null);
   if (catalogue) catalogue.fold();
   page.outcome.textContent = "";
   page.args.textContent = "";
@@ -1825,7 +1849,7 @@ async function connect() {
     const name = (described.serverInfo || (described._meta || {})["io.modelcontextprotocol/serverInfo"] || {}).name;
     say(`${name || "connected"} · ${client.version}`, "on");
     page.connect.textContent = "Disconnect";
-    if (described.instructions) {
+    if (described.instructions && !chosen) {
       page.subject.textContent = "Instructions";
       prose(described.instructions, page.about);
       page.invoke.disabled = true;
