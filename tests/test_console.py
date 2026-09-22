@@ -104,7 +104,7 @@ async def test_the_page_carries_the_title_and_description_it_was_given(registry)
     async with TestClient(TestServer(app)) as client:
         body = await (await client.get("/console")).text()
     assert "<title>Docker</title>" in body
-    assert "<h1>Docker</h1>" in body
+    assert 'title="Show server instructions" disabled>Docker</button></h1>' in body
     assert "This host&#x27;s containers." in body
 
 

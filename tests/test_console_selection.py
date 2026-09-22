@@ -105,7 +105,16 @@ async function loadCatalogue() {{
   await connect();
   if (!page.invoke.disabled) await invoke();
   const initial = {{disabled: page.invoke.disabled, subject: page.subject.textContent, called}};
-  process.stdout.write(JSON.stringify(initial));
+  showServerInstructions();
+  const instructions = {{
+    subject: page.subject.textContent, text: page.about.textContent,
+    disabled: page.invoke.disabled, chosen, remembered,
+    titleEnabled: !page.serverTitle.disabled
+  }};
+  setServerInstructions("");
+  process.stdout.write(JSON.stringify({{...initial, instructions,
+    titleDisabled: page.serverTitle.disabled
+  }}));
 }})();
 """
     )
@@ -114,3 +123,13 @@ async function loadCatalogue() {{
     assert state["disabled"] is not restore
     assert state["subject"] == ("search" if restore else "Instructions")
     assert state["called"] == ({"name": "search", "values": {"query": "test"}} if restore else None)
+
+    assert state["instructions"] == {
+        "subject": "Instructions",
+        "text": "Server instructions",
+        "disabled": True,
+        "chosen": None,
+        "remembered": None,
+        "titleEnabled": True,
+    }
+    assert state["titleDisabled"] is True

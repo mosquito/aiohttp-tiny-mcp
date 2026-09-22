@@ -540,6 +540,7 @@ function encodeHeader(value) {
 
 
 const page = {
+  serverTitle: document.getElementById("server-title"),
   authOAuth: document.getElementById("auth-oauth"),
   authOAuthStatus: document.getElementById("auth-oauth-status"),
   authenticate: document.getElementById("authenticate"),
@@ -585,6 +586,7 @@ const page = {
 
 let client = null;
 let chosen = null;
+let serverInstructions = "";
 let endpointUrl = null;
 //: Where the page was told the endpoint is. The field starts from it and may add a query.
 let configuredEndpoint = null;
@@ -1804,10 +1806,29 @@ async function invoke() {
 }
 
 
+function setServerInstructions(text) {
+  serverInstructions = text || "";
+  if (page.serverTitle) page.serverTitle.disabled = !serverInstructions;
+}
+
+function showServerInstructions(clearFragment = true) {
+  if (!serverInstructions) return;
+  chosen = null;
+  if (clearFragment) rememberTool(null);
+  page.catalogue.querySelectorAll(".item").forEach((item) => item.classList.remove("chosen"));
+  page.subject.textContent = "Instructions";
+  prose(serverInstructions, page.about);
+  page.args.textContent = "";
+  page.outcome.textContent = "";
+  page.invoke.disabled = true;
+  if (catalogue) catalogue.fold();
+}
+
 function disconnect() {
   // Sessions expire server-side; there is no close request.
   client?.abort.abort();
   client = null;
+  setServerInstructions("");
   chosen = null;
   page.catalogue.textContent = "";
   page.catalogue.append(element("p", "empty", "Connect to see what this server offers."));
@@ -1844,17 +1865,15 @@ async function connect() {
       onQuestion: askPerson,
     });
     const described = await client.initialize();
+    setServerInstructions(described.instructions);
     await loadCatalogue();
     page.refresh.disabled = false;
     const name = (described.serverInfo || (described._meta || {})["io.modelcontextprotocol/serverInfo"] || {}).name;
     say(`${name || "connected"} · ${client.version}`, "on");
     page.connect.textContent = "Disconnect";
-    if (described.instructions && !chosen) {
-      page.subject.textContent = "Instructions";
-      prose(described.instructions, page.about);
-      page.invoke.disabled = true;
-    }
+    if (!chosen) showServerInstructions(false);
   } catch (error) {
+    setServerInstructions("");
     client = null;
     page.refresh.disabled = true;
     page.revision.disabled = false;
@@ -1932,6 +1951,7 @@ function markTraffic() {
 
 
 function start() {
+  if (page.serverTitle) page.serverTitle.onclick = () => showServerInstructions();
   setupAuthentication();
   Object.keys(REVISIONS).forEach((version) => {
     const option = element("option", null, version);
@@ -1953,7 +1973,10 @@ function start() {
   page.connect.onclick = () => (client ? disconnect() : connect());
   page.refresh.onclick = async () => {
     try {
-      if (client.rules.extensions) await client.initialize();
+      if (client.rules.extensions) {
+        const described = await client.initialize();
+        setServerInstructions(described.instructions);
+      }
       await loadCatalogue();
     } catch (error) {
       say(error.message, "off");

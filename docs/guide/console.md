@@ -78,7 +78,8 @@ disagree. See [Transports](../deployment/transports.md#origin-checking).
 ## What it shows
 
 **The bar** shows where it is connected, which revision it is speaking, and
-whether it is willing to be asked. Connect and Disconnect are the same button.
+whether it is willing to be asked. Click the server title to return to its
+instructions. The title is enabled when instructions are available. Connect and Disconnect are the same button.
 The endpoint is a field: it starts as the path the page was told, and a query
 string typed after it -- `/mcp?mcp=2025-06-18` to pin a revision, or whatever
 the server reads from its URL -- is sent as typed. The page remembers it for

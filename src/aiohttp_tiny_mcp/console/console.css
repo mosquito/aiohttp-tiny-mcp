@@ -70,6 +70,10 @@ body {
   letter-spacing: -0.01em;
 }
 
+.bar h1 > button { font: inherit; letter-spacing: inherit; color: inherit; background: none; border: 0; padding: 0; }
+.bar h1 > button:disabled { opacity: 1; }
+.bar h1 > button:hover:not(:disabled) { text-decoration: underline; }
+
 .field { display: flex; align-items: center; gap: 6px; }
 .field.grow { flex: 1 1 12em; min-width: 0; }
 .field.grow > input { flex: 1 1 auto; min-width: 8em; }
