@@ -886,22 +886,74 @@ function buildFields(schema, into, omit) {
   return fields;
 }
 
+let fieldId = 0;
+
+function fieldChoices(property) {
+  if (Array.isArray(property.enum)) {
+    return property.enum.map((value) => ({ value, title: String(value) }));
+  }
+  if (!Array.isArray(property.oneOf) || !property.oneOf.length) return null;
+  const choices = [];
+  for (const branch of property.oneOf) {
+    if (!branch || typeof branch !== "object") return null;
+    let value;
+    if (branch.type === "null") value = null;
+    else if (Object.hasOwn(branch, "const")) value = branch.const;
+    else if (Array.isArray(branch.enum) && branch.enum.length === 1) value = branch.enum[0];
+    else return null;
+    choices.push({ value, title: branch.title ?? String(value) });
+  }
+  return choices;
+}
+
+function allowsNull(property) {
+  if (property.default === null) return true;
+  if (property.type === "null" || [].concat(property.type || []).includes("null")) return true;
+  if (Object.hasOwn(property, "const") && property.const === null) return true;
+  if (Array.isArray(property.enum) && property.enum.includes(null)) return true;
+  return (property.anyOf || property.oneOf || []).some(allowsNull);
+}
+
 function buildField(name, property, isRequired, into) {
-  const kinds = [].concat(property.type || inferType(property));
-  const kind = kinds.find((one) => one !== "null") || "string";
-  const row = element("div", kind === "boolean" ? "argument flag" : "argument");
+  const nullable = allowsNull(property);
+  const branches = property.anyOf || property.oneOf || [];
+  const nonNull = branches.filter((branch) => branch.type !== "null" &&
+    !(Object.hasOwn(branch, "const") && branch.const === null));
+  const effective = nullable && nonNull.length === 1
+    ? { ...nonNull[0], ...property, enum: property.enum || nonNull[0].enum }
+    : property;
+  const kinds = [].concat(effective.type || inferType(effective));
+  const choices = fieldChoices(effective)?.filter(({ value }) => value !== null);
+  const baseKind = kinds.find((one) => one !== "null") || "string";
+  const itemChoices = baseKind === "array" && effective.items ? fieldChoices(effective.items) : null;
+  const kind = choices ? "choice" : itemChoices ? "choices" : baseKind;
+  const row = element("div", kind === "boolean" && !nullable ? "argument flag" : "argument");
   const label = element("label", null, property.title || name);
   if (isRequired) label.append(element("span", "required", "*"));
   let input;
 
-  if (property.enum) {
+  if (kind === "choices") {
+    input = element("fieldset", "choice-group");
+    input.choiceInputs = itemChoices.map(({ value, title }) => {
+      const option = element("label");
+      const checkbox = element("input");
+      checkbox.type = "checkbox";
+      checkbox.value = JSON.stringify(value);
+      checkbox.checked = Array.isArray(property.default) &&
+        property.default.some((item) => JSON.stringify(item) === checkbox.value);
+      option.append(checkbox, element("span", null, title));
+      input.append(option);
+      return checkbox;
+    });
+  } else if (choices) {
     input = element("select");
     if (!isRequired) input.append(element("option", null, ""));
-    property.enum.forEach((value) => {
-      const option = element("option", null, String(value));
-      option.value = String(value);
+    choices.forEach(({ value, title }) => {
+      const option = element("option", null, title);
+      option.value = JSON.stringify(value);
       input.append(option);
     });
+    if (property.default !== undefined && property.default !== null) input.value = JSON.stringify(property.default);
   } else if (kind === "boolean") {
     input = element("input");
     input.type = "checkbox";
@@ -909,24 +961,44 @@ function buildField(name, property, isRequired, into) {
   } else if (kind === "integer" || kind === "number") {
     input = element("input");
     input.type = "number";
-    if (kind === "integer") input.step = "1";
-    if (property.minimum !== undefined) input.min = property.minimum;
-    if (property.maximum !== undefined) input.max = property.maximum;
-    if (property.default !== undefined) input.value = property.default;
+    input.step = kind === "integer" ? "1" : "any";
+    if (effective.minimum !== undefined) input.min = effective.minimum;
+    if (effective.maximum !== undefined) input.max = effective.maximum;
+    if (property.default !== undefined && property.default !== null) input.value = property.default;
   } else if (kind === "object" || kind === "array") {
     input = element("textarea");
     input.placeholder = kind === "array" ? "[]" : "{}";
-    if (property.default !== undefined) input.value = JSON.stringify(property.default, null, 2);
+    if (property.default !== undefined && property.default !== null) input.value = JSON.stringify(property.default, null, 2);
   } else {
     input = element("input");
     input.type = "text";
-    if (property.default !== undefined) input.value = property.default;
+    if (property.default !== undefined && property.default !== null) input.value = property.default;
   }
 
   input.dataset.name = name;
   input.dataset.kind = kind;
   if (isRequired) input.dataset.required = "1";
-  row.append(label, input);
+  input.id = `argument-${++fieldId}`;
+  label.htmlFor = input.id;
+  if (kind === "choices") {
+    label.id = `${input.id}-label`;
+    input.setAttribute("aria-labelledby", label.id);
+  }
+  const heading = nullable ? element("div", "argument-heading") : row;
+  heading.append(label);
+  if (nullable) {
+    const toggleLabel = element("label", "null-toggle");
+    const toggle = element("input");
+    toggle.type = "checkbox";
+    toggle.checked = property.default === null || property.type === "null" || choices?.length === 0;
+    toggle.onchange = () => { input.disabled = toggle.checked; };
+    toggle.onchange();
+    input.nullToggle = toggle;
+    toggleLabel.append(toggle, element("span", null, "null"));
+    heading.append(toggleLabel);
+    row.append(heading);
+  }
+  row.append(input);
   if (property.description) row.append(element("div", "hint", property.description));
   into.append(row);
   return input;
@@ -941,7 +1013,8 @@ function inferType(property) {
 /* Empty inputs represent absent arguments, including for required-field validation. */
 function missing(fields) {
   return fields.filter(
-    (input) => input.dataset.required && input.dataset.kind !== "boolean" && !input.value.trim()
+    (input) => input.dataset.required && !input.nullToggle?.checked &&
+      !["boolean", "choices"].includes(input.dataset.kind) && !input.value.trim()
   );
 }
 
@@ -950,13 +1023,23 @@ function readFields(fields) {
   fields.forEach((input) => {
     const name = input.dataset.name;
     const kind = input.dataset.kind;
+    if (input.nullToggle?.checked) {
+      values[name] = null;
+      return;
+    }
+    if (kind === "choices") {
+      values[name] = input.choiceInputs.filter((option) => option.checked)
+        .map((option) => JSON.parse(option.value));
+      return;
+    }
     if (kind === "boolean") {
       values[name] = input.checked;
       return;
     }
     const raw = input.value.trim();
     if (raw === "") return; // absent, which is not the same as empty
-    if (kind === "integer") values[name] = parseInt(raw, 10);
+    if (kind === "choice") values[name] = JSON.parse(raw);
+    else if (kind === "integer") values[name] = parseInt(raw, 10);
     else if (kind === "number") values[name] = parseFloat(raw);
     else if (kind === "object" || kind === "array") {
       try {

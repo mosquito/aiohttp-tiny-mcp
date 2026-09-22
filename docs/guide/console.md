@@ -95,6 +95,17 @@ thing's schema -- types,
 defaults, ranges, enumerations and which fields are required -- and shows what
 came back: text, structured content, progress and log messages.
 
+Fields with `enum` or fixed `oneOf` choices use a select control. Each `oneOf`
+branch must define `const` or a single-value `enum`; its `title` labels the option.
+The selected value keeps its JSON type. Other `oneOf` schemas use the existing
+field renderer.
+
+Nullable fields show a `null` checkbox beside the heading. Checking it disables
+the input and sends JSON `null`. Unchecking it restores the previous input.
+A `null` default checks the box automatically, including in simplified schemas.
+Arrays with fixed `items.enum` or `items.oneOf` choices use checkbox groups.
+Checked options form the submitted array; no checked options sends `[]`.
+
 **Traffic** is every JSON-RPC message either way, in order, expandable. On a
 narrow screen it starts folded, with a dot when something has arrived: it is
 the panel opened when something is wrong, not the one worked in. **Offered**
