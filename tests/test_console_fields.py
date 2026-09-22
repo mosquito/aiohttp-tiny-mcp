@@ -236,3 +236,116 @@ def test_numeric_step_and_bounds(kind, step, value):
         assert result["min"] == -1
         assert result["max"] == 1
         assert result["values"] == {"value": value}
+
+
+@pytest.mark.parametrize("broken_storage", [False, True])
+def test_form_drafts_restore_raw_values_and_null_state(broken_storage):
+    source = CONSOLE.read_text()
+    functions = source[source.index("function buildFields(") : source.index("function show(")]
+    driver = (
+        DOM
+        + functions
+        + f"""
+const location = {{pathname: "/console"}};
+const endpointUrl = {{href: "http://localhost/mcp?project=a"}};
+const data = new Map();
+const localStorage = {{
+  getItem(key) {{
+    if ({json.dumps(broken_storage)}) throw Error("blocked");
+    return data.get(key) || null;
+  }},
+  setItem(key, value) {{
+    if ({json.dumps(broken_storage)}) throw Error("full");
+    data.set(key, value);
+  }}
+}};
+const schema = {{properties: {{
+  query: {{type: "string"}},
+  raw: {{type: "object"}},
+  enabled: {{type: "boolean"}},
+  kinds: {{type: "array", items: {{enum: ["tasks", "memory"]}}}},
+  status: {{type: ["string", "null"], default: null}},
+  choice: {{enum: [1, "1"]}},
+  score: {{type: "number"}}
+}}}};
+function form(name) {{
+  const fields = buildFields(schema, element("div"));
+  rememberToolFields(name, fields);
+  return fields;
+}}
+const fields = form("search");
+fields[0].value = "  draft  ";
+fields[1].value = '{{"unfinished":';
+fields[2].checked = true;
+fields[3].choiceInputs[1].checked = true;
+fields[4].value = "kept under null";
+fields[5].value = '"1"';
+fields[6].value = "0.26";
+fields[0].listeners.input();
+const restored = form("search");
+const other = form("task_get");
+endpointUrl.href = "http://localhost/mcp?project=b";
+const otherEndpoint = form("search");
+endpointUrl.href = "http://localhost/mcp?project=a";
+restored[4].nullToggle.checked = false;
+restored[4].nullToggle.onchange();
+restored[4].nullToggle.listeners.change();
+process.stdout.write(JSON.stringify({{
+  keys: data.size,
+  query: restored[0].value, raw: restored[1].value,
+  enabled: restored[2].checked,
+  kinds: restored[3].choiceInputs.map(option => option.checked),
+  status: restored[4].value, choice: restored[5].value, score: restored[6].value,
+  other: other[0].value, otherEndpoint: otherEndpoint[0].value,
+  nullRestored: form("search")[4].nullToggle.checked
+}}));
+"""
+    )
+    result = subprocess.run([NODE, "-e", driver], capture_output=True, text=True, check=True)
+    state = json.loads(result.stdout)
+    assert state["other"] == state["otherEndpoint"] == ""
+    if broken_storage:
+        assert state["keys"] == 0
+        assert state["query"] == ""
+    else:
+        assert state["keys"] == 1
+        assert state["query"] == "  draft  "
+        assert state["raw"] == '{"unfinished":'
+        assert state["enabled"] is True
+        assert state["kinds"] == [False, True]
+        assert state["status"] == "kept under null"
+        assert state["choice"] == '"1"'
+        assert state["score"] == "0.26"
+        assert state["nullRestored"] is False
+
+
+def test_form_drafts_ignore_malformed_data_and_changed_fields():
+    source = CONSOLE.read_text()
+    functions = source[source.index("function buildFields(") : source.index("function show(")]
+    driver = (
+        DOM
+        + functions
+        + """
+const location = {pathname: "/console"};
+const endpointUrl = {href: "http://localhost/mcp"};
+let saved = "{";
+const localStorage = {getItem() {return saved;}};
+const schema = {properties: {
+  choice: {enum: ["new"], default: "new"}, count: {type: "integer", default: 2}
+}};
+function form() {
+  const fields = buildFields(schema, element("div"));
+  rememberToolFields("search", fields);
+  return readFields(fields);
+}
+const malformed = form();
+saved = JSON.stringify({
+  choice: {kind: "choice", value: '"removed"'},
+  count: {kind: "string", value: "old"}, removed: {kind: "string", value: "gone"}
+});
+process.stdout.write(JSON.stringify({malformed, changed: form()}));
+"""
+    )
+    result = subprocess.run([NODE, "-e", driver], capture_output=True, text=True, check=True)
+    state = json.loads(result.stdout)
+    assert state["malformed"] == state["changed"] == {"choice": "new", "count": 2}

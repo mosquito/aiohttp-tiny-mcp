@@ -90,7 +90,9 @@ what each says about itself. A tool that declared `destructiveHint` is marked.
 On `2026-07-28`, it also lists declared extensions and skills. Listings follow
 pagination cursors, including skill catalogs. Selecting a tool saves its name
 in the page URL as `#toolName`. Reloading selects it again if the server still
-offers it.
+offers it. Tool forms are saved as you edit them, in separate `localStorage`
+entries for each console path, endpoint, and tool. Returning to a tool or reloading
+restores its inputs, checkbox selections, and `null` state.
 
 **The middle** renders the description as the markdown it is -- headings,
 lists, code spans and blocks, links -- and builds a form from the selected

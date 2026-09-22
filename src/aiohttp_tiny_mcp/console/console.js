@@ -1055,6 +1055,53 @@ function readFields(fields) {
 }
 
 
+function rememberToolFields(name, fields) {
+  const key = `mcp-console-form:${JSON.stringify([location.pathname, endpointUrl.href, name])}`;
+  let saved;
+  try {
+    saved = JSON.parse(localStorage.getItem(key));
+  } catch {
+    // Storage can be unavailable or contain an incomplete draft.
+  }
+  for (const input of fields) {
+    const state = saved && Object.hasOwn(saved, input.dataset.name) ? saved[input.dataset.name] : null;
+    if (!state || state.kind !== input.dataset.kind) continue;
+    if (input.choiceInputs && Array.isArray(state.value)) {
+      input.choiceInputs.forEach((option) => { option.checked = state.value.includes(option.value); });
+    } else if (input.dataset.kind === "boolean" && typeof state.value === "boolean") {
+      input.checked = state.value;
+    } else if (typeof state.value === "string") {
+      if (input.dataset.kind !== "choice" || [...input.options].some((option) => option.value === state.value)) {
+        input.value = state.value;
+      }
+    }
+    if (input.nullToggle && typeof state.isNull === "boolean") {
+      input.nullToggle.checked = state.isNull;
+      input.nullToggle.onchange();
+    }
+  }
+  const save = () => {
+    const entries = fields.map((input) => [input.dataset.name, {
+      kind: input.dataset.kind,
+      value: input.choiceInputs
+        ? input.choiceInputs.filter((option) => option.checked).map((option) => option.value)
+        : input.dataset.kind === "boolean" ? input.checked : input.value,
+      isNull: input.nullToggle?.checked || false,
+    }]);
+    try {
+      localStorage.setItem(key, JSON.stringify(Object.fromEntries(entries)));
+    } catch {
+      // Keep the form usable when browser storage is blocked or full.
+    }
+  };
+  for (const input of fields) {
+    input.addEventListener("input", save);
+    input.addEventListener("change", save);
+    if (input.nullToggle) input.nullToggle.addEventListener("change", save);
+  }
+}
+
+
 function show(items, title, into, describe, pick) {
   if (!items.length) return [];
   const buttons = [];
@@ -1347,6 +1394,7 @@ function choose(what) {
     prose(what.item.description, page.about);
     // Hide retry arguments managed by this client.
     chosen.fields = buildFields(what.item.inputSchema || {}, page.args, DRIVEN);
+    rememberToolFields(what.item.name, chosen.fields);
     page.invoke.textContent = "Call";
   } else if (what.kind === "prompt") {
     page.subject.textContent = what.item.name;
