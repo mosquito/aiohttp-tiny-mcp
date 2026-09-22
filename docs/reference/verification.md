@@ -91,9 +91,9 @@ uv run sphinx-build -W --keep-going -b html docs docs/_build
 
 **Resumption of a response stream.** The `GET` notification stream resumes
 with `Last-Event-ID`; see [Transports](../deployment/transports.md#resuming-a-stream).
-The stream a `POST` opens for one request does not: it carries no ids, and a
-client that loses one re-sends the request. The SDK replays those behind its
-`EventStore`.
+The stream a `POST` opens for one request does not: it carries no ids.
+Retrying can execute the handler again, so the application must make retries
+safe. The SDK supports response replay through its `EventStore`.
 
 **Batch response envelopes over stdio.** `2025-03-26` batch input is decoded,
 but stdio emits individual response lines rather than one response array.

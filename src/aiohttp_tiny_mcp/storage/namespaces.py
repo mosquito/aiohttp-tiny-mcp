@@ -1,6 +1,7 @@
 """Request namespaces isolate sessions, subscriptions, and pending questions.
 
-Set namespace in authenticated middleware; spawned tasks inherit it:
+Authentication policies select a namespace from the verified principal.
+Trusted middleware can set one explicitly; spawned tasks inherit it:
 
     @web.middleware
     async def tenant(request, handler):

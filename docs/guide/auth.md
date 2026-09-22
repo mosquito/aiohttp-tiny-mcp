@@ -510,7 +510,7 @@ For the example issuer, metadata is served at
 explicit public URLs; the server never derives them from a request's Host header.
 HTTPS is required, with HTTP permitted for loopback development addresses.
 Use `OAuthServer.is_public(request)` alongside `Console.is_public(request)` in
-application-wide middleware. Facade routes enforce their own OAuth checks.
+application-wide middleware. OAuth routes enforce their own checks.
 The protected-resource metadata route must also remain reachable without an
 MCP token, as described below.
 

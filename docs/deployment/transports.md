@@ -86,10 +86,10 @@ counts events, the storage backends keep theirs until they expire.
 The bundled client remembers the latest id in `client.last_event_id` and passes
 one back with `stream_notifications(last_event_id=...)`.
 
-The stream a `POST` opens for one request carries no ids. Its events are the
-request's own progress and its result, and a client that loses it re-sends the
-request; the answer is the same. `2026-07-28` has no `GET` stream and says to
-ignore the header, which is what its `405` does.
+The stream a `POST` opens for one request carries no ids and cannot resume.
+Retrying the request can execute the handler again. Applications must make
+retries safe when handlers have side effects. `2026-07-28` has no `GET` stream;
+it returns `405` and ignores `Last-Event-ID`.
 
 The class is exported, and takes events the way `WebSocketResponse` takes
 messages, so an application can use it for its own streams:

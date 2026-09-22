@@ -1,8 +1,7 @@
 # Many tenants on one server
 
-A remote MCP server may answer for hundreds of unrelated callers. Every key
-this package writes is composed with a namespace, so isolation holds by
-construction rather than by remembering to check.
+A remote MCP server can serve unrelated callers. Authentication policies select
+a storage namespace from each verified principal to separate their MCP state.
 
 ## Setting it
 
@@ -33,9 +32,10 @@ namespace.set(None)
 
 ## What it covers
 
-Everything: session ids, request-state ids, hub topics. The namespace is part
-of the key, not something checked against it, so there is no path that forgets
-to compare.
+The library prefixes MCP session keys, request-state keys, and Hub topics with
+the selected namespace. Accounts in the same namespace share notifications;
+session ownership is checked separately. Application data needs its own access
+checks. Direct store calls must use scoped keys when namespace isolation is needed.
 
 <!-- name: async test_namespace_isolation; fixtures: serve -->
 ```python
