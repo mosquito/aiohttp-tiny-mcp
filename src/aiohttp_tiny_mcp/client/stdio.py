@@ -13,6 +13,8 @@ from aiohttp_tiny_mcp.protocol.models import Implementation
 
 from .base import BaseClient, ClientError, Elicitor
 
+DEFAULT_STREAM_LIMIT = 1024 * 1024
+
 
 @runtime_checkable
 class ByteWriter(Protocol):
@@ -76,7 +78,7 @@ class StdioClient(BaseClient):
         adapter: Adapter,
         client_info: Implementation | None = None,
         on_ask: Elicitor | None = None,
-        limit: int = 1024 * 1024,
+        limit: int = DEFAULT_STREAM_LIMIT,
     ) -> AsyncIterator[StdioClient]:
         """Launch cmd with protocol pipes and inherit stderr.
 

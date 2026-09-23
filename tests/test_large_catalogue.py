@@ -13,13 +13,17 @@ from aiohttp_tiny_mcp import Client, Registry, StdioClient
 from aiohttp_tiny_mcp.protocol.core import Operation
 from aiohttp_tiny_mcp.protocol.models import ListParams
 from aiohttp_tiny_mcp.protocol.selection import AdapterSet
-from aiohttp_tiny_mcp.testing import serving
+from aiohttp_tiny_mcp.testing import connect, serving
 
 ADAPTERS = AdapterSet.default().adapters
 
 
 class Nothing(BaseModel):
     pass
+
+
+class Echo(BaseModel):
+    text: str
 
 
 def catalogue() -> Registry:
@@ -47,6 +51,37 @@ async def test_complete_catalogue_over_http(adapter):
     async with serving(catalogue()) as url:
         async with Client(url, adapter) as client:
             await check_catalogue(client)
+
+
+@pytest.mark.parametrize("adapter", ADAPTERS, ids=lambda a: a.version)
+async def test_complete_catalogue_through_testing_connect(adapter):
+    async with connect(catalogue(), adapter=adapter, initialize=False) as client:
+        await check_catalogue(client)
+
+
+async def test_testing_connect_reader_limit_is_configurable():
+    async with connect(catalogue(), limit=65536) as client:
+        with pytest.raises(ValueError, match="(separator|Separator)"):
+            await client.list_tools()
+
+    async with connect(catalogue(), limit=128 * 1024, initialize=False) as client:
+        await check_catalogue(client)
+
+
+@pytest.mark.parametrize("adapter", ADAPTERS, ids=lambda a: a.version)
+@pytest.mark.parametrize("limit,size", [(None, 80000), (2 * 1024 * 1024, 1024 * 1024 + 1)])
+async def test_testing_connect_large_request_and_response(adapter, limit, size):
+    registry = Registry("echo", "1")
+
+    @registry.tool
+    async def echo(args: Echo) -> str:
+        return args.text
+
+    options = {} if limit is None else {"limit": limit}
+    async with connect(registry, adapter=adapter, **options) as client:
+        result = await client.call_tool("echo", {"text": "x" * size})
+        assert result.is_error is False
+        assert result.content[0].text == "x" * size
 
 
 @pytest.fixture

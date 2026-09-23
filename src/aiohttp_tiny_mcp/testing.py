@@ -12,7 +12,7 @@ from aiohttp import web
 
 from .client.base import BaseClient, Elicitor
 from .client.http import Client
-from .client.stdio import StdioClient
+from .client.stdio import DEFAULT_STREAM_LIMIT, StdioClient
 from .protocol.adapter import Adapter
 from .protocol.core import elicit_accept, elicit_decline
 from .protocol.models import Implementation
@@ -25,8 +25,8 @@ from .server.stdio import serve_stdio
 class Pipe:
     """One direction of an in-memory connection."""
 
-    def __init__(self) -> None:
-        self.reader = asyncio.StreamReader()
+    def __init__(self, *, limit: int = DEFAULT_STREAM_LIMIT) -> None:
+        self.reader = asyncio.StreamReader(limit=limit)
 
     def write(self, data: bytes) -> None:
         self.reader.feed_data(data)
@@ -62,11 +62,15 @@ async def connect(
     on_ask: Elicitor | None = None,
     client_info: Implementation | None = None,
     initialize: bool = True,
+    limit: int = DEFAULT_STREAM_LIMIT,
 ) -> AsyncIterator[BaseClient]:
     """A client talking to `registry` through memory.
 
     No port, no subprocess, and nothing to tear down. The protocol is the
     real one: pick `adapter` to see what a client of that revision sees.
+
+    `limit` bounds request and response lines in bytes. The default is
+    1 MiB, matching `StdioClient.spawn`.
 
     Answer a handler's questions with `answers`, keyed by any part of the
     question's text::
@@ -75,7 +79,7 @@ async def connect(
             result = await client.call_tool("deploy", {"service": "web"})
     """
     chosen = pick(adapter)
-    to_server, to_client = Pipe(), Pipe()
+    to_server, to_client = Pipe(limit=limit), Pipe(limit=limit)
 
     def send(payload: Mapping[str, Any]) -> None:
         to_client.write((json.dumps(payload, ensure_ascii=False) + "\n").encode())
