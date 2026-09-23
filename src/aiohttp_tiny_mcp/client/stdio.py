@@ -76,10 +76,14 @@ class StdioClient(BaseClient):
         adapter: Adapter,
         client_info: Implementation | None = None,
         on_ask: Elicitor | None = None,
+        limit: int = 1024 * 1024,
     ) -> AsyncIterator[StdioClient]:
-        """Launch cmd with protocol pipes; inherit stderr so logging cannot corrupt stdout."""
+        """Launch cmd with protocol pipes and inherit stderr.
+
+        `limit` bounds response lines in bytes and defaults to 1 MiB.
+        """
         process = await asyncio.create_subprocess_exec(
-            *cmd, stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE
+            *cmd, stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, limit=limit
         )
         assert process.stdin is not None
         assert process.stdout is not None

@@ -282,6 +282,11 @@ async with Client(url, AdapterSet.default().by_version["2026-07-28"]) as client:
 output. Its standard error is left alone, so the server's own logging does not
 collide with the protocol stream.
 
+The response line limit defaults to 1 MiB. Pass `limit=...` to `spawn` to
+change it, for example `limit=4 * 1024 * 1024` for 4 MiB. A response that
+exceeds this limit raises `ValueError`. If you supply a reader directly to
+`StdioClient`, configure the limit on that reader instead.
+
 Given a server written as in [stdio](../deployment/transports.md#stdio), this
 is the whole of a client for it:
 

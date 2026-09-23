@@ -297,6 +297,13 @@ to the server.
 A client that ignores `nextCursor` sees only the first page, which is the
 reason to leave paging off until a listing is actually large.
 
+For such clients, use `Registry(page_size=None)` on both HTTP and stdio.
+The transport does not require pagination. If a stdio client rejects a large
+response line, increase its reader limit instead of hiding tools on later
+pages. `StdioClient.spawn` accepts a `limit` in bytes and defaults to 1 MiB;
+see [Over stdio](client.md#over-stdio). Check the limit of other clients
+before sending a larger catalogue.
+
 The cursor names the last entry of the page, not its position, so a
 registration between two pages neither repeats nor hides an entry. A cursor
 this server did not write is answered with `-32602`, because a paging client
