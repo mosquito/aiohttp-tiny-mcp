@@ -64,6 +64,11 @@ The helpers are async context managers. They close streams, HTTP clients, and
 temporary servers when the block exits. Use a production Client and a deployed
 URL in integration tests that must cover your proxy, TLS, or load balancer.
 
+`connect` limits request and response lines to 1 MiB by default, matching
+`StdioClient.spawn`. Pass `limit=...` in bytes to change both in-memory reader
+limits, for example `connect(registry, limit=4 * 1024 * 1024)` for 4 MiB.
+This permits large catalogues without pagination.
+
 ## Test the HTTP boundary
 
 Use over_http when the request itself is part of the behaviour. For example,
