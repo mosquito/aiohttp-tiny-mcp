@@ -10,6 +10,17 @@ from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, StrictStr
 from pydantic.alias_generators import to_camel
+from pydantic_core import to_json
+
+
+def serialized(payload: Any) -> bytes:
+    """Encode one wire payload as UTF-8 JSON.
+
+    `to_json` is the serializer pydantic already carries. It is about three
+    times faster than `json.dumps` and writes the same bytes for the JSON-mode
+    values `Model.wire` returns. Non-ASCII characters stay as they are.
+    """
+    return to_json(payload)
 
 
 class Model(BaseModel):

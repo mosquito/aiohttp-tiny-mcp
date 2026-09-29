@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import re
 from collections.abc import Mapping
@@ -26,6 +25,7 @@ from aiohttp_tiny_mcp.protocol.core import (
     Rejected,
     Value,
 )
+from aiohttp_tiny_mcp.protocol.models import serialized
 from aiohttp_tiny_mcp.protocol.selection import AdapterSet
 from aiohttp_tiny_mcp.storage.hub import NOTIFICATIONS, Subscription, topic
 from aiohttp_tiny_mcp.storage.namespaces import current, namespace, scoped
@@ -325,7 +325,8 @@ class Endpoint:
             return self.render_failure(self.adapters.fallback(), e.failure)
         held = self.open_values(request, session)
 
-        log.debug("<- [%s] %s", adapter.version, raw.decode("utf-8", "replace"))
+        if log.isEnabledFor(logging.DEBUG):
+            log.debug("<- [%s] %s", adapter.version, raw.decode("utf-8", "replace"))
 
         try:
             items = adapter.decode(pre, self.registry)
@@ -390,13 +391,13 @@ class Endpoint:
             return web.Response(
                 status=200,
                 content_type="application/json",
-                text=json.dumps([p for _, p in replies], ensure_ascii=False),
+                body=serialized([p for _, p in replies]),
             )
         status, payload = replies[0]
         response = web.Response(
             status=status,
             content_type="application/json",
-            text=json.dumps(payload, ensure_ascii=False),
+            body=serialized(payload),
         )
         if minted is not None:
             response.headers[SESSION_HEADER] = minted
@@ -466,7 +467,7 @@ class Endpoint:
             )
             for event in found:
                 if relays(event.message, accepted):
-                    text = json.dumps(event.message, ensure_ascii=False)
+                    text = serialized(event.message).decode()
                     log.debug("-> [%s] %s %s", adapter.version, event.id, text)
                     await response.send(text, id=event.id)
 
@@ -561,15 +562,17 @@ class Endpoint:
     ) -> tuple[int, Mapping[str, Any]]:
         status = adapter.http_status(outcome) if isinstance(outcome, Failure) else 200
         payload = adapter.encode(call, self.registry, outcome)
-        log.debug("-> [%s] %s %s", adapter.version, status, json.dumps(payload, ensure_ascii=False))
+        if log.isEnabledFor(logging.DEBUG):
+            log.debug("-> [%s] %s %s", adapter.version, status, serialized(payload).decode())
         return status, payload
 
     def render_failure(self, adapter: Adapter, failure: Failure) -> web.Response:
         payload = adapter.encode_failure(None, failure)
-        text = json.dumps(payload, ensure_ascii=False)
-        log.debug("-> [%s] %s %s", adapter.version, adapter.http_status(failure), text)
+        body = serialized(payload)
+        if log.isEnabledFor(logging.DEBUG):
+            log.debug("-> [%s] %s %s", adapter.version, adapter.http_status(failure), body.decode())
         return web.Response(
-            status=adapter.http_status(failure), content_type="application/json", text=text
+            status=adapter.http_status(failure), content_type="application/json", body=body
         )
 
     async def stream(self, request: web.Request, ex: Exchange) -> web.StreamResponse:

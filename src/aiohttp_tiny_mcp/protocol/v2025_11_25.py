@@ -135,7 +135,7 @@ class Adapter2025_11_25(Adapter):  # noqa: N801 -- revision date, greppable agai
             instructions=registry.instructions,
         )
 
-    def describe_tool(self, spec: ToolSpec) -> ToolDef | None:
+    def build_tool(self, spec: ToolSpec) -> ToolDef | None:
         if spec.min_revision is not None and spec.min_revision > self.version:
             return None
         schema = simplify_legacy_schema(spec.input_schema)

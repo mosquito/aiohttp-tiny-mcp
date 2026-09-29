@@ -320,8 +320,23 @@ class Adapter(ABC):
     def describe_server(self, registry: RegistryProtocol, call: Call) -> BaseModel:
         """Negotiate the requested legacy revision from `call.params.protocol_version`."""
 
+    def describe_tool(self, spec: ToolSpec) -> ToolDef | None:
+        """Return how this revision shows `spec`, or None where it hides it.
+
+        The projection is cached on the spec. A tool does not change after
+        registration, so each revision simplifies its schemas once instead of
+        once per `tools/list` and once per `tools/call`.
+        """
+        cache = spec.described
+        try:
+            return cache[self.version]
+        except KeyError:
+            definition = cache[self.version] = self.build_tool(spec)
+            return definition
+
     @abstractmethod
-    def describe_tool(self, spec: ToolSpec) -> ToolDef | None: ...
+    def build_tool(self, spec: ToolSpec) -> ToolDef | None:
+        """Project `spec` onto this revision. `describe_tool` caches the result."""
 
     def describe_resource(self, spec: ResourceSpec) -> ResourceDef | ResourceTemplateDef | None:
         """Project extension resources onto the URI understood by this revision."""

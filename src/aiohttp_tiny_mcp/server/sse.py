@@ -23,6 +23,7 @@ from aiohttp_tiny_mcp.protocol.core import (
     Rejected,
     Value,
 )
+from aiohttp_tiny_mcp.protocol.models import serialized
 from aiohttp_tiny_mcp.protocol.selection import AdapterSet
 from aiohttp_tiny_mcp.storage.hub import NOTIFICATIONS, Subscription, topic
 from aiohttp_tiny_mcp.storage.namespaces import scoped
@@ -184,7 +185,7 @@ class SseEndpoint:
             )
             for event in found:
                 if relays(event.message, accepted):
-                    text = json.dumps(event.message, ensure_ascii=False)
+                    text = serialized(event.message).decode()
                     await self.write(response, "message", text)
 
     async def write(self, response: SSEResponse, event: str, data: str) -> None:
@@ -211,7 +212,8 @@ class SseEndpoint:
         )
 
         raw = await request.read()
-        log.debug("<- [%s] %s", VERSION, raw.decode("utf-8", "replace"))
+        if log.isEnabledFor(logging.DEBUG):
+            log.debug("<- [%s] %s", VERSION, raw.decode("utf-8", "replace"))
         where = topic(STREAM, session_id)
 
         pre = Preamble.of(raw, request.headers)
