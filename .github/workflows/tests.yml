@@ -1,18 +1,15 @@
 name: tests
 
+# A tag push repeats the run of the branch it points at and publishes nothing,
+# so only branches start this workflow.
 on:
   push:
+    branches: ["**"]
   pull_request:
 
 # The log is read by people; the tools only colour a terminal unless told.
 env:
   FORCE_COLOR: "1"
-
-# The published pages are the deployment; one at a time, and a newer commit
-# waits for the running one rather than cancelling it.
-concurrency:
-  group: pages
-  cancel-in-progress: false
 
 jobs:
   test:
@@ -168,6 +165,12 @@ jobs:
     needs: [test, docker-mcp, docs]
     if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
     runs-on: ubuntu-latest
+    # The pages deployment is the only step that must not run twice at once.
+    # Keep the group on this job: a workflow-level group cancels a pending run
+    # of the full workflow, and a cancelled run makes the badge red.
+    concurrency:
+      group: pages
+      cancel-in-progress: false
     permissions:
       pages: write
       id-token: write
