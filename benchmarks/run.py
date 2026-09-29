@@ -123,7 +123,7 @@ async def bench_server(settings: argparse.Namespace, running: Servers) -> None:
         for operation in settings.operations:
             rows: list[tuple[str, Any]] = []
             for implementation, url in (
-                ("tiny-mcp", ours),
+                ("aiohttp-tiny-mcp", ours),
                 ("SDK stateless", loose),
                 ("SDK session", keeping),
             ):
@@ -171,7 +171,7 @@ async def bench_client(settings: argparse.Namespace, running: Servers) -> None:
     ours, loose, keeping = running.ours, running.loose, running.keeping
     async with aiohttp.ClientSession() as session:
         targets = (
-            ("tiny-mcp server", ours),
+            ("aiohttp-tiny-mcp server", ours),
             ("SDK stateless", loose),
             ("SDK session", keeping),
         )
@@ -190,7 +190,7 @@ async def bench_client(settings: argparse.Namespace, running: Servers) -> None:
                         await client.initialize()
                         rows.append(
                             (
-                                f"tiny-mcp {version} -> {target}",
+                                f"aiohttp-tiny-mcp {version} -> {target}",
                                 partial(OPERATIONS[operation], client),
                             )
                         )
@@ -237,7 +237,7 @@ async def sdk_client_calling(url: str, operation: str) -> AsyncIterator[tuple[An
 
 
 SCRIPTS = {
-    "tiny-mcp": "benchmarks.stdio_ours",
+    "aiohttp-tiny-mcp": "benchmarks.stdio_ours",
     "SDK": "benchmarks.stdio_sdk",
     "no protocol": "benchmarks.stdio_floor",
 }
@@ -323,11 +323,14 @@ async def bench_stdio(settings: argparse.Namespace) -> None:
                     await spawned.enter_async_context(raw_pipe(SCRIPTS["no protocol"], operation)),
                 )
             )
-            for server, module in (("tiny-mcp", SCRIPTS["tiny-mcp"]), ("SDK", SCRIPTS["SDK"])):
+            for server, module in (
+                ("aiohttp-tiny-mcp", SCRIPTS["aiohttp-tiny-mcp"]),
+                ("SDK", SCRIPTS["SDK"]),
+            ):
                 for version, adapter in sorted(ADAPTERS.items()):
                     rows.append(
                         (
-                            f"tiny-mcp {version} -> {server}",
+                            f"aiohttp-tiny-mcp {version} -> {server}",
                             await spawned.enter_async_context(
                                 our_stdio(module, adapter, operation)
                             ),

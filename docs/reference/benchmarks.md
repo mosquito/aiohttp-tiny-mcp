@@ -13,6 +13,7 @@ uv run python -m benchmarks.run --suite server
 uv run python -m benchmarks.run --suite client
 uv run python -m benchmarks.run --suite stdio
 uv run python -m benchmarks.run --concurrency 32 --calls 3000
+uv run python -m benchmarks.schema_cost       # one request, without a socket
 ```
 
 ## How to read it
@@ -44,10 +45,10 @@ client against this one.
 
 ## Conditions
 
-Apple M4, 10 cores, macOS 26.2. Python 3.10.11, `aiohttp` 3.14.3, `pydantic`
-2.13.4, `mcp` 2.0.0, `uvicorn` 0.51.0. Loopback, no TLS. One call at a time,
-`--calls 1200 --warmup 200 --repeats 3`; every row is measured three times in
-rotation and keeps its best round.
+Apple M4, 10 cores, macOS 26.2. Python 3.14.2, `aiohttp` 3.14.3, `pydantic`
+2.13.5, `mcp` 2.0.0, `uvicorn` 0.53.0, `starlette` 1.6.0. Loopback, no TLS.
+One call at a time, `--calls 1500 --warmup 200 --repeats 3`; every row is
+measured three times in rotation and keeps its best round.
 
 **Every logger is set to ERROR**, on both sides. This matters: starting the
 SDK's server sets the root logger to INFO and installs a `rich` handler for
@@ -62,21 +63,21 @@ Calls a second.
 
 | Server                     | 2024-11-05   | 2025-03-26   | 2025-06-18   |  2025-11-25 | 2026-07-28 |
 |----------------------------|-------------:|-------------:|-------------:|------------:|-----------:|
-| **aiohttp-tiny-mcp**       |     **3687** |     **3562** |     **3629** |    **3607** |   **3624** |
-| official SDK, with session |         1078 |         1031 |         1033 |        1030 |       1393 |
-| official SDK, stateless    |          889 |          896 |          904 |         868 |       1462 |
-| aiohttp, no protocol       |         4779 |              |              |             |            |
-| uvicorn, no protocol       |         3731 |              |              |             |            |
+| **aiohttp-tiny-mcp**       |     **5722** |     **5685** |     **5839** |    **5780** |   **5458** |
+| official SDK, with session |         1263 |         1237 |         1277 |        1235 |       1616 |
+| official SDK, stateless    |         1085 |         1105 |         1079 |        1095 |       1649 |
+| aiohttp, no protocol       |         7208 |              |              |             |            |
+| uvicorn, no protocol       |         4866 |              |              |             |            |
 
 The same tool returning a plain string instead of a model:
 
 | Server                     | 2024-11-05 | 2025-03-26 | 2025-06-18 | 2025-11-25 | 2026-07-28 |
 |----------------------------|-----------:|-----------:|-----------:|-----------:|-----------:|
-| **aiohttp-tiny-mcp**       |   **3659** |   **3736** |   **3730** |   **3781** |   **3656** |
-| official SDK, with session |       1044 |       1025 |       1019 |       1023 |       1656 |
-| official SDK, stateless    |        878 |        888 |        892 |        885 |       1668 |
-| aiohttp, no protocol       |       4686 |            |            |            |            |
-| uvicorn, no protocol       |       3705 |            |            |            |            |
+| **aiohttp-tiny-mcp**       |   **5621** |   **5624** |   **5680** |   **5680** |   **5428** |
+| official SDK, with session |       1272 |       1288 |       1278 |       1239 |       1909 |
+| official SDK, stateless    |       1059 |       1086 |       1062 |       1060 |       1888 |
+| aiohttp, no protocol       |       7193 |            |            |            |            |
+| uvicorn, no protocol       |       4809 |            |            |            |            |
 
 **The revision costs this package nothing measurable.** Five revisions, and
 the spread between them is smaller than the spread between two runs of the
@@ -85,36 +86,49 @@ not paid for at call time.
 
 **What the SDK spends is largely the session.** Same server, same handler,
 same stack; only the revision differs. The four revisions that carry a session
-sit near 1000 calls a second. `2026-07-28`, the one with no session at all,
-reaches 1400-1670.
+sit near 1100-1300 calls a second. `2026-07-28`, the one with no session at
+all, reaches 1600-1900.
 
 **The SDK's stateless mode is the slower of its two.** `stateless_http=True`
 does not remove the session -- it builds and destroys one per request -- and
-on the legacy revisions it costs about 15% against keeping one.
+on the legacy revisions it costs about 13% against keeping one.
 
 At 32 calls in flight the gap widens rather than closes: this package reaches
-5510-5913 against a floor of 8135, while the SDK's session revisions reach
-1051-1159 against a floor of 5715, with a 99th percentile an order of
-magnitude apart.
+7673-8325 against a floor of 12654, while the SDK reaches 1402-1571 against a
+floor of 7698. The tails separate further than the rates do: 4.8-6.4 ms at the
+99th percentile here against 31-92 ms there.
+
+Listing the catalogue behaves like calling it: `tools/list` runs at 5420-5637
+against the same floors, or 76-80% of them. Revisions before `2026-07-28`
+simplify a schema for the client, and that projection is derived once per
+revision and kept on the tool, so a catalogue is not rebuilt per request.
+
+`benchmarks/schema_cost.py` measures the same request with no transport under
+it, which is where that shows. On `2025-11-25`, with a twelve-field argument
+model carrying `$defs`, enums and nullable unions, one `tools/call` costs 19
+us and one `tools/list` 31 us for a 3 KB answer. The two-field tool of the
+tables above costs 18 us and 14 us. A larger schema therefore moves
+`tools/list`, which writes it, and leaves `tools/call`, which does not, where
+it was.
 
 ## Client over HTTP, per revision
 
 The server is held constant down each block, so what varies is the cost of
 building a request and reading a reply.
 
-| Client                           | Against tiny-mcp  | Against SDK stateless  | Against SDK session  |
-|----------------------------------|------------------:|-----------------------:|---------------------:|
-| raw aiohttp, no client library   |              3692 |                    866 |                 1027 |
-| **aiohttp-tiny-mcp, 2024-11-05** |          **3353** |                    975 |                 1188 |
-| **aiohttp-tiny-mcp, 2025-03-26** |          **3395** |                    994 |                 1179 |
-| **aiohttp-tiny-mcp, 2025-06-18** |          **3491** |                    983 |                 1183 |
-| **aiohttp-tiny-mcp, 2025-11-25** |          **3480** |                   1009 |                 1164 |
-| **aiohttp-tiny-mcp, 2026-07-28** |          **3345** |                   1418 |                 1404 |
-| official SDK, 2025-11-25         |               783 |                    384 |                  399 |
+| Client                           | Against aiohttp-tiny-mcp  | Against SDK stateless  | Against SDK session  |
+|----------------------------------|--------------------------:|-----------------------:|---------------------:|
+| raw aiohttp, no client library   |              5632 |                   1034 |                 1237 |
+| **aiohttp-tiny-mcp, 2024-11-05** |          **5112** |                   1135 |                 1326 |
+| **aiohttp-tiny-mcp, 2025-03-26** |          **5169** |                   1130 |                 1318 |
+| **aiohttp-tiny-mcp, 2025-06-18** |          **5225** |                   1125 |                 1339 |
+| **aiohttp-tiny-mcp, 2025-11-25** |          **5247** |                   1124 |                 1293 |
+| **aiohttp-tiny-mcp, 2026-07-28** |          **4888** |                   1658 |                 1656 |
+| official SDK, 2025-11-25         |              1465 |                    613 |                  652 |
 
-Against the same server the two clients run at 3480 and 783 calls a second:
-about a millisecond of client-side work per call. This package's client stays
-within 5-9% of a hand-written `aiohttp` loop.
+Against the same server the two clients run at 5247 and 1465 calls a second:
+about half a millisecond of client-side work per call. This package's client
+stays within 7-13% of a hand-written `aiohttp` loop.
 
 The official client appears once rather than once per revision. It offers only
 `LATEST_PROTOCOL_VERSION` and negotiates down, and nothing in its API asks for
@@ -124,21 +138,21 @@ another; its row is labelled with what the handshake actually settled on.
 
 One subprocess, one pipe, no web framework on either side. Calls a second.
 
-| Pairing                                   | `add`, a model  | `text`, a string  |
-|-------------------------------------------|----------------:|------------------:|
-| raw pipe, no protocol                     |           14338 |             14072 |
-| **tiny-mcp 2024-11-05 client and server** |        **6797** |          **7163** |
-| **tiny-mcp 2025-03-26 client and server** |        **6845** |          **7121** |
-| **tiny-mcp 2025-06-18 client and server** |        **7031** |          **7165** |
-| **tiny-mcp 2025-11-25 client and server** |        **6773** |          **7265** |
-| **tiny-mcp 2026-07-28 client and server** |        **5813** |          **6415** |
-| official SDK client -> tiny-mcp server    |            3350 |              3567 |
-| tiny-mcp 2025-11-25 client -> SDK server  |            1870 |              1860 |
-| official SDK client and server            |            1468 |              1453 |
+| Pairing                                            | `add`, a model  | `text`, a string  |
+|----------------------------------------------------|----------------:|------------------:|
+| raw pipe, no protocol                              |           16330 |             15787 |
+| **aiohttp-tiny-mcp 2024-11-05 client and server**  |        **8341** |          **8653** |
+| **aiohttp-tiny-mcp 2025-03-26 client and server**  |        **8285** |          **8811** |
+| **aiohttp-tiny-mcp 2025-06-18 client and server**  |        **8313** |          **9002** |
+| **aiohttp-tiny-mcp 2025-11-25 client and server**  |        **8486** |          **8931** |
+| **aiohttp-tiny-mcp 2026-07-28 client and server**  |        **7030** |          **7152** |
+| official SDK client -> aiohttp-tiny-mcp server     |            3812 |              4094 |
+| aiohttp-tiny-mcp 2025-11-25 client -> SDK server   |            2051 |              2070 |
+| official SDK client and server                     |            1573 |              1581 |
 
 This is the comparison with the fewest things in it, and the ratios are the
-largest: against the same server the two clients are 6773 and 3350; against
-the same client the two servers are 6773 and 1870.
+largest: against the same server the two clients are 8486 and 3812; against
+the same client the two servers are 8486 and 2051.
 
 ## What these numbers are not
 
@@ -174,6 +188,6 @@ the same client the two servers are 6773 and 1870.
   remote deployment. Use these rows to compare the two implementations under
   identical local conditions, then measure your actual deployment separately.
 - **Not free of loose ends.** Over HTTP the raw driver, which should be the
-  ceiling, runs 10-15% *below* both client libraries against servers that
+  ceiling, runs 4-10% *below* both client libraries against servers that
   frame answers as event streams, and the cause is not isolated.
   `benchmarks/README.md` records that rather than hiding it.
