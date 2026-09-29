@@ -158,8 +158,11 @@ which every client already does.
 Some projection happens because the older revision cannot hold what was
 declared:
 
-- A schema with a nullable union loses the null branch, because a legacy client
-  that cannot read the union would hide the tool entirely.
+- A schema with a nullable union collapses into its one non-null branch, which
+  then declares `"type": [..., "null"]`, because a legacy client that cannot read
+  the union would hide the tool entirely. The branch keeps null valid, so results
+  and arguments that carry null still pass client-side validation. A branch that
+  cannot accept null, such as a `const`, is not simplified.
 - `x-mcp-header` annotations are stripped: a legacy client would not mirror
   them, and a server that then required the header would deadlock.
 - A schema that cannot be simplified losslessly means the tool is not offered on

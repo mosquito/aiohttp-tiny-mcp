@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pytest
+from jsonschema import ValidationError, validate
 from pydantic import BaseModel, Field
 
 from aiohttp_tiny_mcp.protocol.schema import (
@@ -26,6 +27,10 @@ class Routing(BaseModel):
 
 class Routed(BaseModel):
     routing: Routing
+
+
+class Wrapper(BaseModel):
+    inner: Inner | None = None
 
 
 def test_json_schema_keeps_refs_for_full_fidelity():
@@ -134,7 +139,7 @@ def test_optional_field_does_not_hide_the_declaration():
     """Nullable fields must not hide legacy tools as unsupported unions."""
     out = simplify_legacy_schema(json_schema(Optional))
     assert out is not None
-    assert out["properties"]["handle"]["type"] == "string"
+    assert out["properties"]["handle"]["type"] == ["string", "null"]
     assert out["required"] == ["key"]
 
 
@@ -150,7 +155,57 @@ def test_nested_optional_is_simplified_too():
     }
     out = simplify_legacy_schema(schema)
     assert out is not None
-    assert out["properties"]["outer"]["properties"]["inner"]["type"] == "integer"
+    assert out["properties"]["outer"]["properties"]["inner"]["type"] == ["integer", "null"]
+
+
+def test_simplified_schema_accepts_the_results_the_server_sends():
+    """A legacy client validates results against the simplified schema. Null must pass."""
+    schema = simplify_legacy_schema(json_schema(Optional))
+    assert schema is not None
+    validate({"key": "k", "handle": None}, schema)
+    validate({"key": "k", "handle": "h"}, schema)
+    with pytest.raises(ValidationError):
+        validate({"key": "k", "handle": 1}, schema)
+
+
+def test_nullable_object_keeps_null():
+    out = simplify_legacy_schema(json_schema(Wrapper))
+    assert out is not None
+    inner = out["properties"]["inner"]
+    assert inner["type"] == ["object", "null"]
+    assert inner["properties"]["x"]["type"] == "integer"
+    validate({"inner": None}, out)
+
+
+def test_nullable_enum_keeps_null_among_its_choices():
+    schema = {
+        "type": "object",
+        "properties": {
+            "state": {"anyOf": [{"type": "string", "enum": ["on", "off"]}, {"type": "null"}]},
+        },
+    }
+    out = simplify_legacy_schema(schema)
+    assert out is not None
+    assert out["properties"]["state"]["type"] == ["string", "null"]
+    assert out["properties"]["state"]["enum"] == ["on", "off", None]
+    validate({"state": None}, out)
+
+
+def test_nullable_constant_is_refused():
+    """A const cannot also accept null. Refuse rather than publish a schema that rejects null."""
+    schema = {
+        "type": "object",
+        "properties": {"x": {"anyOf": [{"const": "only"}, {"type": "null"}]}},
+    }
+    assert simplify_legacy_schema(schema) is None
+
+
+def test_unconstrained_nullable_branch_stays_unconstrained():
+    schema = {"type": "object", "properties": {"x": {"anyOf": [{}, {"type": "null"}]}}}
+    out = simplify_legacy_schema(schema)
+    assert out is not None
+    assert "type" not in out["properties"]["x"]
+    validate({"x": None}, out)
 
 
 def test_a_real_union_is_still_refused():
