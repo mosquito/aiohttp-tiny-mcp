@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 from collections.abc import AsyncIterator, Mapping
 from dataclasses import dataclass, replace
 from typing import Any, ClassVar
@@ -13,6 +12,8 @@ import aiohttp
 from aiohttp import web
 from aiohttp.compression_utils import ZLibCompressor
 from multidict import CIMultiDict, CIMultiDictProxy
+
+from aiohttp_tiny_mcp.protocol.models import serialized
 
 BOM = b"\xef\xbb\xbf"
 
@@ -188,7 +189,7 @@ class SSEResponse(web.StreamResponse):
     async def send_json(
         self, value: Any, *, event: str | None = None, id: str | None = None
     ) -> None:
-        await self.send(json.dumps(value, ensure_ascii=False), event=event, id=id)
+        await self.send(serialized(value).decode(), event=event, id=id)
 
     async def comment(self, text: str = "") -> None:
         await self.push(SSEEvent(comment=text))

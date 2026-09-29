@@ -345,7 +345,7 @@ async def test_a_standard_eventsource_reads_what_this_writes(
 
     assert reading.returncode == 0, err.decode()[:400]
     assert json.loads(out) == [
-        {"type": "message", "data": '{"ok": true}', "id": "1"},
+        {"type": "message", "data": '{"ok":true}', "id": "1"},
         {"type": "message", "data": "line one\nline two", "id": "2"},
         {"type": "tick", "data": "counted", "id": "3"},
         {"type": "message", "data": "after the quiet", "id": "4"},

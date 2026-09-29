@@ -16,8 +16,8 @@ class Adapter2024_11_05(Adapter2025_03_26):  # noqa: N801 -- revision date, grep
     allows_batch: ClassVar[bool] = False
     progress_message: ClassVar[bool] = False
 
-    def describe_tool(self, spec: ToolSpec) -> ToolDef | None:
-        definition = super().describe_tool(spec)
+    def build_tool(self, spec: ToolSpec) -> ToolDef | None:
+        definition = super().build_tool(spec)
         if definition is None:
             return None
         return definition.model_copy(update={"annotations": None})

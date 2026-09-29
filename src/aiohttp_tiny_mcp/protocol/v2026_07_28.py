@@ -341,7 +341,7 @@ class Adapter2026_07_28(Adapter):  # noqa: N801 -- revision date, greppable agai
             caps["extensions"] = extensions
         return caps
 
-    def describe_tool(self, spec: ToolSpec) -> ToolDef | None:
+    def build_tool(self, spec: ToolSpec) -> ToolDef | None:
         if spec.min_revision is not None and spec.min_revision > self.version:
             return None
         return spec.definition(spec.input_schema, spec.output_schema)

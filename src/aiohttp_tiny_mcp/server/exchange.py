@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import inspect
-import json
 import logging
 from collections.abc import Awaitable, Callable, Mapping
 from contextlib import AsyncExitStack, asynccontextmanager
@@ -25,6 +24,7 @@ from aiohttp_tiny_mcp.protocol.core import (
     answer_of,
     logs_at,
 )
+from aiohttp_tiny_mcp.protocol.models import serialized
 from aiohttp_tiny_mcp.storage.hub import ASK, Hub, topic
 from aiohttp_tiny_mcp.storage.sessions import Session, SessionAccess
 from aiohttp_tiny_mcp.storage.sessions import new_session_id as new_id
@@ -232,7 +232,7 @@ class Exchange:
             await self.send(payload)
             return
         assert self.sse is not None
-        text = json.dumps(payload, ensure_ascii=False)
+        text = serialized(payload).decode()
         log.debug("-> [%s] %s", self.adapter.version, text)
         await self.sse.send(text)
 

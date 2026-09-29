@@ -10,7 +10,7 @@ from collections.abc import Awaitable, Callable, Iterable, Mapping
 from contextlib import AbstractAsyncContextManager
 from typing import Any, ClassVar, Literal, Protocol, get_type_hints
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 
 from aiohttp_tiny_mcp.protocol.models import (
     BlobResourceContents,
@@ -100,6 +100,16 @@ class ToolSpec(Model):
     scopes: frozenset[str] = Field(default_factory=frozenset)
     min_revision: str | None = None
     streaming: bool = False
+
+    #: One projection of this tool per revision, keyed by adapter version.
+    #: A spec never changes after registration, so each revision simplifies
+    #: the schema once instead of once per request. `None` means the revision
+    #: hides the tool. `Adapter.describe_tool` owns this cache.
+    _described: dict[str, ToolDef | None] = PrivateAttr(default_factory=dict)
+
+    @property
+    def described(self) -> dict[str, ToolDef | None]:
+        return self._described
 
     @classmethod
     def build(

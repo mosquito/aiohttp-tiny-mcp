@@ -7,7 +7,6 @@ In-flight tasks support subscriptions and cancellation. HTTP header checks belon
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import sys
 from collections.abc import Callable, Mapping
@@ -23,6 +22,7 @@ from aiohttp_tiny_mcp.protocol.core import (
     Preamble,
     Rejected,
 )
+from aiohttp_tiny_mcp.protocol.models import serialized
 from aiohttp_tiny_mcp.protocol.selection import AdapterSet
 
 from .dispatcher import Dispatcher
@@ -60,7 +60,8 @@ async def serve_stdio(
     level: list[str | None] = [None]
 
     def send(version: str, payload: Mapping[str, Any]) -> None:
-        log.debug("-> [%s] %s", version, json.dumps(payload, ensure_ascii=False))
+        if log.isEnabledFor(logging.DEBUG):
+            log.debug("-> [%s] %s", version, serialized(payload).decode())
         write(payload)
 
     def keep_log_level(value: str) -> None:
@@ -98,7 +99,8 @@ async def serve_stdio(
             if not raw:
                 continue
 
-            log.debug("<- %s", raw.decode("utf-8", "replace"))
+            if log.isEnabledFor(logging.DEBUG):
+                log.debug("<- %s", raw.decode("utf-8", "replace"))
             pre = Preamble.of(raw, {})
             if is_reply(pre.body):
                 await relay_reply(registry.hub, pre.body)
@@ -172,8 +174,8 @@ async def stdin_reader() -> asyncio.StreamReader:
 
 
 def write_stdout(payload: Mapping[str, Any]) -> None:
-    sys.stdout.write(json.dumps(payload, ensure_ascii=False) + "\n")
-    sys.stdout.flush()
+    sys.stdout.buffer.write(serialized(payload) + b"\n")
+    sys.stdout.buffer.flush()
 
 
 async def run_stdio(

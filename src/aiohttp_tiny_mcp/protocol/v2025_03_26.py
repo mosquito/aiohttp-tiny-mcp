@@ -86,8 +86,8 @@ class Adapter2025_03_26(Adapter2025_06_18):  # noqa: N801 -- revision date, grep
         """Only handlers receiving Exchange need the extra answer/state arguments."""
         return any(kind.__name__ == "Exchange" for _, kind in spec.bound.plan)
 
-    def describe_tool(self, spec: ToolSpec) -> ToolDef | None:
-        definition = super().describe_tool(spec)
+    def build_tool(self, spec: ToolSpec) -> ToolDef | None:
+        definition = super().build_tool(spec)
         if definition is None:
             return None
         definition = definition.model_copy(update={"output_schema": None, "title": None})

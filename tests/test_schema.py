@@ -215,3 +215,73 @@ def test_a_real_union_is_still_refused():
         "properties": {"x": {"anyOf": [{"type": "string"}, {"type": "integer"}]}},
     }
     assert simplify_legacy_schema(schema) is None
+
+
+class Described(BaseModel):
+    inner: Inner
+    label: str = "x"
+
+
+async def described(args: Described) -> Inner:
+    """A tool with a schema worth simplifying."""
+    return args.inner
+
+
+def adapters() -> dict:
+    from aiohttp_tiny_mcp.protocol.selection import AdapterSet
+
+    return {adapter.version: adapter for adapter in AdapterSet.default().adapters}
+
+
+def spec_for(fn):
+    from aiohttp_tiny_mcp.server.specs import ToolSpec
+
+    return ToolSpec.build(fn)
+
+
+def test_every_revision_simplifies_a_tool_once(monkeypatch):
+    """`describe_tool` caches per revision, so a hot `tools/list` does no schema work."""
+    from aiohttp_tiny_mcp.protocol import v2025_11_25
+
+    calls = 0
+    original = v2025_11_25.simplify_legacy_schema
+
+    def counted(schema):
+        nonlocal calls
+        calls += 1
+        return original(schema)
+
+    monkeypatch.setattr(v2025_11_25, "simplify_legacy_schema", counted)
+    spec = spec_for(described)
+    for adapter in adapters().values():
+        first = adapter.describe_tool(spec)
+        after_first = calls
+        for _ in range(5):
+            assert adapter.describe_tool(spec) is first
+        assert calls == after_first, f"{adapter.version} simplified the schema again"
+    assert calls > 0, "the legacy path was never reached"
+
+
+def test_the_cached_definition_matches_an_uncached_build():
+    spec = spec_for(described)
+    for adapter in adapters().values():
+        assert adapter.describe_tool(spec) == adapter.build_tool(spec)
+
+
+def test_a_replaced_tool_is_described_again():
+    """Each registration builds a new spec, which carries its own cache."""
+    old, new = spec_for(described), spec_for(described)
+    for adapter in adapters().values():
+        assert adapter.describe_tool(old) is not adapter.describe_tool(new)
+        assert adapter.describe_tool(old) == adapter.describe_tool(new)
+
+
+def test_a_hidden_tool_stays_hidden_without_rebuilding():
+    """A revision that hides a tool caches the None, rather than retrying every request."""
+    from aiohttp_tiny_mcp.server.specs import ToolSpec
+
+    spec = ToolSpec.build(described, min_revision="2026-07-28")
+    legacy = adapters()["2024-11-05"]
+    assert legacy.describe_tool(spec) is None
+    assert legacy.version in spec.described
+    assert adapters()["2026-07-28"].describe_tool(spec) is not None
