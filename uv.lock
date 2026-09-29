@@ -196,6 +196,7 @@ sqlite = [
 dev = [
     { name = "aiosqlite" },
     { name = "furo" },
+    { name = "jsonschema" },
     { name = "markdown-pytest" },
     { name = "mcp", extra = ["cli"] },
     { name = "myst-parser", version = "4.0.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
@@ -232,6 +233,7 @@ provides-extras = ["jwt", "skills", "sqlite", "redis", "postgres"]
 dev = [
     { name = "aiosqlite", specifier = ">=0.20" },
     { name = "furo", specifier = ">=2025.12.19" },
+    { name = "jsonschema", specifier = ">=4.26" },
     { name = "markdown-pytest", specifier = ">=0.6.6" },
     { name = "mcp", extras = ["cli"], specifier = "==2.0.0" },
     { name = "myst-parser", specifier = ">=4.0.1" },

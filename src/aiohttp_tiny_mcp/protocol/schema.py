@@ -100,6 +100,26 @@ def simplify_legacy_schema(schema: dict) -> dict | None:
     return node
 
 
+def _accept_null(branch: dict[str, Any]) -> dict[str, Any] | None:
+    """Keep null valid in a branch that replaces a nullable union. Return None if the branch
+    cannot accept null.
+    """
+    if "const" in branch:
+        return None
+    kind = branch.get("type")
+    if isinstance(kind, str):
+        branch = {**branch, "type": [kind, "null"]}
+    elif isinstance(kind, list):
+        if "null" not in kind:
+            branch = {**branch, "type": [*kind, "null"]}
+    elif kind is not None:
+        return None
+    choices = branch.get("enum")
+    if isinstance(choices, list) and None not in choices:
+        branch = {**branch, "enum": [*choices, None]}
+    return branch
+
+
 def _simplify_node(node: Any) -> Any:
     if not isinstance(node, dict):
         return node
@@ -116,6 +136,12 @@ def _simplify_node(node: Any) -> Any:
         branch = _simplify_node(branches[0])
         if branch is None:
             return None
+        if len(branches) != len(any_of):
+            # The union accepted null. Declare null in the collapsed branch, or results that
+            # carry null fail client-side validation.
+            branch = _accept_null(branch)
+            if branch is None:
+                return None
         node = {**{k: v for k, v in node.items() if k != "anyOf"}, **branch}
     if "oneOf" in node:
         return None

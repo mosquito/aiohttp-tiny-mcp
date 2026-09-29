@@ -56,6 +56,7 @@ dev = [
     "PyJWT[crypto]>=2.13",
     "aiosqlite>=0.20",
     "furo>=2025.12.19",
+    "jsonschema>=4.26",
     "markdown-pytest>=0.6.6",
     "mcp[cli]==2.0.0",
     "myst-parser>=4.0.1",
