@@ -24,7 +24,7 @@ from urllib.parse import parse_qsl, quote_plus, urlsplit
 import aiohttp
 from yarl import URL
 
-from ._oauth import (
+from .oauth_helpers import (
     AuthorizationRequired,
     OAuthError,
     RegistrationRequired,
@@ -32,7 +32,7 @@ from ._oauth import (
     checked_url,
     strings,
 )
-from ._oauth import (
+from .oauth_helpers import (
     scopes as parse_scopes,
 )
 

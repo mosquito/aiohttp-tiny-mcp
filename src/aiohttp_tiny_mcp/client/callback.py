@@ -9,8 +9,8 @@ from collections.abc import Sequence
 from aiohttp import web
 from yarl import URL
 
-from ._oauth import OAuthError
 from .oauth import AuthorizationAttempt, OAuth
+from .oauth_helpers import OAuthError
 
 SUCCESS_HTML = """<!doctype html>
 <html lang="en"><meta charset="utf-8"><title>Authorization complete</title>

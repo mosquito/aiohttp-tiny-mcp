@@ -15,7 +15,6 @@ from aiohttp.test_utils import TestServer
 from yarl import URL
 
 from aiohttp_tiny_mcp import Client
-from aiohttp_tiny_mcp.client._oauth import bearer_challenge
 from aiohttp_tiny_mcp.client.callback import OAuthCallback
 from aiohttp_tiny_mcp.client.loopback import LoopbackCallback
 from aiohttp_tiny_mcp.client.oauth import (
@@ -24,6 +23,7 @@ from aiohttp_tiny_mcp.client.oauth import (
     OAuthError,
     RegistrationRequired,
 )
+from aiohttp_tiny_mcp.client.oauth_helpers import bearer_challenge
 from aiohttp_tiny_mcp.protocol.selection import AdapterSet
 
 ADAPTER = AdapterSet.default().by_version["2026-07-28"]

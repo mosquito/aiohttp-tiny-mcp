@@ -9,9 +9,9 @@ from collections.abc import Awaitable, Callable, Sequence
 from aiohttp import web
 from yarl import URL
 
-from ._oauth import OAuthError
 from .callback import SUCCESS_HTML, OAuthCallback
 from .oauth import OAuth
+from .oauth_helpers import OAuthError
 
 
 class LoopbackCallback:
