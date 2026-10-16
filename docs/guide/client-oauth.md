@@ -44,8 +44,11 @@ A runnable version is available as `examples/client_oauth.py`:
 ```console
 uv run python examples/client_oauth.py https://mcp.example.com/mcp \
   --issuer https://auth.example.com/tenant --client-id example-client \
-  --success-html success.html
+  --port 8765 --success-html success.html
 ```
+
+Omit `--port` to let the operating system select a free port. The helper binds
+to port `0` and includes the assigned port in `callback.redirect_uri`.
 
 `callback.login(auth)` opens the browser, receives the authorization response,
 exchanges the code, and saves the credentials before reporting success. Pass

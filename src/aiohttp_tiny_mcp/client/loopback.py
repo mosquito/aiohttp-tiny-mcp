@@ -19,7 +19,8 @@ class LoopbackCallback:
 
     Enter this context before constructing OAuth, then call ``login(auth)``.
     Register ``redirect_uri`` with the authorization server, or use DCR. A fixed
-    port can be supplied for pre-registered clients. ``success_html`` is trusted
+    port can be supplied for pre-registered clients. By default, the operating
+    system selects a free port. ``success_html`` is trusted
     application HTML, served unchanged only after the token exchange and save.
     """
 

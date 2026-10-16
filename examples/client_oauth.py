@@ -39,7 +39,7 @@ if __name__ == "__main__":
     parser.add_argument("--metadata-url", help="Hosted HTTPS client metadata document")
     parser.add_argument("--register", action="store_true", help="Allow dynamic client registration")
     parser.add_argument(
-        "--port", type=int, default=8765, help="Local callback port (0 for any port)"
+        "--port", type=int, default=0, help="Local callback port (default: OS-assigned port)"
     )
     parser.add_argument("--success-html", type=Path, help="HTML file for the successful login page")
     parser.add_argument(
