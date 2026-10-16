@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 from collections.abc import AsyncIterator, Callable, Mapping
+from contextlib import asynccontextmanager
 from typing import Any
 
 import aiohttp
@@ -14,6 +15,7 @@ from aiohttp_tiny_mcp.protocol.models import Implementation
 from aiohttp_tiny_mcp.transport.sse import read_sse
 
 from .base import BaseClient, Elicitor
+from .oauth import OAuth, OAuthError
 
 ANSWER_METHOD = "elicitation/create"
 
@@ -42,6 +44,7 @@ class Client(BaseClient):
         *,
         client_info: Implementation | None = None,
         session: aiohttp.ClientSession | None = None,
+        auth: OAuth | None = None,
         on_ask: Elicitor | None = None,
         on_notification: Callable[[Mapping[str, Any]], Any] | None = None,
         log_level: str | None = None,
@@ -56,14 +59,63 @@ class Client(BaseClient):
         self.base_url = base_url
         self.session = session
         self.owns_session = session is None
+        self.auth = auth
+        if auth is not None:
+            auth.check_endpoint(base_url)
         #: The id of the last event read from the notification stream.
         self.last_event_id: str | None = None
         self.session_id: str | None = None
 
     async def __aenter__(self) -> Client:
+        self.check_auth()
         if self.owns_session:
             self.session = aiohttp.ClientSession()
         return self
+
+    def check_auth(self) -> None:
+        if self.auth is not None:
+            self.auth.check_endpoint(self.base_url)
+        if self.auth is not None and self.session is not None:
+            if "Authorization" in self.session.headers or self.session.auth is not None:
+                raise ValueError("OAuth cannot be combined with session Authorization or auth.")
+
+    @asynccontextmanager
+    async def http_request(
+        self, method: str, *, headers: dict[str, str], **kwargs: Any
+    ) -> AsyncIterator[aiohttp.ClientResponse]:
+        assert self.session is not None, "use 'async with Client(...) as client:'"
+        if self.auth is None:
+            async with self.session.request(
+                method, self.base_url, headers=headers, **kwargs
+            ) as resp:
+                yield resp
+            return
+        self.check_auth()
+        token = await self.auth.token()
+        for attempt in range(2):
+            async with self.session.request(
+                method,
+                self.base_url,
+                headers={**headers, "Authorization": f"Bearer {token}"},
+                allow_redirects=False,
+                **kwargs,
+            ) as resp:
+                if 300 <= resp.status < 400:
+                    raise OAuthError("Authenticated MCP requests must not follow redirects.")
+                if resp.status in {401, 403}:
+                    challenge = self.auth.observe(resp.headers.getall("WWW-Authenticate", []))
+                    if resp.status == 403:
+                        if challenge.get("error") != "insufficient_scope":
+                            raise OAuthError("The MCP server denied access (HTTP 403).")
+                        raise self.auth.authorization_required()
+                    if attempt:
+                        await self.auth.invalidate(token)
+                        raise self.auth.authorization_required()
+                else:
+                    yield resp
+                    return
+            # Release the response before refreshing, including with a one-slot connector.
+            token = await self.auth.token(rejected=token)
 
     async def __aexit__(self, *exc: object) -> None:
         if self.owns_session and self.session is not None:
@@ -100,8 +152,8 @@ class Client(BaseClient):
         assert self.session is not None, "use 'async with Client(...) as client:'"
         tool = self.tool_definitions.get(name) if name is not None else None
         params = envelope.get("params")
-        async with self.session.post(
-            self.base_url, json=envelope, headers=self.headers(method, name, params, tool)
+        async with self.http_request(
+            "POST", json=envelope, headers=self.headers(method, name, params, tool)
         ) as resp:
             if not self.lost_session(resp):
                 self.adopt(resp)
@@ -110,8 +162,8 @@ class Client(BaseClient):
                 return
         # Retry once on a fresh session; a second 404 is reported as any other reply.
         await self.reopen()
-        async with self.session.post(
-            self.base_url, json=envelope, headers=self.headers(method, name, params, tool)
+        async with self.http_request(
+            "POST", json=envelope, headers=self.headers(method, name, params, tool)
         ) as resp:
             self.adopt(resp)
             async for frame in frames(resp):
@@ -126,15 +178,15 @@ class Client(BaseClient):
     async def send_notification(self, envelope: dict[str, Any], *, method: str) -> None:
         assert self.session is not None, "use 'async with Client(...) as client:'"
         params = envelope.get("params")
-        async with self.session.post(
-            self.base_url, json=envelope, headers=self.headers(method, params=params)
+        async with self.http_request(
+            "POST", json=envelope, headers=self.headers(method, params=params)
         ) as resp:
             if not self.lost_session(resp):
                 await resp.read()
                 return
         await self.reopen()
-        async with self.session.post(
-            self.base_url, json=envelope, headers=self.headers(method, params=params)
+        async with self.http_request(
+            "POST", json=envelope, headers=self.headers(method, params=params)
         ) as resp:
             await resp.read()
 
@@ -147,7 +199,7 @@ class Client(BaseClient):
         headers["Accept"] = "text/event-stream"
         if last_event_id is not None:
             headers["Last-Event-ID"] = last_event_id
-        async with self.session.get(self.base_url, headers=headers) as resp:
+        async with self.http_request("GET", headers=headers) as resp:
             resp.raise_for_status()
             async for event in read_sse(resp):
                 if event.id is not None:
@@ -159,5 +211,5 @@ class Client(BaseClient):
         """Send a bare JSON-RPC response. The hub routes it to the node waiting for the answer."""
         assert self.session is not None, "use 'async with Client(...) as client:'"
         headers = self.headers(ANSWER_METHOD)
-        async with self.session.post(self.base_url, json=envelope, headers=headers) as resp:
+        async with self.http_request("POST", json=envelope, headers=headers) as resp:
             await resp.read()

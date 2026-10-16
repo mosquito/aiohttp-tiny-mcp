@@ -891,3 +891,42 @@ async def test_encrypted_tokens_and_code_redemption_across_workers(
             server, provider, store=None, tokens=make_tokens(key, server.resource_url)
         )
         assert (await fresh.verify(token)).subject == "github:123"
+
+
+async def test_python_oauth_client_with_library_server(protected):
+    """Keep the client interoperable with the library's static-client server."""
+    from aiohttp_tiny_mcp import Client, OAuth
+    from aiohttp_tiny_mcp.protocol.selection import AdapterSet
+
+    server, browser = protected
+
+    async def authorize(url):
+        response = await browser.get(URL(url).path_qs)
+        ticket = re.search(r'name="ticket" value="([^"]+)"', await response.text())[1]
+        response = await browser.post(
+            "/oauth/authorize",
+            data={"ticket": ticket, "decision": "allow"},
+            headers={"Origin": server.origin},
+            allow_redirects=False,
+        )
+        upstream = URL(response.headers["Location"])
+        response = await browser.get(
+            "/oauth/callback",
+            params={"state": upstream.query["state"], "code": "provider-code"},
+            allow_redirects=False,
+        )
+        return response.headers["Location"]
+
+    async with OAuth(
+        server.resource_url,
+        issuer=server.issuer,
+        client_id="console",
+        redirect_uri=server.origin + "/console/oauth-callback",
+        allow_http=True,
+    ) as auth:
+        await auth.login(authorize=authorize)
+        adapter = AdapterSet.default().by_version["2026-07-28"]
+        async with Client(server.resource_url, adapter, auth=auth) as client:
+            await client.initialize()
+            result = await client.call_tool("who", {})
+            assert "123" in result.content[0].text

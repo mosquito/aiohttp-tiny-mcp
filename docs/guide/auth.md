@@ -298,8 +298,9 @@ async with ClientSession(headers=headers) as http:
 ```
 
 For Bearer authentication, use `{"Authorization": "Bearer <access-token>"}`.
-The client sends the configured headers on its HTTP requests. The client does
-not obtain or refresh OAuth tokens automatically. Basic and Bearer policies
+The client sends the configured headers on its HTTP requests. To obtain and
+refresh OAuth tokens, pass an `OAuth` context through `Client(auth=...)`; see
+[Client OAuth](client-oauth.md). Static session headers do not refresh tokens. Basic and Bearer policies
 do not read credentials from URLs; use a custom policy when required by your
 application.
 
