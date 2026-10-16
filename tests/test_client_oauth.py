@@ -700,14 +700,14 @@ async def test_refresh_network_failure_is_not_retried(authority, monkeypatch):
     async with oauth(authority) as auth:
         # Trigger discovery before interrupting the token transport.
         await auth.begin()
-        original = auth._session.request
+        original = auth.session.request
 
         def fail(method, url, **kwargs):
             if method == "POST":
                 raise TimeoutError("private request details")
             return original(method, url, **kwargs)
 
-        monkeypatch.setattr(auth._session, "request", fail)
+        monkeypatch.setattr(auth.session, "request", fail)
         with pytest.raises(OAuthError, match="HTTP request failed") as error:
             await auth.token()
         assert "private" not in str(error.value)
@@ -752,7 +752,7 @@ async def test_cancelled_refresh_does_not_reuse_rotated_token(authority, monkeyp
     authority.saved["expires_at"] = 0
     started = asyncio.Event()
     async with oauth(authority) as auth:
-        original = auth._exchange
+        original = auth.exchange
 
         async def exchange(form):
             result = await original(form)
@@ -760,7 +760,7 @@ async def test_cancelled_refresh_does_not_reuse_rotated_token(authority, monkeyp
             await asyncio.Event().wait()
             return result
 
-        monkeypatch.setattr(auth, "_exchange", exchange)
+        monkeypatch.setattr(auth, "exchange", exchange)
         refresh = asyncio.create_task(auth.token())
         await asyncio.wait_for(started.wait(), timeout=5)
         refresh.cancel()

@@ -63,7 +63,7 @@ def strings(value: object) -> list[str]:
     return value
 
 
-_PARAM = re.compile(r'([!#$%&\'*+.^_`|~\w-]+)\s*=\s*(?:"((?:[^"\\]|\\.)*)"|([^\s,]+))\Z')
+CHALLENGE_PARAM = re.compile(r'([!#$%&\'*+.^_`|~\w-]+)\s*=\s*(?:"((?:[^"\\]|\\.)*)"|([^\s,]+))\Z')
 
 
 def bearer_challenge(values: Iterable[str]) -> dict[str, str]:
@@ -75,7 +75,7 @@ def bearer_challenge(values: Iterable[str]) -> dict[str, str]:
         current: dict[str, str] | None = None
         for part in parse_http_list(value):
             part = part.strip()
-            match = _PARAM.fullmatch(part)
+            match = CHALLENGE_PARAM.fullmatch(part)
             if match is None:
                 scheme, _, part = part.partition(" ")
                 current = {} if scheme.lower() == "bearer" else None
@@ -83,7 +83,7 @@ def bearer_challenge(values: Iterable[str]) -> dict[str, str]:
                     if found is not None:
                         raise OAuthError("Multiple Bearer challenges are ambiguous.")
                     found = current
-                match = _PARAM.fullmatch(part.strip())
+                match = CHALLENGE_PARAM.fullmatch(part.strip())
                 if current is not None and part and match is None:
                     raise OAuthError("Invalid Bearer challenge.")
             if current is not None and match:

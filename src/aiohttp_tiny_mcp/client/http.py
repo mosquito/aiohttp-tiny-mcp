@@ -67,12 +67,12 @@ class Client(BaseClient):
         self.session_id: str | None = None
 
     async def __aenter__(self) -> Client:
-        self._check_auth()
+        self.check_auth()
         if self.owns_session:
             self.session = aiohttp.ClientSession()
         return self
 
-    def _check_auth(self) -> None:
+    def check_auth(self) -> None:
         if self.auth is not None:
             self.auth.check_endpoint(self.base_url)
         if self.auth is not None and self.session is not None:
@@ -80,7 +80,7 @@ class Client(BaseClient):
                 raise ValueError("OAuth cannot be combined with session Authorization or auth.")
 
     @asynccontextmanager
-    async def _request(
+    async def http_request(
         self, method: str, *, headers: dict[str, str], **kwargs: Any
     ) -> AsyncIterator[aiohttp.ClientResponse]:
         assert self.session is not None, "use 'async with Client(...) as client:'"
@@ -90,7 +90,7 @@ class Client(BaseClient):
             ) as resp:
                 yield resp
             return
-        self._check_auth()
+        self.check_auth()
         token = await self.auth.token()
         for attempt in range(2):
             async with self.session.request(
@@ -152,7 +152,7 @@ class Client(BaseClient):
         assert self.session is not None, "use 'async with Client(...) as client:'"
         tool = self.tool_definitions.get(name) if name is not None else None
         params = envelope.get("params")
-        async with self._request(
+        async with self.http_request(
             "POST", json=envelope, headers=self.headers(method, name, params, tool)
         ) as resp:
             if not self.lost_session(resp):
@@ -162,7 +162,7 @@ class Client(BaseClient):
                 return
         # Retry once on a fresh session; a second 404 is reported as any other reply.
         await self.reopen()
-        async with self._request(
+        async with self.http_request(
             "POST", json=envelope, headers=self.headers(method, name, params, tool)
         ) as resp:
             self.adopt(resp)
@@ -178,14 +178,14 @@ class Client(BaseClient):
     async def send_notification(self, envelope: dict[str, Any], *, method: str) -> None:
         assert self.session is not None, "use 'async with Client(...) as client:'"
         params = envelope.get("params")
-        async with self._request(
+        async with self.http_request(
             "POST", json=envelope, headers=self.headers(method, params=params)
         ) as resp:
             if not self.lost_session(resp):
                 await resp.read()
                 return
         await self.reopen()
-        async with self._request(
+        async with self.http_request(
             "POST", json=envelope, headers=self.headers(method, params=params)
         ) as resp:
             await resp.read()
@@ -199,7 +199,7 @@ class Client(BaseClient):
         headers["Accept"] = "text/event-stream"
         if last_event_id is not None:
             headers["Last-Event-ID"] = last_event_id
-        async with self._request("GET", headers=headers) as resp:
+        async with self.http_request("GET", headers=headers) as resp:
             resp.raise_for_status()
             async for event in read_sse(resp):
                 if event.id is not None:
@@ -211,5 +211,5 @@ class Client(BaseClient):
         """Send a bare JSON-RPC response. The hub routes it to the node waiting for the answer."""
         assert self.session is not None, "use 'async with Client(...) as client:'"
         headers = self.headers(ANSWER_METHOD)
-        async with self._request("POST", json=envelope, headers=headers) as resp:
+        async with self.http_request("POST", json=envelope, headers=headers) as resp:
             await resp.read()

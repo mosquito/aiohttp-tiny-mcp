@@ -28,8 +28,8 @@ class OAuthCallback:
     def __init__(self, auth: OAuth, *, success_html: str = SUCCESS_HTML) -> None:
         self.auth = auth
         self.success_html = success_html
-        self._attempt: AuthorizationAttempt | None = None
-        self._outcome: asyncio.Future[Exception | None] | None = None
+        self.attempt: AuthorizationAttempt | None = None
+        self.outcome: asyncio.Future[Exception | None] | None = None
 
     def routes(self) -> list[web.RouteDef]:
         """Return the GET route at the path of the configured redirect URI."""
@@ -42,29 +42,29 @@ class OAuthCallback:
     async def begin(self, *, scopes: Sequence[str] | None = None) -> AuthorizationAttempt:
         """Prepare the URL to which the application redirects its signed-in user."""
         self.cancel()
-        self._attempt = await self.auth.begin(scopes=scopes)
-        self._outcome = asyncio.get_running_loop().create_future()
-        return self._attempt
+        self.attempt = await self.auth.begin(scopes=scopes)
+        self.outcome = asyncio.get_running_loop().create_future()
+        return self.attempt
 
     async def wait(self) -> None:
         """Wait for token acquisition and persistence, or raise their error."""
-        if self._outcome is None:
+        if self.outcome is None:
             raise RuntimeError("Start an authorization attempt first.")
-        error = await asyncio.shield(self._outcome)
+        error = await asyncio.shield(self.outcome)
         if error is not None:
             raise error
 
     def cancel(self) -> None:
         """Cancel a pending callback without changing existing credentials."""
-        if self._attempt is not None:
-            self.auth.cancel(self._attempt)
-            self._attempt = None
-        if self._outcome is not None and not self._outcome.done():
-            self._outcome.set_result(OAuthError("Authorization was cancelled."))
+        if self.attempt is not None:
+            self.auth.cancel(self.attempt)
+            self.attempt = None
+        if self.outcome is not None and not self.outcome.done():
+            self.outcome.set_result(OAuthError("Authorization was cancelled."))
 
     async def handle(self, request: web.Request) -> web.Response:
         """Exchange the callback code before sending the result page."""
-        attempt, outcome = self._attempt, self._outcome
+        attempt, outcome = self.attempt, self.outcome
         states = request.query.getall("state", [])
         expected_state = URL(attempt.url).query["state"] if attempt is not None else ""
         if (
@@ -74,8 +74,8 @@ class OAuthCallback:
             or len(states) != 1
             or not hmac.compare_digest(states[0].encode(), expected_state.encode())
         ):
-            return self._response(False, "No matching authorization attempt.")
-        self._attempt = None
+            return self.response(False, "No matching authorization attempt.")
+        self.attempt = None
         # Use the configured public URI, not an untrusted Host or Forwarded header.
         callback_url = self.auth.redirect_uri + "?" + request.rel_url.raw_query_string
         try:
@@ -87,14 +87,14 @@ class OAuthCallback:
         except Exception as error:
             if not outcome.done():
                 outcome.set_result(error)
-            return self._response(False, "Authorization failed. Return to the application.")
+            return self.response(False, "Authorization failed. Return to the application.")
         if outcome.done():
-            return self._response(False, "Authorization was cancelled.")
+            return self.response(False, "Authorization was cancelled.")
         outcome.set_result(None)
-        return self._response(True, self.success_html)
+        return self.response(True, self.success_html)
 
     @staticmethod
-    def _response(success: bool, text: str) -> web.Response:
+    def response(success: bool, text: str) -> web.Response:
         return web.Response(
             status=200 if success else 400,
             text=text,
@@ -110,4 +110,4 @@ class OAuthCallback:
         )
 
 
-__all__ = ["OAuthCallback"]
+__all__ = ["OAuthCallback", "SUCCESS_HTML"]
