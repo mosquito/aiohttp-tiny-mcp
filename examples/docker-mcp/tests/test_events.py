@@ -58,14 +58,21 @@ async def test_a_daemon_event_reaches_a_subscriber(url, registry, client, fake, 
 async def test_the_relay_names_the_container_that_changed(registry, client):
     where = topic(NOTIFICATIONS)
     changes = await registry.hub.subscribe(where)
+
+    async def collect_uris() -> set[str]:
+        # The relay publishes each URI separately; one poll may return only one.
+        uris: set[str] = set()
+        while len(uris) < 2:
+            uris.update(event.message["params"]["uri"] for event in await changes.poll())
+        return uris
+
     watching = asyncio.ensure_future(relay(registry, client))
     try:
-        events = await changes.poll(timeout=5)
+        uris = await asyncio.wait_for(collect_uris(), 5)
     finally:
         watching.cancel()
         await asyncio.gather(watching, return_exceptions=True)
 
-    uris = {event.message["params"]["uri"] for event in events}
     assert "docker://containers" in uris
     assert "docker://containers/333333333333" in uris
 
