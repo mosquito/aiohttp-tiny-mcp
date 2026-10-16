@@ -4,8 +4,9 @@
 code is the same for all of them. `StdioClient` is the same class over a
 subprocess's standard streams.
 
-For protected HTTP servers, follow
-[Sending credentials](auth.md#sending-credentials) in the authentication guide.
+For protected HTTP servers, use [Client OAuth](client-oauth.md) for browser login
+and token refresh, or [Sending credentials](auth.md#sending-credentials) for
+existing credentials.
 
 <!-- name: async test_client; fixtures: serve -->
 ```python

@@ -65,6 +65,7 @@ guide/sessions
 :caption: Calling and running a server
 
 guide/client
+guide/client-oauth
 guide/console
 deployment/transports
 deployment/stores

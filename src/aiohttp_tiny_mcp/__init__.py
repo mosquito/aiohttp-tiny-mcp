@@ -14,7 +14,10 @@ from .auth import (
     principal_from_claims,
 )
 from .client.base import ClientError, Elicitor
+from .client.callback import OAuthCallback
 from .client.http import Client
+from .client.loopback import LoopbackCallback
+from .client.oauth import AuthorizationRequired, OAuth, OAuthError, RegistrationRequired
 from .client.stdio import StdioClient
 from .extensions import Extension
 from .protocol.core import (
@@ -55,6 +58,12 @@ from .transport.sse import SSEResponse
 
 __all__ = [
     "AdapterSet",
+    "OAuth",
+    "OAuthError",
+    "OAuthCallback",
+    "LoopbackCallback",
+    "AuthorizationRequired",
+    "RegistrationRequired",
     "Answer",
     "AnswerAction",
     "AudioContent",

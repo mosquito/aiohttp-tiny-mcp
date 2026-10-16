@@ -259,3 +259,25 @@ The classes below provide the API reference.
 
 .. autoclass:: aiohttp_tiny_mcp.protocol.core.ClientProfile
 ```
+
+## Client OAuth
+
+See [Client OAuth](../guide/client-oauth.md) for registration, callback handling,
+credential storage, and refresh behavior.
+
+```{eval-rst}
+.. autoclass:: aiohttp_tiny_mcp.OAuth
+   :members: begin, complete, cancel, login, token
+
+.. autoclass:: aiohttp_tiny_mcp.OAuthCallback
+   :members: begin, handle, wait, cancel, routes, setup
+
+.. autoclass:: aiohttp_tiny_mcp.LoopbackCallback
+   :members: redirect_uri, login
+
+.. autoclass:: aiohttp_tiny_mcp.AuthorizationRequired
+
+.. autoclass:: aiohttp_tiny_mcp.RegistrationRequired
+
+.. autoclass:: aiohttp_tiny_mcp.OAuthError
+```
