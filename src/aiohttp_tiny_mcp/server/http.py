@@ -8,6 +8,7 @@ import re
 from collections.abc import Mapping
 from dataclasses import replace
 from functools import cached_property, partial
+from hashlib import sha256
 from typing import Any
 
 from aiohttp import web
@@ -50,6 +51,7 @@ from .subscriptions import relays, wanted
 from .tasks import stop
 
 log = logging.getLogger("aiohttp_tiny_mcp")
+session_log = logging.getLogger("aiohttp_tiny_mcp.sessions")
 
 MAY_ASK = frozenset({Operation.CALL_TOOL, Operation.GET_PROMPT, Operation.READ_RESOURCE})
 AUTH_POLICY: web.RequestKey[Authentication] = web.RequestKey("mcp_auth_policy", Authentication)
@@ -523,12 +525,41 @@ class Endpoint:
         if not session_id:
             return None
         record = await self.registry.session_store.get(scoped(session_id))
-        if record is None or not self.owns(record, principal, request):
+        if record is None:
+            self._log_session(
+                f"{request.method} rejected: missing or expired", session_id, logging.WARNING
+            )
             raise Rejected(Failure(FailureKind.SESSION_NOT_FOUND, "session not found"))
-        await self.registry.session_store.touch(
+        if not self.owns(record, principal, request):
+            self._log_session(
+                f"{request.method} rejected: owner mismatch", session_id, logging.WARNING
+            )
+            raise Rejected(Failure(FailureKind.SESSION_NOT_FOUND, "session not found"))
+        renewed = await self.registry.session_store.touch(
             scoped(session_id), ttl_seconds=self.registry.session_ttl_seconds
         )
+        self._log_session(
+            f"{request.method} {'renewed' if renewed else 'renewal failed'}",
+            session_id,
+            logging.DEBUG if renewed else logging.WARNING,
+        )
         return record
+
+    def _log_session(self, event: str, session_id: str, level: int) -> None:
+        """Correlate sessions and storage keys without logging bearer identifiers."""
+        if not session_log.isEnabledFor(level):
+            return
+        store = type(self.registry.session_store)
+        session_log.log(
+            level,
+            "MCP session %s; session=%s key=%s store=%s.%s ttl=%s",
+            event,
+            sha256(session_id.encode(errors="surrogateescape")).hexdigest()[:16],
+            sha256(scoped(session_id).encode(errors="surrogateescape")).hexdigest()[:16],
+            store.__module__,
+            store.__qualname__,
+            self.registry.session_ttl_seconds,
+        )
 
     def open_values(self, request: web.Request, record: SessionRecord | None) -> Session | None:
         """The application-owned half of this request's session, if any."""
@@ -555,6 +586,8 @@ class Endpoint:
             handshake_data(negotiated, call.client.capabilities, owner),
             ttl_seconds=self.registry.session_ttl_seconds,
         )
+        if created:
+            self._log_session("created", session_id, logging.INFO)
         return session_id if created else None
 
     def encode(

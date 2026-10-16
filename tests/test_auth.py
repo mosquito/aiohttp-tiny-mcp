@@ -9,6 +9,10 @@ verified rather than from what the caller said.
 
 from __future__ import annotations
 
+import asyncio
+import json
+import logging
+import re
 import time
 from collections.abc import AsyncIterator
 
@@ -308,6 +312,91 @@ async def test_a_session_belongs_to_whoever_opened_it(served):
     )
     assert stolen.status in (200, 400, 404)
     assert session_id not in await stolen.text()
+
+
+@pytest.mark.parametrize("namespace_from_token", [False, True])
+async def test_session_diagnostics_correlate_without_credentials(caplog, namespace_from_token):
+    caplog.set_level(logging.DEBUG, logger="aiohttp_tiny_mcp.sessions")
+    registry, _ = build(namespace_from_token=namespace_from_token)
+    async with TestClient(TestServer(Endpoint(registry).app("/mcp"))) as client:
+        session_id = await opened(client, "alice")
+        headers = {
+            **HEADERS,
+            SESSION_HEADER: session_id,
+            "MCP-Protocol-Version": "2025-11-25",
+        }
+        for token, status in (("alice", 200), ("bob", 404)):
+            response = await client.post(
+                "/mcp?token=private-query-secret",
+                json={"jsonrpc": "2.0", "id": 2, "method": "ping"},
+                headers={**headers, "Authorization": f"Bearer {token}"},
+            )
+            assert response.status == status
+            if status == 404:
+                assert (await response.json())["error"]["message"] == "session not found"
+
+    entries = [
+        record.getMessage()
+        for record in caplog.records
+        if record.name == "aiohttp_tiny_mcp.sessions"
+    ]
+    assert len(entries) == 3
+    assert "created" in entries[0]
+    assert "POST renewed" in entries[1]
+    reason = "missing or expired" if namespace_from_token else "owner mismatch"
+    assert f"POST rejected: {reason}" in entries[2]
+    references = [re.search(r"session=([0-9a-f]{16}) key=([0-9a-f]{16})", line) for line in entries]
+    assert all(references)
+    assert len({match[1] for match in references}) == 1
+    assert references[0][2] == references[1][2]
+    assert (references[1][2] != references[2][2]) == namespace_from_token
+    for entry in entries:
+        assert "store=aiohttp_tiny_mcp.storage.sessions.MemorySessionStore" in entry
+        for secret in (session_id, "alice", "bob", "private-query-secret", "Bearer"):
+            assert secret not in entry
+
+
+@pytest.mark.parametrize("method", ["GET", "POST"])
+@pytest.mark.parametrize("namespace_from_token", [False, True])
+async def test_session_diagnostics_with_non_utf8_headers(caplog, method, namespace_from_token):
+    caplog.set_level(logging.WARNING, logger="aiohttp_tiny_mcp.sessions")
+    registry, _ = build(namespace_from_token=namespace_from_token)
+    body = b'{"jsonrpc":"2.0","id":1,"method":"ping"}' if method == "POST" else b""
+    async with TestServer(Endpoint(registry).app("/mcp")) as server:
+        reader, writer = await asyncio.open_connection(server.host, server.port)
+        try:
+            # Send raw bytes because an HTTP client may normalize header values.
+            writer.write(
+                f"{method} /mcp HTTP/1.1\r\n".encode()
+                + b"Host: localhost\r\n"
+                + b"Authorization: Bearer alice\r\n"
+                + b"Accept: application/json, text/event-stream\r\n"
+                + b"Content-Type: application/json\r\n"
+                + b"MCP-Protocol-Version: 2025-11-25\r\n"
+                + b"Mcp-Session-Id: invalid-\xff\r\n"
+                + b"Connection: close\r\n"
+                + f"Content-Length: {len(body)}\r\n\r\n".encode()
+                + body
+            )
+            await writer.drain()
+            response = await asyncio.wait_for(reader.read(), timeout=5)
+        finally:
+            writer.close()
+            await writer.wait_closed()
+
+    headers, _, payload = response.partition(b"\r\n\r\n")
+    assert headers.startswith(b"HTTP/1.1 404 ")
+    assert json.loads(payload)["error"]["message"] == "session not found"
+    entries = [
+        record.getMessage()
+        for record in caplog.records
+        if record.name == "aiohttp_tiny_mcp.sessions"
+    ]
+    assert len(entries) == 1
+    assert f"{method} rejected: missing or expired" in entries[0]
+    assert re.search(r"session=[0-9a-f]{16} key=[0-9a-f]{16}", entries[0])
+    assert "invalid-" not in entries[0]
+    assert "alice" not in entries[0]
 
 
 async def test_binding_can_be_turned_off_for_a_layer_that_does_it_elsewhere():

@@ -260,3 +260,31 @@ naming a session the store no longer holds -- expired, deleted, or lost to a
 restart of a process-local store -- is answered with `404` and a JSON-RPC error,
 as the specification requires. `Client` handles that by calling `initialize`
 again and repeating the request once.
+
+An open GET notification stream does not renew the TTL after its initial request.
+A reconnect can therefore receive 404 even when the stream was open before a
+server restart. A persistent store preserves live sessions across restarts;
+it does not restore expired records.
+
+### Diagnosing session rejection
+
+The `aiohttp_tiny_mcp.sessions` logger records creation at INFO and rejection at
+WARNING. Rejections distinguish a missing or expired record from an owner
+mismatch. The store interface does not distinguish missing records from expired
+records. DEBUG adds successful TTL renewals without enabling protocol payload
+logging:
+
+```python
+import logging
+
+logging.getLogger("aiohttp_tiny_mcp.sessions").setLevel(logging.DEBUG)
+```
+
+Each entry includes the store class, configured TTL, and two fingerprints:
+`session` hashes the client session ID; `key` hashes the namespaced storage key.
+Both are the first 16 hexadecimal characters of SHA-256 over the UTF-8 value.
+Invalid UTF-8 bytes in a session header are preserved when computing the hashes.
+The raw identifiers, namespace, owner, credentials, and query string are omitted.
+The same `session` with a different `key` indicates a namespace change. Compare
+creation, renewal, and rejection entries across workers and restarts. A matching
+store class alone does not prove that workers use the same database.
