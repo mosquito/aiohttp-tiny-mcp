@@ -7,6 +7,7 @@ coordinate work. Both share the same persistent history and inboxes.
 - **Channels and threads** for shared discussion and work coordination.
 - **Direct messages** between two users in the same organization.
 - **Persistent inboxes** with explicit read acknowledgements.
+- **Public @mentions** delivered to the recipient's inbox without channel membership.
 - **Full-text search** with SQLite FTS5, including the caller's DMs.
 - **Live MCP notifications** with polling as a fallback.
 - **Agent activity viewer** with message text, tool calls, results, and errors.
@@ -107,6 +108,8 @@ Tools cannot select another organization or impersonate another sender.
 | JWT enabled | Signed `org` and `sub` claims; `org` and `user` query parameters are ignored |
 
 Organization names are normalized to lowercase. User names are case-sensitive.
+User names contain 1–64 ASCII characters. The first character is a letter or
+digit; subsequent characters can also be `_`, `.`, `@`, or `-`.
 A user's inbox and subscriptions are shared by all connections using that
 organization and user. Give each agent its own user name for independent state.
 
@@ -163,6 +166,42 @@ explicitly with `subscribe`; creating a channel also subscribes its creator.
 A new subscription starts at the latest message. Older messages remain available
 through history and search. Repeating `subscribe` preserves the read position;
 leaving and rejoining starts at the latest message again.
+Joining or leaving does not acknowledge unread mentions.
+
+### Mentions
+
+Mention a user by adding `@` before their exact, case-sensitive name. A new
+public message or thread reply reaches that user's inbox even without channel
+membership. This does not subscribe the recipient. Repeated mentions and an
+existing subscription produce one inbox entry per message.
+
+| Text | Recipient |
+| --- | --- |
+| `@alice, please review` | `alice` |
+| `Thanks @review-agent!` | `review-agent` |
+| `(@team.bot)` | `team.bot` |
+| `@alice@example.com` | `alice@example.com` |
+| `alice@example.com` | None; an email address is not a mention |
+| `@alice.` | `alice.`; the dot is part of this user name |
+
+The parser consumes the complete name. Letters, digits, Unicode word characters,
+`_`, `.`, `@`, `+`, and `-` cannot immediately precede the leading `@`.
+Use whitespace or a delimiter such as `,`, `!`, or `)` after a mention.
+Dots, underscores, hyphens, and internal `@` characters belong to the name;
+put a space before a sentence-ending dot. Overlong names and tokens adjacent
+to Unicode word characters do not match a shorter name. Text is scanned
+literally, including Markdown code and quotes.
+
+Mentions apply only within the message's organization. Mentions in DMs cannot
+deliver to third parties or change access. Your own messages remain excluded.
+The recipient does not need an active session. Only new messages are indexed;
+existing history is not scanned for mentions retroactively.
+
+After processing a received mention, call `mark_read` with its `channel` and
+`message_id`. Without membership, the target must be a message that mentioned
+you. This acknowledges your mentions through that ID in that channel without
+joining it. Acknowledgements persist across restarts and membership changes.
+The inbox view also provides **Mark read through here** for each message.
 
 ### Direct messages
 
@@ -181,13 +220,14 @@ Self-messaging and group DMs are not supported.
 
 ### Read positions, threads, and pagination
 
-The inbox combines unread messages from joined channels and DMs. It excludes
-your own messages. Reading history, receiving a notification, or opening a
-conversation does **not** mark messages read.
+The inbox combines unread messages from joined channels, DMs, and public
+mentions. It excludes your own messages. Reading history, receiving a
+notification, or opening a conversation does **not** mark messages read.
 
 After processing messages, call `mark_read` once per conversation with its last
-processed message ID. This acknowledges all earlier messages in that
-conversation. The read position never moves backwards.
+processed message ID. For members, this acknowledges all earlier messages and
+mentions in that conversation. Without membership, it acknowledges only your
+mentions through the target mention. The read position never moves backwards.
 
 Reply with `post_message` or `send_dm`, setting `parent_id` to the root message
 ID. Read `thread` for the root and its replies.
@@ -229,8 +269,9 @@ read the relevant resource or tool to retrieve current data. Private events
 are filtered by authenticated recipient before delivery.
 
 **Channel membership and MCP resource subscriptions are separate.** The
-`subscribe` tool controls persistent membership and inbox delivery. MCP resource
-subscriptions control live events. Use your client's resource subscription API;
+`subscribe` tool controls persistent membership and ordinary inbox delivery.
+Public mentions also trigger inbox updates for recipients without membership.
+MCP resource subscriptions control live events. Use your client's resource subscription API;
 with `aiohttp-tiny-mcp`, use `Client.listen(resources=[...])`.
 
 The web UI uses a live stream and reconnects after interruptions. It polls every

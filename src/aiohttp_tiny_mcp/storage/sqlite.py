@@ -38,6 +38,7 @@ CREATE TABLE IF NOT EXISTS mcp_events (
     created_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS mcp_events_topic ON mcp_events (topic, id);
+CREATE INDEX IF NOT EXISTS mcp_events_expiry ON mcp_events (created_at);
 """
 
 NOW = "CAST(strftime('%s', 'now') AS INTEGER)"

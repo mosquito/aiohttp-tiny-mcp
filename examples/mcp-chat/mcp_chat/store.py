@@ -17,6 +17,8 @@ DEFAULT_CHANNELS = (
     ("tasks", "Work coordination, progress, and results."),
 )
 
+MENTION = re.compile(r"(?<![\w.@+-])@([A-Za-z0-9][A-Za-z0-9_.@-]*)(?![\w.@-])")
+
 SCHEMA = (
     "CREATE TABLE IF NOT EXISTS audit_events ("
     "id INTEGER PRIMARY KEY AUTOINCREMENT, "
@@ -25,6 +27,8 @@ SCHEMA = (
     "arguments TEXT NOT NULL, result TEXT NOT NULL, error TEXT);"
     "CREATE INDEX IF NOT EXISTS audit_org_user_id ON audit_events (org, user, id);"
     "CREATE INDEX IF NOT EXISTS audit_org_id ON audit_events (org, id);"
+    "CREATE INDEX IF NOT EXISTS audit_org_user_tool_id ON audit_events (org, user, tool, id);"
+    "CREATE INDEX IF NOT EXISTS audit_org_tool_id ON audit_events (org, tool, id);"
     "CREATE TABLE IF NOT EXISTS channels ("
     "org TEXT NOT NULL, name TEXT NOT NULL, description TEXT NOT NULL, "
     "created_by TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT "
@@ -41,6 +45,16 @@ SCHEMA = (
     "last_read_id INTEGER NOT NULL DEFAULT 0, "
     "PRIMARY KEY (org, user, channel), "
     "FOREIGN KEY (org, channel) REFERENCES channels (org, name));"
+    "CREATE INDEX IF NOT EXISTS subscriptions_channel ON subscriptions (org, channel, user);"
+    "CREATE TABLE IF NOT EXISTS mentions ("
+    "org TEXT NOT NULL, user TEXT NOT NULL, channel TEXT NOT NULL, message_id INTEGER NOT NULL, "
+    "is_read INTEGER NOT NULL DEFAULT 0 CHECK (is_read IN (0, 1)), "
+    "PRIMARY KEY (org, user, message_id), "
+    "FOREIGN KEY (org, channel, message_id) REFERENCES messages (org, channel, id));"
+    "CREATE INDEX IF NOT EXISTS mentions_channel "
+    "ON mentions (org, user, channel, is_read, message_id);"
+    "CREATE INDEX IF NOT EXISTS mentions_unread ON mentions (org, user, is_read, message_id);"
+    "CREATE INDEX IF NOT EXISTS mentions_message ON mentions (org, channel, message_id, user);"
     "CREATE TABLE IF NOT EXISTS direct_conversations ("
     "org TEXT NOT NULL, channel TEXT NOT NULL, user_a TEXT NOT NULL, user_b TEXT NOT NULL, "
     "PRIMARY KEY (org, channel), UNIQUE (org, user_a, user_b), CHECK (user_a < user_b), "
@@ -160,15 +174,17 @@ class Store:
         self, org: str, user: str | None, *, tools: list[str] | tuple[str, ...] | None = None
     ) -> int:
         tool_filter = "" if tools is None else f" AND tool IN ({','.join('?' for name in tools)})"
+        user_filter = "" if user is None else " AND user = ?"
         async with self.lock:
             connection = self.connection
             if connection is None:
                 raise RuntimeError("The chat store is not open.")
             rows = await self.rows(
                 connection,
-                "SELECT coalesce(max(id), 0) AS id FROM audit_events WHERE org = ? "
-                "AND (? IS NULL OR user = ?)" + tool_filter,
-                (org, user, user, *(tools or ())),
+                "SELECT coalesce(max(id), 0) AS id FROM audit_events WHERE org = ?"
+                + user_filter
+                + tool_filter,
+                (org, *((user,) if user is not None else ()), *(tools or ())),
             )
         return rows[0]["id"]
 
@@ -184,6 +200,8 @@ class Store:
         if not 1 <= limit <= 100 or (before is not None and before < 1):
             raise ValueError("Use a positive before ID and a limit between 1 and 100.")
         tool_filter = "" if tools is None else f" AND a.tool IN ({','.join('?' for name in tools)})"
+        user_filter = "" if user is None else " AND a.user = ?"
+        before_filter = "" if before is None else " AND a.id < ?"
         async with self.lock:
             connection = self.connection
             if connection is None:
@@ -196,9 +214,18 @@ class Store:
                 "AND a.user IN (d.user_a, d.user_b) AND d.channel = coalesce("
                 "json_extract(a.arguments, '$.channel'), "
                 "json_extract(a.result, '$.structuredContent.channel')) "
-                "WHERE a.org = ? AND (? IS NULL OR a.user = ?) "
-                "AND (? IS NULL OR a.id < ?)" + tool_filter + " ORDER BY a.id DESC LIMIT ?",
-                (org, user, user, before, before, *(tools or ()), limit + 1),
+                "WHERE a.org = ?"
+                + user_filter
+                + before_filter
+                + tool_filter
+                + " ORDER BY a.id DESC LIMIT ?",
+                (
+                    org,
+                    *((user,) if user is not None else ()),
+                    *((before,) if before is not None else ()),
+                    *(tools or ()),
+                    limit + 1,
+                ),
             )
             users = await self.rows(
                 connection,
@@ -250,6 +277,11 @@ class Store:
     def check_page(after: int, limit: int) -> None:
         if after < 0 or not 1 <= limit <= 100:
             raise ValueError("Use after >= 0 and a limit between 1 and 100.")
+
+    @staticmethod
+    def mentioned_users(text: str) -> set[str]:
+        """Extract complete case-sensitive names without matching email fragments."""
+        return {match[1] for match in MENTION.finditer(text) if len(match[1]) <= 64}
 
     async def require_channel(
         self, connection: aiosqlite.Connection, org: str, channel: str, user: str | None = None
@@ -317,13 +349,16 @@ class Store:
                 connection,
                 "SELECT c.*, s.channel IS NOT NULL AS subscribed, "
                 "COALESCE(s.last_read_id, 0) AS last_read_id, "
-                "(SELECT count(*) FROM messages m WHERE m.org = c.org AND m.channel = c.name "
-                "AND m.id > s.last_read_id AND m.user != ?) AS unread "
+                "((SELECT count(*) FROM messages m WHERE m.org = c.org AND m.channel = c.name "
+                "AND m.id > s.last_read_id AND m.user != ?) + "
+                "(SELECT count(*) FROM mentions n WHERE n.org = c.org AND n.channel = c.name "
+                "AND n.user = ? AND n.is_read = 0 "
+                "AND (s.last_read_id IS NULL OR n.message_id <= s.last_read_id))) AS unread "
                 "FROM channels c LEFT JOIN subscriptions s "
                 "ON s.org = c.org AND s.channel = c.name AND s.user = ? "
                 "WHERE c.org = ? AND NOT EXISTS (SELECT 1 FROM direct_conversations d "
                 "WHERE d.org = c.org AND d.channel = c.name) ORDER BY c.name",
-                (user, user, org),
+                (user, user, user, org),
             )
             for row in rows:
                 row["subscribed"] = bool(row["subscribed"])
@@ -427,7 +462,9 @@ class Store:
             found = await self.require_channel(connection, org, channel, user)
             return found["kind"] == "dm"
 
-    async def notification_recipients(self, org: str, user: str, channel: str) -> dict[str, Any]:
+    async def notification_recipients(
+        self, org: str, user: str, channel: str, message_id: int | None = None
+    ) -> dict[str, Any]:
         """Return authorized recipients after checking the caller's channel access."""
         async with self.transaction() as connection:
             found = await self.require_channel(connection, org, channel, user)
@@ -441,8 +478,10 @@ class Store:
             else:
                 rows = await self.rows(
                     connection,
-                    "SELECT user FROM subscriptions WHERE org = ? AND channel = ? ORDER BY user",
-                    (org, channel),
+                    "SELECT user FROM subscriptions WHERE org = ? AND channel = ? "
+                    "UNION SELECT user FROM mentions WHERE org = ? AND channel = ? "
+                    "AND message_id = ? ORDER BY user",
+                    (org, channel, org, channel, message_id),
                 )
                 users = [row["user"] for row in rows]
             return {"kind": found["kind"], "users": users}
@@ -462,6 +501,15 @@ class Store:
             ) as cursor:
                 message_id = cursor.lastrowid
             assert message_id is not None
+            found = await self.require_channel(connection, org, channel, user)
+            if found["kind"] != "dm":
+                await connection.executemany(
+                    "INSERT INTO mentions (org, user, channel, message_id) VALUES (?, ?, ?, ?)",
+                    [
+                        (org, recipient, channel, message_id)
+                        for recipient in sorted(self.mentioned_users(text) - {user})
+                    ],
+                )
             return await self.require_message(connection, org, message_id, user)
 
     async def history(
@@ -487,9 +535,10 @@ class Store:
                 raise ValueError("Use the root message ID to read a thread.")
             return await self.rows(
                 connection,
-                "SELECT * FROM messages WHERE org = ? AND (id = ? OR parent_id = ?) "
+                "SELECT * FROM messages WHERE org = ? AND id = ? AND id > ? "
+                "UNION ALL SELECT * FROM messages WHERE org = ? AND parent_id = ? "
                 "AND id > ? ORDER BY id LIMIT ?",
-                (org, message_id, message_id, after, limit),
+                (org, message_id, after, org, message_id, after, limit),
             )
 
     async def inbox(
@@ -499,21 +548,80 @@ class Store:
         async with self.transaction() as connection:
             return await self.rows(
                 connection,
-                "SELECT m.* FROM messages m JOIN subscriptions s "
-                "ON s.org = m.org AND s.channel = m.channel "
-                "LEFT JOIN direct_conversations d ON d.org = m.org AND d.channel = m.channel "
-                "WHERE m.org = ? AND s.user = ? AND m.user != ? "
+                "WITH members AS ("
+                "SELECT m.id FROM subscriptions s LEFT JOIN direct_conversations d "
+                "ON d.org = s.org AND d.channel = s.channel CROSS JOIN messages m "
+                "ON m.id IN (SELECT id FROM messages WHERE org = s.org AND channel = s.channel "
+                "AND id > max(s.last_read_id, ?) AND user != ? ORDER BY id LIMIT ?) "
+                "WHERE s.org = ? AND s.user = ? "
                 "AND (d.channel IS NULL OR ? IN (d.user_a, d.user_b)) "
-                "AND m.id > s.last_read_id AND m.id > ? ORDER BY m.id LIMIT ?",
-                (org, user, user, user, after, limit),
+                "ORDER BY m.id LIMIT ?), addressed AS ("
+                "SELECT message_id AS id FROM mentions WHERE org = ? AND user = ? "
+                "AND is_read = 0 AND message_id > ? ORDER BY message_id LIMIT ?), unread AS ("
+                "SELECT id FROM members UNION SELECT id FROM addressed) "
+                "SELECT m.* FROM unread u CROSS JOIN messages m ON m.id = u.id "
+                "LEFT JOIN direct_conversations d ON d.org = m.org AND d.channel = m.channel "
+                "WHERE m.org = ? AND m.user != ? "
+                "AND (d.channel IS NULL OR ? IN (d.user_a, d.user_b)) "
+                "ORDER BY m.id LIMIT ?",
+                (
+                    after,
+                    user,
+                    limit,
+                    org,
+                    user,
+                    user,
+                    limit,
+                    org,
+                    user,
+                    after,
+                    limit,
+                    org,
+                    user,
+                    user,
+                    limit,
+                ),
             )
 
     async def mark_read(self, org: str, user: str, channel: str, message_id: int) -> dict[str, Any]:
         async with self.transaction() as connection:
-            await self.require_subscription(connection, org, user, channel)
+            await self.require_channel(connection, org, channel, user)
             message = await self.require_message(connection, org, message_id, user)
             if message["channel"] != channel:
                 raise ValueError("Message not found in this channel.")
+            subscriptions = await self.rows(
+                connection,
+                "SELECT * FROM subscriptions WHERE org = ? AND user = ? AND channel = ?",
+                (org, user, channel),
+            )
+            if not subscriptions:
+                mentions = await self.rows(
+                    connection,
+                    "SELECT message_id FROM mentions WHERE org = ? AND user = ? "
+                    "AND channel = ? AND message_id = ?",
+                    (org, user, channel, message_id),
+                )
+                if not mentions:
+                    raise ValueError("Subscribe to the channel or acknowledge a received mention.")
+            await connection.execute(
+                "UPDATE mentions SET is_read = 1 WHERE org = ? AND user = ? "
+                "AND channel = ? AND is_read = 0 AND message_id <= ?",
+                (org, user, channel, message_id),
+            )
+            if not subscriptions:
+                rows = await self.rows(
+                    connection,
+                    "SELECT MAX(message_id) AS last_read_id FROM mentions "
+                    "WHERE org = ? AND user = ? AND channel = ? AND is_read = 1",
+                    (org, user, channel),
+                )
+                return {
+                    "org": org,
+                    "user": user,
+                    "channel": channel,
+                    "last_read_id": rows[0]["last_read_id"],
+                    "subscribed": False,
+                }
             await connection.execute(
                 "UPDATE subscriptions SET last_read_id = MAX(last_read_id, ?) "
                 "WHERE org = ? AND user = ? AND channel = ?",
@@ -546,7 +654,8 @@ class Store:
                     "LEFT JOIN direct_conversations d ON d.org = m.org AND d.channel = m.channel "
                     "WHERE messages_fts MATCH ? AND m.org = ? "
                     "AND (d.channel IS NULL OR ? IN (d.user_a, d.user_b)) "
-                    "AND (? IS NULL OR m.channel = ?) AND m.id > ? ORDER BY m.id LIMIT ?",
+                    "AND (? IS NULL OR m.channel = ?) AND messages_fts.rowid > ? "
+                    "ORDER BY messages_fts.rowid LIMIT ?",
                     (query, org, user, channel, channel, after, limit),
                 )
             except aiosqlite.OperationalError as error:

@@ -113,7 +113,7 @@ function renderNavigation() {
       node.dataset.channel = channel.name;
       node.setAttribute("aria-current", active.view === "channel" && active.channel === channel.name ? "page" : "false");
       node.setAttribute("aria-label", `${conversationLabel(channel.name)}${channel.unread ? `, ${channel.unread} unread` : ""}`);
-      node.title = direct ? `Private conversation with ${channel.peer}` : channel.subscribed ? "Following this channel" : "Public channel · join to receive messages";
+      node.title = direct ? `Private conversation with ${channel.peer}` : channel.subscribed ? "Following this channel" : "Public channel · join to follow all messages; mentions arrive automatically";
       const label = element("span", "channel-label");
       label.append(element("span", "hash", direct ? "@" : "#"), document.createTextNode(direct ? channel.peer : channel.name));
       const meta = element("span", "channel-meta");
@@ -156,7 +156,7 @@ function renderHeading() {
   byId("send-message").disabled = !info?.subscribed || context.sending;
   byId("composer-note").textContent = info?.subscribed
     ? "⌘ / Ctrl + Enter to send · Draft saved on this device"
-    : "Join this channel to send messages and receive them in your inbox.";
+    : "Join to send and follow all messages. Mentions reach your inbox without joining.";
   byId("load-more").hidden = !context.more;
   byId("page-note").textContent = context.messages.length ? `${context.messages.length} messages shown` : "";
   if (context.thread) {
@@ -205,7 +205,7 @@ function renderMessages() {
     const empty = element("div", "empty-state");
     const titles = { inbox: "You're all caught up", channel: "Start the conversation", search: active.query ? "No messages found" : "Find a conversation" };
     const direct = channelInfo(active.channel)?.kind === "dm";
-    const tips = { inbox: "Follow a channel or start a direct message. Your own messages do not appear in your inbox.", channel: direct ? "Send the first message to start your private conversation." : "Send the first message, or join this channel to take part.", search: "Search message text. You can narrow results to one conversation." };
+    const tips = { inbox: "Follow a channel, receive a mention, or start a direct message. Your own messages do not appear in your inbox.", channel: direct ? "Send the first message to start your private conversation." : "Send the first message, or join this channel to take part.", search: "Search message text. You can narrow results to one conversation." };
     empty.append(element("span", "empty-icon", active.view === "inbox" ? "✓" : "#"));
     empty.append(element("h2", "", active.loaded ? titles[active.view] : "Loading messages…"), element("p", "", active.loaded ? tips[active.view] : "Connecting through MCP."));
     target.replaceChildren(empty);

@@ -118,10 +118,15 @@ export function agentConfig({ endpoint, user, token = "", auth = "bearer" } = {}
     ],
     prompt: (
       "Use the mcp_chat MCP server. Call identity with {} to confirm the organization and user.\n" +
+      "User names are case-sensitive: 1–64 ASCII characters, first a letter or digit, then letters, digits, _, ., @, or -.\n" +
+      "Mention a full name with @alice or @alice@example.com. Start it after whitespace or a delimiter, not a word character, ., @, +, or -.\n" +
+      "Use whitespace, comma, or ! after a mention; ., _, -, and internal @ belong to the name. Do not attach Unicode word characters.\n" +
+      "Public mentions reach inbox without channel membership, once per message, including thread replies; DM mentions never add recipients.\n" +
       "Read chat://rules with resources/read, then call list_channels with {}.\n" +
       'If I want to follow them, call subscribe with {"channel":"general"} and {"channel":"tasks"}.\n' +
       "Check inbox with {} when working on this chat. Fetch further pages using next_after as after.\n" +
       "Process messages before calling mark_read with the channel and last processed message_id.\n" +
+      "Without channel membership, mark_read must target a received mention; it acknowledges your mentions through that ID without joining.\n" +
       "Use thread for context and post_message with parent_id for replies. Do not mark unseen messages read.\n" +
       'For a private message, call send_dm with {"user":"teammate","text":"your message"}.\n' +
       "This connection does not start a background polling process."

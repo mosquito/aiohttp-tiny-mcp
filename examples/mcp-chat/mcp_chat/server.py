@@ -72,7 +72,7 @@ def build_registry(
 
     async def message_updated(principal: Principal, message: dict[str, Any]) -> None:
         audience = await store.notification_recipients(
-            organization(principal), username(principal), message["channel"]
+            organization(principal), username(principal), message["channel"], message["id"]
         )
         private = audience["kind"] == "dm"
         recipients = audience["users"] if private else None
@@ -116,7 +116,7 @@ def build_registry(
 
     @registry.tool(annotations=IDEMPOTENT, description=TOOL_HELP["unsubscribe"])
     async def unsubscribe(args: Channel, principal: Principal) -> dict:
-        """Leave a channel and remove its unread messages from your inbox."""
+        """Leave a channel; unread mentions remain in your inbox."""
         result = await store.unsubscribe(organization(principal), username(principal), args.channel)
         await membership_updated(principal)
         return result
@@ -190,7 +190,7 @@ def build_registry(
 
     @registry.tool(annotations=READ_ONLY, description=TOOL_HELP["inbox"])
     async def inbox(args: Page, principal: Principal) -> dict:
-        """Read unread messages from subscribed channels, excluding your own messages."""
+        """Read subscribed messages and public mentions, excluding your own messages."""
         return message_page(
             await store.inbox(organization(principal), username(principal), args.after, args.limit),
             args.after,

@@ -18,15 +18,17 @@ TOOL_HELP = {
         'to join or history({"channel":"general"}) to read without joining.'
     ),
     "subscribe": (
-        'Call subscribe({"channel":"general"}) before posting or receiving future messages '
-        "in inbox. The channel must exist. A new subscription starts at the latest message; "
+        'Call subscribe({"channel":"general"}) before posting or following all future messages '
+        "in inbox. Explicit @mentions arrive without membership. The channel must exist. "
+        "A new subscription starts at the latest message; "
         "repeating this call preserves the read position. Read older messages with history. "
         "This persists across sessions and is separate from MCP resource subscriptions. "
         "Watch chat://inbox and chat://subscriptions through MCP notifications for changes."
     ),
     "unsubscribe": (
-        'Call unsubscribe({"channel":"general"}) to leave a channel and remove its messages '
-        "from your inbox. Repeating the call is safe. Rejoining with subscribe starts at "
+        'Call unsubscribe({"channel":"general"}) to leave a channel and stop ordinary messages '
+        "from reaching your inbox. Unread @mentions remain. Repeating the call is safe. "
+        "Rejoining with subscribe starts at "
         "the latest message. The public history remains readable."
     ),
     "list_subscriptions": (
@@ -60,6 +62,8 @@ TOOL_HELP = {
         'Reply with post_message({"channel":"general","text":"Agreed","parent_id":123}), '
         "replacing 123 with the root message ID. The root must belong to this channel. "
         "Text must contain 1–16000 nonblank characters. Returns the stored message and its ID. "
+        "Use @bob to deliver a public message to Bob's inbox without subscribing him. "
+        "Read the user name and mention syntax in chat://rules. "
         "A DM channel returned by open_dm or list_dms is also accepted, only for its participants. "
         "Posting is not idempotent: do not blindly retry after a connection failure."
     ),
@@ -76,7 +80,8 @@ TOOL_HELP = {
         "for another page. Reading does not mark messages read."
     ),
     "inbox": (
-        'Call inbox({"after":0,"limit":50}) to read unread channel messages and your DMs, '
+        'Call inbox({"after":0,"limit":50}) to read unread joined-channel messages, your DMs, '
+        "and explicit public @mentions even without channel membership, "
         "excluding your own messages. Pass next_after as after to read the remaining pages. "
         "Start each refresh at after=0 to include unread messages from newly joined "
         "channels. Reading does not mark messages read. After processing messages, call "
@@ -86,9 +91,11 @@ TOOL_HELP = {
     ),
     "mark_read": (
         'Call mark_read({"channel":"general","message_id":123}) after processing messages '
-        "through ID 123 in that channel. Replace 123 with an actual message ID. You must be "
-        "subscribed, and the message must belong to this channel and organization. "
-        "This marks all earlier channel messages read and never moves the cursor backwards. "
+        "through ID 123 in that channel. Replace 123 with an actual message ID. The message "
+        "must belong to this channel and organization. If subscribed, this acknowledges all "
+        "earlier channel messages and mentions without moving the cursor backwards. "
+        "Without membership, ID 123 must be a message that explicitly mentions you; this "
+        "acknowledges your mentions through that ID without subscribing you. Repeating is safe. "
         "Do not acknowledge unread messages you have not processed."
     ),
     "search": (
@@ -116,6 +123,26 @@ RULES = (
     "Regular channels are public within one organization; direct messages are limited to two "
     "participants. Tool arguments cannot change your organization or identity. The user argument "
     "of open_dm and send_dm selects the recipient.\n\n"
+    "## User names and mentions\n\n"
+    "User names are case-sensitive and contain 1–64 ASCII characters. The first is a letter "
+    "or digit; the rest may also contain underscore, dot, hyphen, or @. For example: "
+    "alice, review-agent, team.bot, or alice@example.com. Mention the exact name by adding "
+    "one @: @alice or @alice@example.com. There must be no letter, digit, Unicode word "
+    "character, underscore, dot, @, plus, or hyphen immediately before the mention. "
+    "The parser consumes the complete name; an overlong token or one adjacent to a Unicode "
+    "word character is not shortened to a valid name. Use whitespace, a comma, or ! to end "
+    "a mention. Dots, underscores, hyphens, and internal @ belong to the name: @alice. "
+    "targets alice., not alice. Put a space before a sentence-ending dot. Plain email "
+    "addresses do not mention their domain. Text is scanned literally, including Markdown "
+    "code and quotes.\n\n"
+    "In public channels, new roots and replies with @mentions reach the addressed user's "
+    "inbox without subscribing them. Repeated names and existing memberships produce one "
+    "inbox entry. Only the current organization is addressed. Mentions in DMs never add "
+    "recipients or grant access. Your own messages remain excluded. Only messages sent "
+    "with mention support are indexed; old history is not scanned retroactively. "
+    "Joining or leaving does not acknowledge mentions. Without membership, use mark_read "
+    "with a received mention's ID to acknowledge your mentions through it in that channel. "
+    "Reading history or inbox alone never acknowledges them.\n\n"
     "## Choose a channel\n\n"
     "Every organization has general, random, and tasks. "
     "Use general for announcements and team discussion; random for informal conversation; "
@@ -158,7 +185,8 @@ RULES = (
     "The same participant checks apply to resources and tools.\n\n"
     "## Live notifications\n\n"
     "Use MCP notifications as the primary update mechanism. The subscribe tool stores channel "
-    "membership and controls the inbox across sessions; MCP resource subscriptions control "
+    "membership and ordinary inbox delivery across sessions; public @mentions also reach "
+    "inbox without membership. MCP resource subscriptions control "
     "live updates independently. Listen for notifications/resources/updated on chat://channels, "
     "chat://subscriptions, chat://inbox, and chat://dms. Also watch chat://channels/{channel} "
     "for the open conversation and chat://threads/{message_id} for an open thread. "

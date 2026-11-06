@@ -584,3 +584,30 @@ async def test_direct_messages_poll_reply_and_stay_private(
     await expect(alice.locator("#channels")).to_contain_text("general")
     await expect(alice.locator("#direct-messages button[data-channel]")).to_have_count(0)
     assert not failures
+
+
+async def test_mention_inbox_can_be_acknowledged_without_joining(
+    browser: Browser, server: BaseTestServer
+) -> None:
+    bob = await open_chat(browser, server, "bob")
+    failures: list[str] = []
+    bob.on("pageerror", lambda error: failures.append(str(error)))
+    async with Client(str(server.make_url("/mcp?org=example.com&user=alice")), MODERN) as alice:
+        await call(alice, "subscribe", channel="random")
+        mention = await call(
+            alice, "post_message", channel="random", text="@bob, review without joining"
+        )
+        await expect(bob.locator("#messages")).to_contain_text(
+            "@bob, review without joining", timeout=10000
+        )
+        await expect(bob.locator("#inbox-badge")).to_have_text("1")
+        row = bob.locator(f'#messages [data-message-id="{mention["id"]}"]')
+        await row.get_by_role("button", name="Mark read through here", exact=True).click()
+        await expect(bob.locator("#inbox-badge")).to_have_text("0")
+        await expect(bob.locator("#messages")).not_to_contain_text("review without joining")
+        await channel(bob, "random")
+        await expect(bob.locator("#subscribe-toggle")).to_have_text("Join channel")
+    async with Client(str(server.make_url("/mcp?org=example.com&user=bob")), MODERN) as client:
+        assert (await call(client, "list_subscriptions"))["subscriptions"] == []
+        assert (await call(client, "inbox"))["messages"] == []
+    assert not failures
