@@ -6,7 +6,7 @@ import asyncio
 import json
 import logging
 from collections.abc import AsyncIterator, Mapping, Sequence
-from contextlib import suppress
+from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 from typing import Any
 
@@ -67,31 +67,67 @@ class SqliteStorage:
             self.sweep_seconds = sweep_seconds
         self.connection: aiosqlite.Connection | None = None
         self.opening = asyncio.Lock()
+        self.executing = asyncio.Lock()
 
     async def open(self) -> aiosqlite.Connection:
         async with self.opening:
             if self.connection is None:
                 connection = await aiosqlite.connect(self.path, isolation_level=None)
-                await connection.execute("PRAGMA journal_mode=WAL")
-                await connection.execute(f"PRAGMA busy_timeout={self.busy_timeout_ms}")
-                await connection.executescript(SCHEMA)
+                try:
+                    async with connection.execute(f"PRAGMA busy_timeout={self.busy_timeout_ms}"):
+                        pass
+                    await self.enable_wal(connection)
+                    async with connection.executescript(SCHEMA):
+                        pass
+                except BaseException:
+                    await connection.close()
+                    raise
                 self.connection = connection
                 log.debug("MCP state in %s", self.path)
             return self.connection
 
+    async def enable_wal(self, connection: aiosqlite.Connection) -> None:
+        """Retry competing WAL transitions within the configured busy timeout."""
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + self.busy_timeout_ms / 1000
+        while True:
+            try:
+                async with connection.execute("PRAGMA journal_mode=WAL"):
+                    return
+            except aiosqlite.OperationalError as error:
+                busy = (
+                    getattr(error, "sqlite_errorcode", None) == 5
+                    or str(error) == "database is locked"
+                )
+                remaining = deadline - loop.time()
+                if not busy or remaining <= 0:
+                    raise
+                await asyncio.sleep(min(0.01, remaining))
+
     async def close(self) -> None:
-        async with self.opening:
+        async with self.executing, self.opening:
             if self.connection is not None:
                 await self.connection.close()
                 self.connection = None
 
+    @asynccontextmanager
+    async def execute(
+        self, sql: str, parameters: Sequence[Any] = ()
+    ) -> AsyncIterator[aiosqlite.Cursor]:
+        """Keep concurrent operations out until this statement's cursor is closed."""
+        async with self.executing:
+            connection = await self.open()
+            async with connection.execute(sql, parameters) as cursor:
+                yield cursor
+
     async def sweep(self) -> None:
         """Remove what has expired. Safe to call at any time, from any worker."""
-        connection = await self.open()
-        await connection.execute(f"DELETE FROM mcp_sessions WHERE expires_at <= {NOW}")
-        await connection.execute(
+        async with self.execute(f"DELETE FROM mcp_sessions WHERE expires_at <= {NOW}"):
+            pass
+        async with self.execute(
             f"DELETE FROM mcp_events WHERE created_at <= {NOW} - ?", (self.event_ttl_seconds,)
-        )
+        ):
+            pass
 
     async def sweeping(self, *, every: float | None = None) -> None:
         """Sweep until cancelled. A failed sweep is logged and tried again."""
@@ -123,8 +159,7 @@ class SqliteSessionStore(SessionStore):
         self.storage = storage
 
     async def create(self, session_id: str, data: Mapping[str, Any], *, ttl_seconds: int) -> bool:
-        connection = await self.storage.open()
-        cursor = await connection.execute(
+        async with self.storage.execute(
             f"""
             INSERT INTO mcp_sessions (id, data, version, expires_at)
                 VALUES (?, ?, 1, {NOW} + ?)
@@ -133,12 +168,11 @@ class SqliteSessionStore(SessionStore):
                 WHERE mcp_sessions.expires_at <= {NOW}
             """,
             (session_id, json.dumps(data), ttl_seconds),
-        )
-        return cursor.rowcount > 0
+        ) as cursor:
+            return cursor.rowcount > 0
 
     async def get(self, session_id: str) -> SessionRecord | None:
-        connection = await self.storage.open()
-        async with connection.execute(
+        async with self.storage.execute(
             f"SELECT data, version FROM mcp_sessions WHERE id = ? AND expires_at > {NOW}",
             (session_id,),
         ) as cursor:
@@ -155,27 +189,25 @@ class SqliteSessionStore(SessionStore):
         expected_version: int,
         ttl_seconds: int,
     ) -> bool:
-        connection = await self.storage.open()
-        cursor = await connection.execute(
+        async with self.storage.execute(
             f"""
             UPDATE mcp_sessions SET data = ?, version = version + 1, expires_at = {NOW} + ?
             WHERE id = ? AND version = ? AND expires_at > {NOW}
             """,
             (json.dumps(data), ttl_seconds, session_id, expected_version),
-        )
-        return cursor.rowcount > 0
+        ) as cursor:
+            return cursor.rowcount > 0
 
     async def touch(self, session_id: str, *, ttl_seconds: int) -> bool:
-        connection = await self.storage.open()
-        cursor = await connection.execute(
+        async with self.storage.execute(
             f"UPDATE mcp_sessions SET expires_at = {NOW} + ? WHERE id = ? AND expires_at > {NOW}",
             (ttl_seconds, session_id),
-        )
-        return cursor.rowcount > 0
+        ) as cursor:
+            return cursor.rowcount > 0
 
     async def delete(self, session_id: str) -> None:
-        connection = await self.storage.open()
-        await connection.execute("DELETE FROM mcp_sessions WHERE id = ?", (session_id,))
+        async with self.storage.execute("DELETE FROM mcp_sessions WHERE id = ?", (session_id,)):
+            pass
 
 
 class SqliteHub(Hub):
@@ -190,16 +222,14 @@ class SqliteHub(Hub):
             self.look_again = look_again
 
     async def publish(self, topic: str, message: Mapping[str, Any]) -> Cursor:
-        connection = await self.storage.open()
-        async with connection.execute(
+        async with self.storage.execute(
             f"INSERT INTO mcp_events (topic, message, created_at) VALUES (?, ?, {NOW})",
             (topic, json.dumps(message)),
         ) as inserted:
             return str(inserted.lastrowid)
 
     async def position(self, topic: str) -> Cursor:
-        connection = await self.storage.open()
-        async with connection.execute(
+        async with self.storage.execute(
             "SELECT MAX(id) FROM mcp_events WHERE topic = ?", (topic,)
         ) as cursor:
             row = await cursor.fetchone()
@@ -207,8 +237,7 @@ class SqliteHub(Hub):
 
     async def after(self, topic: str, cursor: Cursor) -> list[Event]:
         """Events after `cursor`. The row id is the event id."""
-        connection = await self.storage.open()
-        async with connection.execute(
+        async with self.storage.execute(
             "SELECT id, message FROM mcp_events WHERE topic = ? AND id > ? ORDER BY id",
             (topic, int(cursor) if cursor else 0),
         ) as rows:
@@ -228,8 +257,8 @@ class SqliteHub(Hub):
             await asyncio.sleep(min(self.look_again, left))
 
     async def delete(self, topic: str) -> None:
-        connection = await self.storage.open()
-        await connection.execute("DELETE FROM mcp_events WHERE topic = ?", (topic,))
+        async with self.storage.execute("DELETE FROM mcp_events WHERE topic = ?", (topic,)):
+            pass
 
 
 __all__ = [

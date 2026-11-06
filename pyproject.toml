@@ -116,4 +116,4 @@ root = ["src", "examples"]
 
 [tool.ty.src]
 # Checked separately with its own dependencies.
-exclude = ["examples/docker-mcp"]
+exclude = ["examples/docker-mcp", "examples/mcp-chat"]

@@ -239,12 +239,22 @@ class Client {
     this.onQuestion = options.onQuestion; // returns an ElicitResult
     this.authHeaders = { ...(options.authHeaders || {}) };
     this.onAuthError = options.onAuthError;
+    this.notifications = Boolean(options.notifications);
+    this.onNotificationError = options.onNotificationError;
     this.abort = new AbortController();
+    this.abort.signal.addEventListener("abort", () => this.stopNotifications(), { once: true });
     // Return the server-issued session id on subsequent requests.
     this.sessionId = null;
     this.counter = 0;
     this.tools = new Map();
     this.serverCapabilities = {};
+    this.resourceUris = new Set();
+    this.readUris = new Set();
+    this.notificationStarted = false;
+    this.notificationAbort = null;
+    this.notificationTask = Promise.resolve();
+    this.notificationFilter = null;
+    this.lastEventId = null;
   }
 
   get capabilities() {
@@ -284,7 +294,7 @@ class Client {
     return headers;
   }
 
-  async post(envelope, method, name) {
+  async post(envelope, method, name, signal = this.abort.signal) {
     this.onFrame("sent", envelope);
     const response = await fetch(this.url, {
       method: "POST",
@@ -292,8 +302,17 @@ class Client {
       body: JSON.stringify(envelope),
       credentials: "omit",
       redirect: "error",
-      signal: this.abort.signal,
+      signal,
     });
+    await this.checkResponse(response, signal);
+    return response;
+  }
+
+  async checkResponse(response, signal) {
+    if (signal.aborted) {
+      await response.body?.cancel();
+      throw new DOMException("The request was aborted.", "AbortError");
+    }
     if (!response.ok) {
       const error = new HttpError(response);
       const authenticationFailure = error.status === 401 ||
@@ -304,27 +323,29 @@ class Client {
         if (body?.jsonrpc === "2.0" && body.error) {
           this.onFrame("received", body);
           throw Object.assign(new Error(body.error.message), {
-            code: body.error.code, data: body.error.data,
+            code: body.error.code, data: body.error.data, status: response.status,
           });
         }
       }
       if (!response.bodyUsed) await response.body?.cancel();
-      if (authenticationFailure) this.onAuthError?.(error);
+      if (authenticationFailure && !signal.aborted) this.onAuthError?.(error);
       throw error;
     }
-    return response;
   }
 
-  /* Read frames before EOF so pushed questions can be answered while the stream stays open. */
-  async *frames(envelope, method, name) {
-    const response = await this.post(envelope, method, name);
+  // Read frames before EOF so pushed questions can be answered while the stream stays open.
+  async *frames(envelope, method, name, signal = this.abort.signal) {
+    const response = await this.post(envelope, method, name, signal);
     const issued = response.headers.get("Mcp-Session-Id");
     if (issued) this.sessionId = issued;
+    yield* this.responseFrames(response, signal);
+  }
 
+  async *responseFrames(response, signal, onEventId) {
     const kind = (response.headers.get("Content-Type") || "").split(";")[0].trim();
     if (kind !== "text/event-stream") {
       const text = await response.text();
-      if (!text) return;
+      if (!text || signal.aborted) return;
       const body = JSON.parse(text);
       this.onFrame("received", body);
       yield body;
@@ -334,22 +355,38 @@ class Client {
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let buffer = "";
-    while (true) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      let cut;
-      while ((cut = buffer.indexOf("\n")) >= 0) {
-        const line = buffer.slice(0, cut).trim();
-        buffer = buffer.slice(cut + 1);
-        if (!line.startsWith("data:")) continue;
-        const text = line.slice(5).trim();
-        // A data line with no payload primes or keeps the stream alive.
-        if (!text) continue;
-        const body = JSON.parse(text);
-        this.onFrame("received", body);
-        yield body;
+    let eventId = null;
+    let data = [];
+    const cancel = () => { reader.cancel().catch(() => {}); };
+    signal.addEventListener("abort", cancel, { once: true });
+    try {
+      while (!signal.aborted) {
+        const { value, done } = await reader.read();
+        if (done || signal.aborted) break;
+        buffer += decoder.decode(value, { stream: true });
+        let cut;
+        while ((cut = buffer.indexOf("\n")) >= 0) {
+          const line = buffer.slice(0, cut).trim();
+          buffer = buffer.slice(cut + 1);
+          if (line.startsWith("id:")) eventId = line.slice(3).trim();
+          if (line.startsWith("data:")) data.push(line.slice(5).trim());
+          if (line !== "") continue;
+          const text = data.join("\n");
+          const body = text ? JSON.parse(text) : null;
+          // Commit the resume cursor only after the complete event is received.
+          if (eventId !== null) onEventId?.(eventId);
+          eventId = null;
+          data = [];
+          if (body === null) continue;
+          this.onFrame("received", body);
+          yield body;
+          if (signal.aborted) return;
+        }
       }
+    } finally {
+      signal.removeEventListener("abort", cancel);
+      await reader.cancel().catch(() => {});
+      reader.releaseLock();
     }
   }
 
@@ -359,7 +396,7 @@ class Client {
     return frame.id === id || ("error" in frame && frame.id === null);
   }
 
-  async request(method, params, name) {
+  async request(method, params, name, signal = this.abort.signal) {
     const envelope = {
       jsonrpc: "2.0",
       id: this.nextId(),
@@ -367,7 +404,7 @@ class Client {
       params: this.decorate(params || {}, method),
     };
     let body = null;
-    for await (const frame of this.frames(envelope, method, name)) {
+    for await (const frame of this.frames(envelope, method, name, signal)) {
       if (this.answers(frame, envelope.id)) {
         body = frame;
         break;
@@ -423,6 +460,117 @@ class Client {
     return this.rules.extensions ? this.serverCapabilities.extensions || {} : {};
   }
 
+  notificationSelection() {
+    const caps = this.serverCapabilities;
+    const selected = {};
+    for (const kind of ["tools", "prompts", "resources"]) {
+      if (caps[kind]?.listChanged) selected[`${kind}ListChanged`] = true;
+    }
+    if (caps.resources?.subscribe) {
+      const uris = [...new Set([...this.resourceUris, ...this.readUris])].sort();
+      if (uris.length) selected.resourceSubscriptions = uris;
+    }
+    const methods = [...new Set(Object.values(this.extensions).flatMap((extension) => {
+      const declared = extension.notifications || {};
+      return Array.isArray(declared) ? declared : Object.keys(declared);
+    }))].sort();
+    if (methods.length) selected.methods = methods;
+    return selected;
+  }
+
+  startNotifications() {
+    if (!this.notifications || this.abort.signal.aborted) return;
+    this.notificationStarted = true;
+    const selected = this.notificationSelection();
+    const key = JSON.stringify(selected);
+    if (this.notificationFilter === key) return;
+    this.notificationAbort?.abort();
+    this.notificationFilter = key;
+    const controller = new AbortController();
+    this.notificationAbort = controller;
+    const previous = this.notificationTask;
+    this.notificationTask = previous.then(async () => {
+      if (controller.signal.aborted) return;
+      if (this.rules.meta && !Object.keys(selected).length) return;
+      await this.listenNotifications(selected, controller.signal);
+    });
+  }
+
+  stopNotifications() {
+    this.notificationStarted = false;
+    this.notificationFilter = null;
+    this.notificationAbort?.abort();
+    this.notificationAbort = null;
+  }
+
+  async listenNotifications(selected, signal) {
+    let delay = 500;
+    while (!signal.aborted) {
+      try {
+        let response;
+        let id;
+        if (this.rules.meta) {
+          const method = "subscriptions/listen";
+          id = this.nextId();
+          response = await this.post({
+            jsonrpc: "2.0", id, method,
+            params: this.decorate({ notifications: selected }, method),
+          }, method, undefined, signal);
+        } else {
+          for (const uri of selected.resourceSubscriptions || []) {
+            if (signal.aborted) return;
+            await this.request("resources/subscribe", { uri }, uri, signal);
+          }
+          if (signal.aborted) return;
+          const headers = this.headers();
+          headers.Accept = "text/event-stream";
+          if (this.lastEventId !== null) headers["Last-Event-ID"] = this.lastEventId;
+          response = await fetch(this.url, {
+            method: "GET", headers, credentials: "omit", redirect: "error", signal,
+          });
+          await this.checkResponse(response, signal);
+        }
+        if (signal.aborted) {
+          await response.body?.cancel();
+          return;
+        }
+        const kind = (response.headers.get("Content-Type") || "").split(";")[0].trim();
+        for await (const frame of this.responseFrames(response, signal, (eventId) => {
+          if (!this.rules.meta) this.lastEventId = eventId;
+        })) {
+          if (signal.aborted) return;
+          if (id !== undefined && this.answers(frame, id)) {
+            if (frame.error) throw Object.assign(new Error(frame.error.message), frame.error);
+            return;
+          }
+          delay = 500;
+          await this.incoming(frame);
+        }
+        if (signal.aborted) return;
+        if (kind !== "text/event-stream") {
+          throw Object.assign(new Error("Notifications require an SSE response."), { permanent: true });
+        }
+        throw new Error("The notification stream closed. Reconnecting.");
+      } catch (error) {
+        if (signal.aborted) return;
+        this.onNotificationError?.(error);
+        const rejected = [-32600, -32601, -32602].includes(error.code);
+        if (error.permanent || rejected || (error.status >= 400 && error.status < 500)) return;
+        await new Promise((resolve) => {
+          const finish = () => {
+            clearTimeout(timer);
+            signal.removeEventListener("abort", finish);
+            resolve();
+          };
+          const timer = setTimeout(finish, delay);
+          signal.addEventListener("abort", finish, { once: true });
+          if (signal.aborted) finish();
+        });
+        delay = Math.min(delay * 2, 15000);
+      }
+    }
+  }
+
   async pages(method, key) {
     const items = [];
     const seen = new Set();
@@ -456,6 +604,8 @@ class Client {
       /* A server with no templates may not expose the method. */
       if (error instanceof HttpError) throw error;
     }
+    this.resourceUris = new Set(resources.map((resource) => resource.uri));
+    if (this.notificationStarted) this.startNotifications();
     return { resources, templates };
   }
 
@@ -480,7 +630,10 @@ class Client {
   }
 
   async readResource(uri) {
-    return this.request("resources/read", { uri }, uri);
+    const result = await this.request("resources/read", { uri }, uri);
+    this.readUris.add(uri);
+    if (this.notificationStarted) this.startNotifications();
+    return result;
   }
 
   async getPrompt(name, argumentValues) {
@@ -561,6 +714,7 @@ const page = {
   endpoint: document.getElementById("endpoint"),
   revision: document.getElementById("revision"),
   answerable: document.getElementById("answerable"),
+  notifications: document.getElementById("notifications"),
   connect: document.getElementById("connect"),
   refresh: document.getElementById("refresh"),
   status: document.getElementById("status"),
@@ -1896,6 +2050,7 @@ function disconnect() {
   page.refresh.disabled = true;
   page.revision.disabled = false;
   page.answerable.disabled = false;
+  page.notifications.disabled = false;
   page.endpoint.disabled = false;
   page.connect.textContent = "Connect";
   say("not connected", "");
@@ -1906,6 +2061,7 @@ async function connect() {
   page.authenticate.disabled = true;
   page.revision.disabled = true;
   page.answerable.disabled = true;
+  page.notifications.disabled = true;
   page.endpoint.disabled = true;
   say("connecting", "");
   page.outcome.textContent = "";
@@ -1916,6 +2072,8 @@ async function connect() {
       authHeaders: credentials.forEndpoint(endpointUrl.href),
       onAuthError: openAuthentication,
       answerable: page.answerable.checked,
+      notifications: page.notifications.checked,
+      onNotificationError: (error) => report("Notifications interrupted", error.message, true),
       onFrame: record,
       onNotify: noticed,
       onQuestion: askPerson,
@@ -1928,12 +2086,15 @@ async function connect() {
     say(`${name || "connected"} · ${client.version}`, "on");
     page.connect.textContent = "Disconnect";
     if (!chosen) showServerInstructions(false);
+    client.startNotifications();
   } catch (error) {
+    client?.abort.abort();
     setServerInstructions("");
     client = null;
     page.refresh.disabled = true;
     page.revision.disabled = false;
     page.answerable.disabled = false;
+    page.notifications.disabled = false;
     page.endpoint.disabled = false;
     page.connect.textContent = "Connect";
     say(error.message, "off");

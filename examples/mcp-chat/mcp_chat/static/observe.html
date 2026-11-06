@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en" data-auth-required="{{AUTH_REQUIRED}}">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
+    <meta name="referrer" content="no-referrer" />
+    <title>Observe · MCP Chat</title>
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="/ui/static/app.css" />
+    <link rel="stylesheet" href="/ui/static/observe.css" />
+    <script type="module" src="/ui/static/observe.js"></script>
+  </head>
+  <body class="observe-page">
+    <header class="topbar">
+      <a class="brand" id="observe-chat" href="/ui/">Chat<span>.</span></a>
+      <span class="observe-section">Observe</span>
+      <form id="observe-form" class="context-form" aria-label="Observe an agent">
+        <label>Organization<input id="observe-org" list="observe-orgs" required maxlength="253" autocomplete="off" value="example.com" /></label>
+        <datalist id="observe-orgs"></datalist>
+        <label>Agent user<input id="observe-user" list="observe-users" required maxlength="64" autocomplete="off" value="human" /></label>
+        <datalist id="observe-users"></datalist>
+        <label>Show<select id="observe-mode"><option value="conversations">Conversations</option><option value="all">All calls</option><option value="custom" hidden>Custom tools</option></select></label>
+        <button id="observe-apply" type="submit">Observe</button>
+      </form>
+      <span id="observe-status" class="status" role="status">Connecting…</span>
+    </header>
+    <main class="observe-main">
+      <div class="observe-heading">
+        <div><p class="eyebrow">Agent activity</p><h1 id="observe-title">Activity</h1><p id="observe-description" class="muted">Tool calls, their arguments, and their results.</p></div>
+        <div class="observe-actions"><span id="observe-count" class="muted"></span><button id="observe-refresh" type="button">Refresh newest</button></div>
+      </div>
+      <div id="observe-error" class="observe-error" role="alert" hidden></div>
+      <p class="observe-hint muted">Newest first · live updates with polling fallback · expand a call to inspect its arguments and result.</p>
+      <section id="observe-events" class="observe-events" aria-label="Agent activity log" aria-live="polite" tabindex="0">
+        <div class="empty-state"><h2>Loading activity…</h2><p>Choose an organization and an agent user.</p></div>
+      </section>
+      <div class="observe-pagination"><button id="observe-more" type="button" hidden>Load older</button><span id="observe-page-note" class="muted"></span></div>
+    </main>
+    <dialog id="observe-login-dialog" aria-labelledby="observe-login-title">
+      <form id="observe-login-form">
+        <div class="dialog-heading"><h2 id="observe-login-title">Sign in to Observe</h2><button id="observe-login-close" class="quiet" type="button" aria-label="Close observer sign in">×</button></div>
+        <p class="muted">Use the server's JWT signing secret to inspect agent activity.</p>
+        <label>JWT secret<input id="observe-secret" type="password" required autocomplete="off" /></label>
+        <p id="observe-login-error" class="inline-error" role="alert"></p>
+        <button id="observe-login-submit" class="primary" type="submit">Sign in</button>
+      </form>
+    </dialog>
+  </body>
+</html>

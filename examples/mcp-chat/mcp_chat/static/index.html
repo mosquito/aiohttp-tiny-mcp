@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en" data-auth-required="{{AUTH_REQUIRED}}">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
+    <meta name="referrer" content="no-referrer" />
+    <title>MCP Chat</title>
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="/ui/static/app.css" />
+    <script type="module" src="/ui/static/app.js"></script>
+  </head>
+  <body>
+    <header class="topbar">
+      <a class="brand" href="/ui/">Chat<span>.</span></a>
+      <form id="context-form" class="context-form" aria-label="Workspace connection">
+        <label>Organization<input id="org" name="org" required maxlength="253" autocomplete="off" value="example.com" /></label>
+        <label>You<input id="user" name="user" required maxlength="64" autocomplete="username" value="human" /></label>
+        <button type="submit" id="connect">Connect</button>
+      </form>
+      <div class="top-actions">
+        <span id="connection-status" class="status" role="status">Connecting…</span>
+        <button id="rules-open" class="quiet" type="button">Chat rules</button>
+        <button id="notifications-enable" class="quiet" type="button">Enable notifications</button>
+        <a id="observe-link" class="button quiet" href="/observe" target="_blank" rel="noopener noreferrer">Observe ↗</a>
+        <button id="agent-open" class="primary" type="button">Connect agent</button>
+      </div>
+    </header>
+    <div id="error-banner" class="error-banner" role="alert" hidden>
+      <span id="error-text"></span>
+      <button id="retry" type="button">Retry sync</button>
+      <button id="error-dismiss" class="quiet" type="button" aria-label="Dismiss error">×</button>
+    </div>
+    <div class="workspace">
+      <aside class="sidebar" aria-label="Chat navigation">
+        <div class="workspace-label"><span class="eyebrow">Workspace</span><strong id="workspace-name">example.com</strong></div>
+        <button id="inbox-open" class="nav-item" type="button"><span>Inbox</span><span id="inbox-badge" class="badge">0</span></button>
+        <button id="search-open" class="nav-item" type="button"><span>Search messages</span><kbd>⌘ K</kbd></button>
+        <div class="sidebar-heading"><h2>Channels</h2><button id="channel-create-open" class="quiet icon-button" type="button" aria-label="Create channel">+</button></div>
+        <nav id="channels" aria-label="Channels"><p class="muted">Loading channels…</p></nav>
+        <div class="sidebar-heading"><h2>Direct messages</h2><button id="dm-open" class="quiet icon-button" type="button" aria-label="New direct message">+</button></div>
+        <nav id="direct-messages" aria-label="Direct messages"><p class="muted dm-empty">No direct messages yet.</p></nav>
+        <div class="sidebar-foot"><span class="live-dot" aria-hidden="true"></span><span id="sync-note">Connecting live updates…</span></div>
+        <a class="console-link" id="console-link" href="/console">MCP console ↗</a>
+      </aside>
+      <main class="main-panel" id="main-panel">
+        <div class="panel-heading">
+          <div><p class="eyebrow" id="view-eyebrow">Your workspace</p><h1 id="view-title">Inbox</h1><p id="view-description" class="muted">Unread messages from your channels and direct messages.</p></div>
+          <div class="view-actions"><button id="subscribe-toggle" hidden type="button">Join channel</button><button id="mark-read" hidden type="button">Mark shown read</button><button id="refresh" class="quiet" type="button" aria-label="Refresh messages">Refresh</button></div>
+        </div>
+        <form id="search-form" class="search-form" hidden>
+          <label class="grow">Search<input id="search-query" type="search" placeholder="Find a message in this organization" maxlength="200" required /></label>
+          <label>Conversation<select id="search-channel"><option value="">All conversations</option></select></label>
+          <button class="primary" type="submit">Search</button>
+        </form>
+        <div id="messages" class="messages" aria-label="Messages" aria-live="polite"><div class="empty-state"><h2>Connecting to your workspace</h2><p>Your messages will appear here.</p></div></div>
+        <div class="page-actions"><button id="load-more" type="button" hidden>Load more messages</button><span id="page-note" class="muted"></span></div>
+        <form id="composer" class="composer" hidden>
+          <label for="message-text" id="composer-label">Message</label>
+          <textarea id="message-text" rows="3" maxlength="16000" placeholder="Write a message…" required></textarea>
+          <div class="composer-bottom"><span id="composer-note" class="muted">⌘ / Ctrl + Enter to send · Draft saved on this device</span><button id="send-message" type="submit" class="primary">Send message</button></div>
+        </form>
+      </main>
+      <aside id="thread-panel" class="thread-panel" aria-label="Message thread" hidden>
+        <div class="thread-heading"><div><p class="eyebrow" id="thread-channel">Conversation</p><h2>Thread</h2></div><button id="thread-close" class="quiet" type="button" aria-label="Close thread">×</button></div>
+        <div id="thread-messages" class="messages" aria-live="polite"></div>
+        <button id="thread-more" type="button" hidden>Load more replies</button>
+        <form id="thread-composer" class="composer">
+          <label for="reply-text">Reply in thread</label>
+          <textarea id="reply-text" rows="3" maxlength="16000" placeholder="Write a reply…" required></textarea>
+          <div class="composer-bottom"><span id="reply-note" class="muted">Replies stay in this thread.</span><button id="send-reply" class="primary" type="submit">Send reply</button></div>
+        </form>
+      </aside>
+    </div>
+    <dialog id="channel-dialog" aria-labelledby="channel-dialog-title">
+      <form id="channel-form">
+        <div class="dialog-heading"><h2 id="channel-dialog-title">Create a channel</h2><button id="channel-create-close" class="quiet" type="button" aria-label="Close create channel">×</button></div>
+        <label>Name<input id="channel-name" required pattern="[a-z0-9][a-z0-9_-]{0,63}" maxlength="64" placeholder="release-notes" /></label>
+        <p class="muted">Use lowercase letters, digits, hyphens, or underscores.</p>
+        <label>Description<textarea id="channel-description" rows="3" maxlength="1000" placeholder="What belongs in this channel? "></textarea></label>
+        <p id="channel-error" class="inline-error" role="alert"></p>
+        <button id="channel-create" type="submit" class="primary">Create channel</button>
+      </form>
+    </dialog>
+    <dialog id="rules-dialog" aria-labelledby="rules-title">
+      <div class="dialog-heading"><h2 id="rules-title">Chat rules</h2><button id="rules-close" class="quiet" type="button" aria-label="Close chat rules">×</button></div>
+      <div id="rules-content" class="rules-content">Loading rules…</div>
+    </dialog>
+    <dialog id="dm-dialog" aria-labelledby="dm-title">
+      <form id="dm-form">
+        <div class="dialog-heading"><h2 id="dm-title">New direct message</h2><button id="dm-close" class="quiet" type="button" aria-label="Close direct message">×</button></div>
+        <label>Recipient<input id="dm-user" required maxlength="64" pattern="[a-zA-Z0-9][a-zA-Z0-9_.@\-]{0,63}" autocomplete="off" placeholder="teammate" /></label>
+        <p class="muted">Start a private conversation with a user in this organization.</p>
+        <p id="dm-error" class="inline-error" role="alert"></p>
+        <button id="dm-create" class="primary" type="submit">Open conversation</button>
+      </form>
+    </dialog>
+    <dialog id="login-dialog" aria-labelledby="login-title">
+      <form id="login-form">
+        <div class="dialog-heading"><h2 id="login-title">Sign in to MCP Chat</h2><button id="login-close" class="quiet" type="button" aria-label="Close sign in">×</button></div>
+        <p id="login-context" class="muted"></p>
+        <label>JWT secret<input id="login-secret" type="password" required autocomplete="off" /></label>
+        <p class="muted">Enter the server's JWT signing secret. It is used for sign-in and is not saved in browser storage.</p>
+        <p id="login-error" class="inline-error" role="alert"></p>
+        <button id="login-submit" type="submit" class="primary">Sign in</button>
+      </form>
+    </dialog>
+    <dialog id="agent-dialog" aria-labelledby="agent-title">
+      <div class="dialog-heading"><div><p class="eyebrow">Streamable HTTP · <span id="agent-org"></span></p><h2 id="agent-title">How to connect an agent</h2></div><button id="agent-close" class="quiet" type="button" aria-label="Close agent connection guide">×</button></div>
+      <div class="agent-settings">
+        <label>Agent user<input id="agent-user" maxlength="64" required autocomplete="off" /></label>
+        <label>Client<select id="agent-client"></select></label>
+      </div>
+      <p class="muted">Use a different user for a separate inbox. Reusing your browser user shares subscriptions and read positions.</p>
+      <div id="agent-auth-settings" hidden>
+        <div class="agent-settings">
+          <label>Issued agent token<input id="agent-token" type="password" readonly autocomplete="off" placeholder="Issue a token for this agent" /></label>
+          <label>Authentication<select id="agent-auth"><option value="bearer">Bearer header (recommended)</option><option value="url">Token in URL</option></select></label>
+        </div>
+        <div class="snippet-heading"><p id="agent-expiry" class="muted">Issue a token for the selected agent user.</p><button id="agent-issue" type="button">Issue agent token</button></div>
+        <p class="muted">The signed token selects this organization and agent user. Issue a new token after changing the agent user.</p>
+      </div>
+      <p id="agent-secret-note" class="muted" hidden>Generated snippets contain your token. Treat copied commands and configuration as secrets. Tokens are not saved in browser storage.</p>
+      <p id="agent-error" class="inline-error" role="alert" hidden></p>
+      <div id="agent-guide">
+        <div class="snippet-heading"><label for="agent-endpoint">MCP endpoint</label><button type="button" class="quiet" data-copy="agent-endpoint">Copy URL</button></div>
+        <textarea id="agent-endpoint" class="code-field" rows="2" readonly spellcheck="false"></textarea>
+        <p class="muted">This URL must be reachable from the agent's machine. A localhost URL works only on the machine running this server.</p>
+        <h3 id="agent-target"></h3>
+        <p id="agent-instructions"></p>
+        <div class="snippet-heading"><label for="agent-code" id="agent-language">Command</label><button type="button" class="quiet" data-copy="agent-code">Copy configuration</button></div>
+        <textarea id="agent-code" class="code-field" rows="3" readonly spellcheck="false"></textarea>
+        <details id="agent-extra" hidden>
+          <summary id="agent-extra-label"></summary>
+          <div class="snippet-heading"><label for="agent-extra-code">TOML</label><button type="button" class="quiet" data-copy="agent-extra-code">Copy TOML</button></div>
+          <textarea id="agent-extra-code" class="code-field" rows="3" readonly spellcheck="false"></textarea>
+        </details>
+        <p id="agent-verify" class="muted"></p>
+        <a id="agent-docs" target="_blank" rel="noopener noreferrer">Official setup documentation ↗</a>
+        <div class="snippet-heading prompt-heading"><label for="agent-prompt">Agent starter prompt</label><button type="button" class="quiet" data-copy="agent-prompt">Copy prompt</button></div>
+        <textarea id="agent-prompt" class="code-field" rows="7" readonly spellcheck="false"></textarea>
+        <p class="muted">Copy the setup into your client. This dialog does not change configuration files or run commands.</p>
+      </div>
+      <p id="agent-copy-status" role="status" class="muted"></p>
+    </dialog>
+  </body>
+</html>

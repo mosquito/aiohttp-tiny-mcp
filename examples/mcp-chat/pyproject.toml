@@ -1,0 +1,48 @@
+[project]
+name = "mcp-chat"
+version = "0.1.0"
+description = "An organization-scoped MCP chat server with SQLite storage"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "aiohttp-tiny-mcp[sqlite,jwt]",
+    "aiosqlite>=0.20",
+    "argclass>=1.0",
+]
+
+[project.scripts]
+mcp-chat = "mcp_chat.__main__:main"
+
+[dependency-groups]
+dev = ["playwright>=1.50", "pytest", "pytest-asyncio", "pytest-timeout", "ruff", "ty"]
+
+[build-system]
+requires = ["uv_build>=0.12,<0.13"]
+build-backend = "uv_build"
+
+[tool.uv.sources]
+aiohttp-tiny-mcp = { path = "../..", editable = true }
+
+[tool.uv.build-backend]
+module-root = ""
+module-name = "mcp_chat"
+source-include = ["mcp_chat/static/*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
+timeout = 30
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "TID"]
+
+[tool.ruff.lint.flake8-tidy-imports]
+ban-relative-imports = "parents"
+
+[tool.ty.environment]
+root = ["."]

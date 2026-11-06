@@ -69,7 +69,7 @@ def test_server_instructions_do_not_disable_restored_tool(restore):
         + invoke
         + f"""
 const page = Object.fromEntries([
-  "connect", "authenticate", "revision", "answerable", "endpoint", "outcome",
+  "connect", "authenticate", "revision", "answerable", "notifications", "endpoint", "outcome",
   "refresh", "subject", "about", "invoke", "args", "serverTitle"
 ].map(name => [name, {{disabled: true}}]));
 let client, endpointUrl, chosen = null, called = null, serverInstructions = "", catalogue = null;
@@ -91,6 +91,7 @@ function resultViews() {{ return {{text: "ok"}}; }}
 function missing() {{ return []; }}
 function readFields() {{ return {{query: "test"}}; }}
 class Client {{
+  startNotifications() {{}}
   async initialize() {{ return {{instructions: "Server instructions"}}; }}
   async callTool(name, values) {{ called = {{name, values}}; return {{content: []}}; }}
 }}

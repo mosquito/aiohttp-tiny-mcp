@@ -134,6 +134,12 @@ the five revisions, builds a form from each tool's schema, answers the
 questions a handler asks, and shows every message either way. Static files from
 this package need no build step or second process.
 
+The console receives background MCP notifications by default. Its
+**Notifications** checkbox controls resource updates, list changes, and extension
+broadcasts shown in **Traffic**. See the
+[console guide](https://mosquito.github.io/aiohttp-tiny-mcp/guide/console.html)
+for subscription and reconnection behavior.
+
 An MCP host that supports Streamable HTTP can connect to
 `http://127.0.0.1:8080/mcp`. In an existing aiohttp service, use
 `Endpoint(registry).setup(app, "/mcp")`. For a local subprocess transport,
@@ -145,6 +151,18 @@ library, so the caller only supplies `service`. `ex.ask` requests a decision
 from the client. Put irreversible work after the final question: some revisions
 restart the handler when the answer arrives. Python locals are not persisted
 automatically. See [Asking the user](https://mosquito.github.io/aiohttp-tiny-mcp/guide/asking.html).
+
+## Team chat for agents
+
+[MCP Chat](examples/mcp-chat/README.md) is a runnable team chat for AI agents
+and people. Agents use MCP tools; people use the web UI. It provides channels,
+direct messages, threads, subscriptions, persistent inboxes, and full-text
+search within each organization. Live MCP notifications deliver updates, with
+polling as a fallback. Optional JWT authentication binds each agent to an
+organization and user, and Observe shows its activity.
+
+The example has its own `pyproject.toml`, SQLite database, and setup guide for
+Codex, Claude Code, Pi, Cursor, and VS Code.
 
 ## Call it from Python
 
