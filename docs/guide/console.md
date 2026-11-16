@@ -35,7 +35,7 @@ Console(
 
 That is the whole of it. `Console("/mcp")` says where the endpoint is;
 `setup(app, "/console")` says where the page goes. `routes("/console")` returns
-the same three route definitions for `add_routes`, where an application
+the same asset route definitions for `add_routes`, where an application
 registers its own routes in one place. The title and the description are what a
 person sees on opening it, and they are the deployment's own words -- a console
 with no title says nothing about which server it reached.
@@ -47,8 +47,12 @@ about, from `add_subapp`, is therefore still correct.
 ## Nothing to configure
 
 The server supplies the initial endpoint URL. The console restores the last
-endpoint from `localStorage` and waits for **Connect**. Opening or reloading the
-page does not start a connection. Requests stay on the same origin:
+endpoint from `localStorage` and waits for **Connect** on first open. Reloading
+a connected console reconnects to its endpoint with the same revision and
+checkbox settings. This connection state is stored in `sessionStorage` for the
+current tab and console path. **Disconnect**, clearing credentials, or a failed
+connection removes it. Each reconnect starts a new MCP session; it does not
+replay tool calls. Requests stay on the same origin:
 
 <!-- name: async test_console -->
 ```python
@@ -214,15 +218,70 @@ such as `labels=red&labels=blue`; booleans use `true` or `false`. Empty fields
 and null values are omitted. Declared fields replace fixed query values with
 the same name. Fill required fields before submitting the dialog.
 
+## Add an agent
+
+Click **Add agent** to generate configuration for the current endpoint URL.
+The dialog works while disconnected and does not make an MCP request. Choose
+a server name, an **Agent**, and a **Configuration level**, then copy
+the result into the file shown in the dialog. **Project** applies to the current
+project; **User** applies across your projects. Merge the server entry with
+existing settings.
+
+The default level is **User**. The console remembers your level choice in
+`localStorage` for each console path, including after reopening or reloading.
+Missing, invalid, or unavailable storage uses **User**. The file path depends
+on the selected agent. These formats were checked against their official
+references on 2026-11-16:
+
+| Agent | Project file | User file | HTTP configuration |
+| --- | --- | --- | --- |
+| [Claude Code](https://code.claude.com/docs/en/mcp#user-scope) | `.mcp.json` | `~/.claude.json` | `mcpServers`, `type: "http"`, `url` |
+| [Codex](https://learn.chatgpt.com/docs/config-file/config-basic) | `.codex/config.toml` | `~/.codex/config.toml` | `mcp_servers`, `url`, `http_headers` |
+| [Cursor](https://cursor.com/docs/mcp) | `.cursor/mcp.json` | `~/.cursor/mcp.json` | `mcpServers`, `url` |
+| [VS Code / Copilot](https://code.visualstudio.com/docs/agents/reference/mcp-configuration) | `.mcp.json` | `~/.copilot/mcp-config.json` | `mcpServers`, `type: "http"`, `url`, `tools` |
+| [Gemini CLI](https://geminicli.com/docs/tools/mcp-server/) | `.gemini/settings.json` | `~/.gemini/settings.json` | `mcpServers`, `httpUrl` |
+| [Pi](https://docs.pi.dev/latest/mcp) | `.pi/mcp.json` | `~/.pi/agent/mcp.json` | `mcpServers`, `url` |
+| [OpenCode V2](https://opencode.ai/docs/config/#locations) | `opencode.json` | `~/.config/opencode/opencode.json` | `mcp.servers`, `type: "remote"`, `url` |
+
+Paths use each agent's default configuration directory. If you override that
+directory, use the corresponding file there; for example, Copilot uses
+`$COPILOT_HOME/mcp-config.json` when `COPILOT_HOME` is set. Codex and Pi require
+project trust before reading project configuration. Claude's `~/.claude.json`
+contains other settings: merge the generated top-level `mcpServers` entry and
+preserve those settings, including any `projects` entries.
+
+The project-level `.mcp.json` file supports both Claude Code and Copilot;
+it is not exclusive to Claude Code. Their user-level files differ, as shown above.
+Other formats are not interchangeable. For example, Gemini's `url` field selects
+legacy SSE, while `httpUrl` selects Streamable HTTP. Current VS Code Copilot
+uses the portable `.mcp.json` format; its older `.vscode/mcp.json` format uses
+`servers` and is intended for Local harness compatibility.
+
+The generated URL includes the current query parameters. Saved authentication
+headers are included only when they belong to that exact endpoint URL. Clear
+**Include saved authentication headers** to generate a URL-only configuration
+and use the agent's own sign-in flow where supported. Query tokens remain part
+of the URL. The console does not copy its OAuth client registration to agents.
+
+**Copy configuration** copies the selected format. If clipboard access is
+unavailable, the dialog selects the text for keyboard copying. Each format
+includes a configuration path, verification instructions, and its documentation
+link. Closing the dialog leaves the console URL and connection unchanged.
+
 ## Descriptions are markdown
 
 A description is prose, and prose is markdown whether or not anybody said so,
 so the page renders it: paragraphs reflowed to the panel, `code` as code,
 lists as lists, fenced blocks kept as written.
 
-It renders them itself, in about a hundred lines. A library would have meant a
-fourth file, a version to keep, and either a network the console cannot assume
-or a script from somewhere else on a page that holds the whole exchange.
+Headings keep their levels and use distinct sizes and spacing. Use `#` through
+`######` for levels 1–6. The console also accepts `#######` for level 7 and
+standalone, attribute-free `<h1>Title</h1>` through `<h7>Title</h7>` lines.
+Level 7 renders with `role="heading"` and `aria-level="7"`. Heading contents
+support inline Markdown; embedded HTML and tags with attributes stay escaped.
+
+The Markdown renderer is included with the console. It needs no external
+library or network request.
 
 Everything from the server is escaped before a single tag is added, and links
 are limited to `http`, `https` and `mailto`. A description cannot bring its own

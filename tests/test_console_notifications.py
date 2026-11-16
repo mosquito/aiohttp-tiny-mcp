@@ -356,6 +356,7 @@ def test_connection_controls_apply_notifications_and_reset_after_disconnect() ->
       restore() {}, forEndpoint: () => ({Authorization: 'Bearer private-token'})
     };
     function chosenEndpoint() { return new URL('http://localhost/mcp?org=example'); }
+    function rememberConnection() {}
     function setEndpointDisabled(disabled) { page.endpoint.disabled = disabled; }
     function clearCredentials() {}
     function openAuthentication() {}

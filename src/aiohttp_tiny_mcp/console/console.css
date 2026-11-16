@@ -300,12 +300,21 @@ button.quiet { color: var(--ink-soft); }
 .about > :first-child { margin-top: 0; }
 .about > :last-child { margin-bottom: 0; }
 .about p { margin: 0 0 8px; }
-.about h3, .about h4, .about h5, .about h6 {
+:is(.about, #question-text) :is(h1, h2, h3, h4, h5, h6, [role="heading"]) {
   color: var(--ink);
-  font-size: 13px;
   font-weight: 600;
-  margin: 14px 0 6px;
+  line-height: 1.3;
+  margin: 1.2em 0 0.45em;
+  overflow-wrap: anywhere;
 }
+:is(.about, #question-text) h1 { font-size: 1.8em; }
+:is(.about, #question-text) h2 { font-size: 1.55em; }
+:is(.about, #question-text) h3 { font-size: 1.35em; }
+:is(.about, #question-text) h4 { font-size: 1.2em; }
+:is(.about, #question-text) h5 { font-size: 1.1em; }
+:is(.about, #question-text) h6 { font-size: 1em; }
+:is(.about, #question-text) [role="heading"][aria-level="7"] { font-size: 0.95em; }
+:is(.about, #question-text) > :first-child { margin-top: 0; }
 .about ul, .about ol { margin: 0 0 10px; padding-left: 18px; }
 .about li { margin: 3px 0; padding-left: 2px; }
 .about li::marker { color: var(--ink-faint); }
@@ -552,7 +561,24 @@ dialog.question .argument { margin-bottom: 10px; }
 
 .auth-field { display: flex; flex-direction: column; gap: 4px; margin: 12px 0; }
 .auth-field[hidden] { display: none; }
-.auth-field > input, .auth-field > select { width: 100%; min-width: 0; }
+.auth-field > input, .auth-field > select {
+  width: 100%;
+  min-width: 0;
+  height: calc(1.5em + 12px);
+  line-height: 1.5;
+}
 .auth-endpoint { overflow-wrap: anywhere; font-family: var(--mono); }
 .auth-help { color: var(--ink-soft); font-size: 12px; }
 .auth-error { color: var(--bad); }
+
+
+dialog.agent-setup { max-width: 680px; width: calc(100vw - 32px); max-height: calc(100vh - 32px); overflow: auto; }
+dialog.agent-setup menu { align-items: center; flex-wrap: wrap; }
+#agent-docs { margin-right: auto; }
+.agent-options { display: grid; grid-template-columns: minmax(0, 1.5fr) repeat(2, minmax(0, 1fr)); gap: 12px; }
+#agent-headers-field[hidden] { display: none; }
+.agent-target { font-family: var(--mono); font-weight: 600; overflow-wrap: anywhere; }
+#agent-code { width: 100%; font-family: var(--mono); font-size: 12px; resize: vertical; }
+@media (max-width: 540px) {
+  .agent-options { grid-template-columns: 1fr; gap: 0; }
+}

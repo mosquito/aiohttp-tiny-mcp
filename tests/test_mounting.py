@@ -236,7 +236,11 @@ async def test_a_console_addresses_its_own_files_wherever_it_is_mounted():
     async with TestClient(TestServer(host)) as http:
         page = await (await http.get("/reports/console")).text()
         assets = sorted(set(re.findall(r'(?:src|href)="(/[^"]*)"', page)))
-        assert assets == ["/reports/console/console.css", "/reports/console/console.js"]
+        assert assets == [
+            "/reports/console/agent-config.js",
+            "/reports/console/console.css",
+            "/reports/console/console.js",
+        ]
         for address in assets:
             assert (await http.get(address)).status == 200, address
 

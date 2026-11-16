@@ -174,8 +174,6 @@ async def test_jwt_console_uses_declared_methods_and_cancel_preserves_credential
             expected = f"Bearer {token}" if method == "bearer" else None
             assert all(request.headers.get("authorization") == expected for request in sent)
             await page.reload()
-            await expect(page.locator("#connect")).to_have_text("Connect")
-            await page.locator("#connect").click()
             await expect(page.locator("#connect")).to_have_text("Disconnect")
             await expect(page.locator("#authentication")).not_to_be_visible()
             await expect(page.locator("#endpoint")).to_have_value(endpoint)
