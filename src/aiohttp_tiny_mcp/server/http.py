@@ -45,6 +45,7 @@ from aiohttp_tiny_mcp.storage.sessions import (
 from aiohttp_tiny_mcp.transport.metadata import metadata_route
 from aiohttp_tiny_mcp.transport.sse import SSEResponse
 
+from .batch import run_batch
 from .dispatcher import Dispatcher
 from .exchange import Exchange, is_reply, relay_reply
 from .registry import Registry
@@ -102,7 +103,10 @@ class Endpoint:
         allowed_origins: set[str] | None = None,
         trust_proxy_origin_validation: bool = False,
         compress: bool = True,
+        batch_concurrency: int = 4,
     ) -> None:
+        if type(batch_concurrency) is not int or batch_concurrency < 1:
+            raise ValueError("batch_concurrency must be a positive integer")
         self.registry = registry
         self.adapters = adapters or AdapterSet.default()
         self.dispatcher = Dispatcher(registry)
@@ -110,6 +114,7 @@ class Endpoint:
         self.origin_patterns = [origin_pattern(o) for o in allowed_origins or () if "*" in o]
         self.trust_proxy_origin_validation = trust_proxy_origin_validation
         self.compress = compress
+        self.batch_concurrency = batch_concurrency
 
     @cached_property
     def view(self) -> type[web.View]:
@@ -376,18 +381,17 @@ class Endpoint:
         if will_reply and not self.accepts(request, "application/json"):
             return web.Response(status=406, text="client does not accept application/json")
 
-        replies: list[tuple[int, Mapping[str, Any]]] = []
         minted: str | None = None
-        for item in items:
+
+        async def execute(item: Call | DecodeFailure) -> tuple[int, Mapping[str, Any]] | None:
+            nonlocal minted
             if isinstance(item, DecodeFailure):
                 if item.must_respond:
-                    replies.append(
-                        (
-                            adapter.http_status(item.failure),
-                            adapter.encode_failure(item.id, item.failure),
-                        )
+                    return (
+                        adapter.http_status(item.failure),
+                        adapter.encode_failure(item.id, item.failure),
                     )
-                continue
+                return None
             ex = Exchange(self.registry, request, adapter, item, held)
             ex.principal = principal
             outcome = await self.dispatcher.run(ex)
@@ -395,8 +399,11 @@ class Endpoint:
                 owner = principal.identity if principal is not None else None
                 minted = await self.open_session(adapter, item, outcome, owner)
             if item.is_notification:
-                continue
-            replies.append(self.encode(adapter, item, outcome))
+                return None
+            return self.encode(adapter, item, outcome)
+
+        results = await run_batch(items, execute, self.batch_concurrency if pre.is_batch else 1)
+        replies = [result for result in results if result is not None]
 
         if not replies:
             return web.Response(status=202)

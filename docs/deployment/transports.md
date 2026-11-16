@@ -42,6 +42,30 @@ through `subscriptions/listen` and is told so with a `405`.
 A reply is a single JSON body, or a stream of `data:` events where the call has
 something to send before its result -- progress, log messages, or a question.
 
+### Concurrent batches
+
+`Endpoint` and `SseEndpoint` accept `batch_concurrency`, a positive integer.
+The default, `4`, lets up to four batch items run concurrently while their
+handlers await I/O:
+
+<!-- name: test_transports -->
+```python
+endpoint = Endpoint(registry, batch_concurrency=4)
+```
+
+The limit applies separately to each batch, not to all requests on the endpoint.
+It does not create threads or make blocking handler code run in parallel.
+Only the `2025-03-26` revision accepts JSON-RPC batch arrays; other revisions
+still reject them. Single-message requests and stdio behavior do not change.
+
+Streamable HTTP returns the response array in request order after all items
+finish. Notifications have no response entries. Invalid items and handler
+errors do not prevent other items from running. With HTTP+SSE, replies travel
+on the existing stream and can arrive in completion order; match them by `id`.
+
+Concurrent batch items must not depend on each other's side effects or session
+updates. Set `batch_concurrency=1` or use separate awaited requests when order matters.
+
 ### Access logs
 
 `Endpoint.setup()` and `SseEndpoint.setup()` enable token masking on
