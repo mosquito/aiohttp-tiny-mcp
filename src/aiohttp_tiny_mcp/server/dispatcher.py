@@ -24,6 +24,7 @@ from aiohttp_tiny_mcp.protocol.core import (
 )
 from aiohttp_tiny_mcp.protocol.models import (
     CallToolResult,
+    CompleteParams,
     CompleteResult,
     Completion,
     EmptyResult,
@@ -48,6 +49,7 @@ from aiohttp_tiny_mcp.protocol.models import (
 from .exchange import Exchange
 from .registry import Registry
 from .request_state import RequestStates, protect_request_state, restore_request_state
+from .resource_auth import resource_refusal, visible_resource
 from .specs import ToolSpec
 from .subscriptions import listen, subscribe, unsubscribe
 
@@ -244,12 +246,11 @@ class Dispatcher:
                 "resources/subscribe needs the session the handshake issued",
             )
         if wanted:
-            found = self.registry.match_resource(uri)
-            definition = ex.adapter.describe_resource(found[0]) if found is not None else None
-            if definition is None or (
-                isinstance(definition, ResourceDef) and definition.uri != uri
-            ):
+            spec = visible_resource(self.registry, ex.adapter, uri)
+            if spec is None:
                 return Failure(FailureKind.RESOURCE_NOT_FOUND, f"no resource matches {uri}")
+            if (refused := resource_refusal(spec, ex.principal)) is not None:
+                return Failure(FailureKind.ACCESS_DENIED, refused)
         await (subscribe if wanted else unsubscribe)(ex.session, uri)
         return Value(result=EmptyResult())
 
@@ -344,13 +345,10 @@ class Dispatcher:
         if found is None:
             return Failure(FailureKind.RESOURCE_NOT_FOUND, f"resource not found: {uri}")
         spec, variables = found
-        definition = ex.adapter.describe_resource(spec)
-        if definition is None or (isinstance(definition, ResourceDef) and definition.uri != uri):
+        if visible_resource(self.registry, ex.adapter, uri) is None:
             return Failure(FailureKind.RESOURCE_NOT_FOUND, f"resource not found: {uri}")
-        if spec.template is not None and spec.legacy_uri is not None:
-            pattern = spec.pattern if ex.adapter.supports_extensions else spec.legacy_pattern
-            if pattern is None or pattern.fullmatch(uri) is None:
-                return Failure(FailureKind.RESOURCE_NOT_FOUND, f"resource not found: {uri}")
+        if (refused := resource_refusal(spec, ex.principal)) is not None:
+            return Failure(FailureKind.ACCESS_DENIED, refused)
         try:
             value = await spec.bound.call(variables, ex)
         except ValidationError as e:
@@ -381,6 +379,18 @@ class Dispatcher:
         return Value(result=prompt_result(value))
 
     async def complete(self, ex: Exchange) -> Outcome:
+        if isinstance(ex.call.params, CompleteParams) and ex.call.params.ref.type == "ref/resource":
+            uri = ex.call.params.ref.uri or ""
+            spec = visible_resource(self.registry, ex.adapter, uri, template=True)
+            if spec is not None:
+                if (refused := resource_refusal(spec, ex.principal)) is not None:
+                    return Failure(FailureKind.ACCESS_DENIED, refused)
+            elif self.registry.match_resource(uri) is not None or any(
+                candidate.template is not None
+                and uri in (candidate.template.uri_template, candidate.legacy_uri)
+                for candidate in self.registry.resources_templated
+            ):
+                return Failure(FailureKind.RESOURCE_NOT_FOUND, f"resource not found: {uri}")
         completer = self.registry.completer
         if completer is None:
             return Value(result=CompleteResult(completion=Completion(values=[])))

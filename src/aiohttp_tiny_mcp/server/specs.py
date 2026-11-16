@@ -156,6 +156,7 @@ class ResourceSpec(Model):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     bound: Bound
+    scopes: frozenset[str] = Field(default_factory=frozenset)
     definition: ResourceDef | None = None  # fixed URI
     template: ResourceTemplateDef | None = None  # URI template
     pattern: Any = None  # compiled matcher for the template
@@ -180,13 +181,18 @@ class ResourceSpec(Model):
         mime_type: str | None = None,
         cache_ttl_ms: int | None = None,
         cache_scope: Literal["public", "private"] | None = None,
+        scopes: Iterable[str] | None = None,
     ) -> ResourceSpec:
+        required = frozenset(scopes or ())
+        if required and cache_scope == "public":
+            raise ValueError("Resources with scopes cannot use public caching.")
         bound = Bound.of(fn)
         name = name or getattr(fn, "__name__", repr(fn))
         description = described(description, fn) or None
         if not cls.VAR.search(uri):
             return cls(
                 bound=bound,
+                scopes=required,
                 mime_type=mime_type,
                 cache_ttl_ms=cache_ttl_ms,
                 cache_scope=cache_scope,
@@ -202,6 +208,7 @@ class ResourceSpec(Model):
         parts.append(re.escape(uri[last:]))
         return cls(
             bound=bound,
+            scopes=required,
             mime_type=mime_type,
             cache_ttl_ms=cache_ttl_ms,
             cache_scope=cache_scope,

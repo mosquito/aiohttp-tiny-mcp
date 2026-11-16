@@ -43,6 +43,7 @@ from .dispatcher import Dispatcher
 from .exchange import Exchange
 from .http import Endpoint
 from .registry import Registry
+from .resource_auth import allowed_resource
 from .subscriptions import relays, wanted
 from .tasks import stop
 
@@ -127,7 +128,7 @@ class SseEndpoint:
             await self.relay_until_disconnect(
                 request,
                 self.relay(response, events),
-                self.relay_shared(response, shared, session_id),
+                self.relay_shared(response, shared, session_id, principal=principal),
             )
         finally:
             await hub.delete(where)
@@ -164,7 +165,12 @@ class SseEndpoint:
             await self.write(response, "message", json.dumps(event.message, ensure_ascii=False))
 
     async def relay_shared(
-        self, response: SSEResponse, events: Subscription, session_id: str
+        self,
+        response: SSEResponse,
+        events: Subscription,
+        session_id: str,
+        *,
+        principal: Principal | None = None,
     ) -> None:
         """Write the list changes, resource updates and broadcasts this session wants.
 
@@ -184,6 +190,12 @@ class SseEndpoint:
             accepted = wanted(
                 adapter.capabilities(self.registry), session, self.registry.broadcasts
             )
+            if "resourceSubscriptions" in accepted:
+                accepted["resourceSubscriptions"] = [
+                    uri
+                    for uri in accepted["resourceSubscriptions"]
+                    if allowed_resource(self.registry, adapter, uri, principal)
+                ]
             for event in found:
                 if relays(event.message, accepted):
                     text = serialized(event.message).decode()

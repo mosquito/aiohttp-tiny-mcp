@@ -132,6 +132,11 @@ class Registry:
         }
         claimed: set[str] = set()
         for uri, resource in resources.items():
+            if resource.scopes and self.auth is None:
+                raise TypeError(
+                    f"{uri}: scopes were declared, but this registry has no auth= -- "
+                    f"a scope nothing verifies is a check that never runs"
+                )
             for address in {uri, resource.legacy_uri}:
                 if address is None:
                     continue
@@ -259,6 +264,11 @@ class Registry:
     def resource(self, uri: str, fn: Callable[..., Awaitable[Any]] | None = None, **kw: Any):
         def register(fn: Callable[..., Awaitable[Any]]):
             spec = ResourceSpec.build(uri, fn, **kw)
+            if spec.scopes and self.auth is None:
+                raise TypeError(
+                    f"{uri}: scopes were declared, but this registry has no auth= -- "
+                    f"a scope nothing verifies is a check that never runs"
+                )
             self.check(uri, spec.bound)
             if spec.definition is not None:
                 if (
