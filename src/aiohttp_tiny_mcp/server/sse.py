@@ -39,6 +39,7 @@ from aiohttp_tiny_mcp.storage.sessions import (
 )
 from aiohttp_tiny_mcp.transport.sse import SSEResponse
 
+from .batch import run_batch
 from .dispatcher import Dispatcher
 from .exchange import Exchange
 from .http import Endpoint
@@ -65,6 +66,7 @@ class SseEndpoint:
         allowed_origins: set[str] | None = None,
         trust_proxy_origin_validation: bool = False,
         compress: bool = True,
+        batch_concurrency: int = 4,
         sse_path: str = "/sse",
         message_path: str = "/messages",
     ) -> None:
@@ -76,8 +78,10 @@ class SseEndpoint:
             adapters=self.adapters,
             allowed_origins=allowed_origins,
             trust_proxy_origin_validation=trust_proxy_origin_validation,
+            batch_concurrency=batch_concurrency,
         )
         self.compress = compress
+        self.batch_concurrency = batch_concurrency
         self.sse_path = sse_path
         self.message_path = message_path
 
@@ -237,10 +241,12 @@ class SseEndpoint:
             await self.registry.hub.publish(where, self.adapter.encode_failure(None, e.failure))
             return web.Response(status=202)
 
-        for item in items:
+        async def execute(item: Call | DecodeFailure) -> None:
             await self.serve(
                 adapter, item, session_id, record, where, request=request, principal=principal
             )
+
+        await run_batch(items, execute, self.batch_concurrency if pre.is_batch else 1)
         return web.Response(status=202)
 
     async def serve(
