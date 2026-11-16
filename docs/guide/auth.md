@@ -315,25 +315,33 @@ token if they lack OAuth discovery and login support.
 
 Mount `Console` normally. `Registry(auth=...)` protects MCP requests while the
 console HTML, JavaScript, and CSS remain public. The page first connects without
-credentials. An HTTP 401 opens the authentication dialog. The console reads
+credentials unless it restores a saved record for this endpoint. An HTTP 401
+opens the authentication dialog. The console reads
 `WWW-Authenticate`, which the endpoint builds from each policy's `challenge()`.
 This uses [HTTP authentication challenges](https://www.rfc-editor.org/rfc/rfc9110.html#section-11.6.1)
 and works with every supported MCP revision.
 
 Select **Basic** and enter a username and password, or select **Bearer token**
-and enter an existing access token. With the OAuth configuration below, use
+and enter an existing access token. **None** adds no authentication header;
+**Query parameters** uses credentials declared in the endpoint's query form.
+Endpoint declarations can limit the offered authentication methods. With the
+OAuth configuration below, use
 **Sign in with OAuth** to obtain an MCP token through browser login.
 Multiple configured policies appear in the
 server authentication message. Use **Authentication** to change credentials;
-**Connect** starts a new MCP session. **Clear** removes credentials and disconnects.
-Closing the dialog cancels editing without changing active credentials.
+**Connect** starts a new MCP session. Closing the dialog cancels editing without
+changing active credentials.
 
-Credentials stay in page memory. The console sends them on all MCP requests,
-including notifications and answers to server questions. It does not put them
-in browser storage, URLs, or the traffic panel. Editing the endpoint or reloading
-the page clears them. Disconnecting retains them for reconnecting to the same
-endpoint. Credentialed requests do not follow redirects. Cookies and browser-managed
-HTTP credentials are not sent.
+Credentials are saved in browser `localStorage`, scoped to the console path and
+exact endpoint URL. Reloading restores matching credentials; editing the endpoint
+does not delete saved records. **Clear** removes the current endpoint's saved
+credentials and disconnects. Closing the dialog leaves saved credentials unchanged.
+If storage is unavailable, credentials stay in page memory.
+
+The console sends credentials on all MCP requests, including notifications and
+answers to server questions. Header credentials do not appear in the traffic
+panel or URL; query credentials are part of the URL. Credentialed requests do
+not follow redirects. Cookies and browser-managed HTTP credentials are not sent.
 
 For a custom policy, use **Custom header** with `Authorization` or an `X-*`
 header, such as `X-API-Key`, and its complete value. A challenge cannot describe

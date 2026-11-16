@@ -76,8 +76,9 @@ let client, endpointUrl, chosen = null, called = null, serverInstructions = "", 
 let remembered = "search";
 page.catalogue = {{querySelectorAll() {{ return []; }} }};
 function rememberTool(name) {{ remembered = name; }}
-const credentials = {{forEndpoint() {{ return {{}}; }} }};
+const credentials = {{restore() {{}}, forEndpoint() {{ return {{}}; }} }};
 function chosenEndpoint() {{ return new URL("http://localhost/mcp"); }}
+function setEndpointDisabled(disabled) {{ page.endpoint.disabled = disabled; }}
 function clearCredentials() {{}}
 function openAuthentication() {{}}
 function record() {{}}

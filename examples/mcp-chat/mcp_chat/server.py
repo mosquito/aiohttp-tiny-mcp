@@ -8,8 +8,9 @@ from typing import Any
 
 from aiohttp import web
 from aiohttp_tiny_mcp import Endpoint, Principal, Registry
-from aiohttp_tiny_mcp.console import Console
+from aiohttp_tiny_mcp.console import Console, ConsoleEndpoint
 from aiohttp_tiny_mcp.storage.sqlite import SqliteHub, SqliteSessionStore, SqliteStorage
+from pydantic import BaseModel, Field
 
 from .auth import DemoIdentity, JWTIdentity, setup_auth
 from .models import (
@@ -35,6 +36,23 @@ from .webui import setup as setup_webui
 READ_ONLY = {"readOnlyHint": True}
 IDEMPOTENT = {"destructiveHint": False, "idempotentHint": True}
 APPEND = {"destructiveHint": False, "idempotentHint": False}
+
+
+class ConsoleDemoQuery(BaseModel):
+    org: str = Field(
+        default="example.com", description="Organization whose channels and messages to use."
+    )
+    user: str = Field(default="human", description="User name for messages and the personal inbox.")
+
+
+class ConsoleTokenQuery(BaseModel):
+    token: str | None = Field(
+        default=None,
+        description=(
+            "Agent JWT. Leave blank when using a Bearer token through Authentication. "
+            "The signed token selects the organization and user."
+        ),
+    )
 
 
 def organization(principal: Principal) -> str:
@@ -299,9 +317,18 @@ def create_app(
     setup_auth(app, jwt_secret)
     setup_observe(app, store, jwt_secret, dispatcher.feed)
     Console(
-        "/mcp?org=example.com&user=human",
         title="MCP Chat",
-        description="Select an organization and user in the endpoint URL to start chatting.",
+        description="Inspect chat tools, resources, and notifications.",
+        endpoints=[
+            ConsoleEndpoint(
+                "/mcp",
+                "Team chat for an organization and user."
+                if jwt_secret is None
+                else "Team chat authenticated with an agent JWT.",
+                query=ConsoleDemoQuery if jwt_secret is None else ConsoleTokenQuery,
+                auth=("none",) if jwt_secret is None else ("bearer", "query"),
+            )
+        ],
     ).setup(app, "/console")
 
     async def chat_lifetime(app: web.Application) -> AsyncIterator[None]:

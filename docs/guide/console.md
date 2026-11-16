@@ -46,9 +46,9 @@ about, from `add_subapp`, is therefore still correct.
 
 ## Nothing to configure
 
-The page is served by the server it talks to, so it is told where the endpoint
-is rather than asking, and connects on opening. Its requests are therefore
-same-origin, and no origin has to be allowed:
+The server supplies the initial endpoint URL. The console restores the last
+endpoint from `localStorage` and waits for **Connect**. Opening or reloading the
+page does not start a connection. Requests stay on the same origin:
 
 <!-- name: async test_console -->
 ```python
@@ -92,10 +92,9 @@ MCP `2026-07-28` uses `subscriptions/listen`; older revisions use resource
 subscriptions and a GET stream. A new stateless subscription does not replay
 events missed while disconnected.
 
-The endpoint is a field: it starts as the path the page was told, and a query
-string typed after it -- `/mcp?mcp=2025-06-18` to pin a revision, or whatever
-the server reads from its URL -- is sent as typed. The page remembers it for
-the next visit as long as the path is still the configured one.
+**Endpoint** always remains a text field. It starts with the configured path and
+accepts a query string, such as `/mcp?mcp=2025-06-18` to pin a revision. You can
+enter additional query parameters even when endpoint declarations are present.
 
 **Offered** lists the tools, resources, resource templates and prompts, with
 what each says about itself. A tool that declared `destructiveHint` is marked.
@@ -130,6 +129,90 @@ folds there too, once something has been chosen from it -- which is the moment
 it has done its job. This is
 the part worth having when something is not behaving: it shows what was sent
 rather than what you meant to send.
+
+## Declared endpoints
+
+Pass `endpoints` to add an endpoint selector, a short description, and query
+parameter fields inside the existing **Authentication** dialog. The main URL
+field remains editable. Each `ConsoleEndpoint` describes an existing route;
+declarations do not register routes or validate incoming requests. The application
+still owns query validation and authorization.
+
+Use a Pydantic model to declare query parameter names, descriptions, defaults,
+required fields, and choices:
+
+<!-- name: async test_console_declared_endpoints -->
+```python
+from typing import Literal
+
+from aiohttp import web
+from aiohttp.test_utils import TestClient, TestServer
+from pydantic import BaseModel, Field
+
+from aiohttp_tiny_mcp import Endpoint, Registry
+from aiohttp_tiny_mcp.console import Console, ConsoleEndpoint
+
+
+class TeamQuery(BaseModel):
+    team: str = Field(description="Team name")
+    environment: Literal["staging", "production"] = "staging"
+    labels: list[str] = Field(default_factory=list, description="Filter by labels")
+
+
+application = web.Application()
+application.add_routes(Endpoint(Registry("team-tools", "1.0")).routes("/team/mcp", name="team"))
+application.add_routes(
+    Endpoint(Registry("shared-tools", "1.0")).routes("/shared/mcp", name="shared")
+)
+Console(
+    title="Operations",
+    endpoints=[
+        ConsoleEndpoint("/team/mcp", "Tools for one team", TeamQuery, auth=("none",)),
+        ConsoleEndpoint("/shared/mcp", "Shared read-only tools", auth=("none",)),
+    ],
+).setup(application)
+
+async with TestClient(TestServer(application)) as client:
+    response = await client.get("/console")
+    assert response.status == 200
+    assert 'data-endpoint="/team/mcp"' in await response.text()
+```
+
+The first declaration supplies the initial URL and takes precedence over
+`endpoint_path`. An empty list adds no endpoint form. Declared paths must start with
+`/` and stay on the same origin; fragments and duplicate paths are rejected.
+A path can contain fixed query parameters, such as `/team/mcp?mode=readonly`.
+
+Open **Authentication** to select an endpoint and edit its query fields. Choose
+**None** for anonymous access or **Query parameters** for credentials passed in
+query fields. Neither adds an Authorization header. **Connect** applies the form
+values to the URL field and connects. **Cancel** leaves the URL and connection
+unchanged. Manual URLs can include parameters that are absent from the declaration.
+
+The optional `auth` list declares the endpoint's supported authentication types:
+`none`, `basic`, `bearer`, `query`, `custom`, and `oauth`. The dialog offers only
+the declared types. `auth=None` preserves the default authentication choices;
+an explicit list must be nonempty and contain no duplicates. Declaring `oauth`
+also requires `Console(oauth_client_id=...)`. These declarations configure the
+console, not the server's authentication policy.
+
+Authentication values are saved in browser `localStorage` when you connect.
+Saved values include usernames, passwords, tokens, and custom header names.
+Each record belongs to one console path and exact endpoint URL, including its
+query string. Reloading can restore that record; switching endpoints does not
+delete it. **Clear** removes the saved credentials for the current endpoint.
+Closing or cancelling the dialog does not save edits. If browser storage is
+unavailable, credentials remain usable for the current page only.
+
+Query models must contain named scalar fields or lists of scalars. Strings,
+numbers, integers, booleans, enums, and nullable fields are supported. Nested
+objects, recursive models, and unions of different non-null types are rejected.
+Field aliases become query parameter names.
+
+The console encodes values with `URLSearchParams`. Lists use repeated keys,
+such as `labels=red&labels=blue`; booleans use `true` or `false`. Empty fields
+and null values are omitted. Declared fields replace fixed query values with
+the same name. Fill required fields before submitting the dialog.
 
 ## Descriptions are markdown
 
@@ -255,8 +338,9 @@ bundled page uses, or the script has nothing to fill in.
 
 ## Before you mount it
 
-The console is an HTTP client. Its authentication dialog supports Basic, Bearer
-tokens, custom headers, and configured OAuth sign-in. See the [authentication guide](auth.md#console-authentication)
+The console is an HTTP client. Its authentication dialog supports anonymous
+access, query credentials, Basic, Bearer tokens, custom headers, and configured
+OAuth sign-in. See the [authentication guide](auth.md#console-authentication)
 for credential handling. `Registry(auth=...)` leaves console assets public.
 Optional application middleware can use `Console.is_public(request)` to identify them.
 

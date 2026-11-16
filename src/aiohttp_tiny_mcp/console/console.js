@@ -188,9 +188,19 @@ class ConsoleCredentials {
     this.endpoint = null;
     this.method = null;
     this.headers = {};
+    this.record = null;
   }
 
-  set(endpoint, method, username, secret, header) {
+  storageKey(endpoint) {
+    if (typeof location === "undefined" || typeof location.pathname !== "string") return null;
+    return `mcp-console-credentials:${JSON.stringify([location.pathname, endpoint])}`;
+  }
+
+  apply(endpoint, method, username, secret, header) {
+    if (typeof endpoint !== "string" || !endpoint ||
+        ![username, secret, header].every((value) => typeof value === "string")) {
+      throw new Error("Enter valid authentication fields.");
+    }
     let name = "Authorization";
     let value;
     if (method === "basic") {
@@ -214,12 +224,45 @@ class ConsoleCredentials {
         throw new Error("The header value must use printable ASCII without surrounding spaces.");
       }
       value = secret;
-    } else {
+    } else if (method !== "none" && method !== "query") {
       throw new Error("Choose an authentication method.");
     }
     this.endpoint = endpoint;
     this.method = method;
-    this.headers = { [name]: value };
+    this.headers = value === undefined ? {} : { [name]: value };
+    this.record = { endpoint, method, username, secret, header };
+  }
+
+  set(endpoint, method, username, secret, header) {
+    this.apply(endpoint, method, username, secret, header);
+    try {
+      const key = this.storageKey(endpoint);
+      if (key && typeof localStorage !== "undefined") {
+        localStorage.setItem(key, JSON.stringify({ version: 1, ...this.record }));
+      }
+    } catch {}
+  }
+
+  restore(endpoint) {
+    this.clear();
+    try {
+      const key = this.storageKey(endpoint);
+      if (!key || typeof localStorage === "undefined") return false;
+      const record = JSON.parse(localStorage.getItem(key));
+      if (!record || record.version !== 1 || record.endpoint !== endpoint) return false;
+      this.apply(endpoint, record.method, record.username, record.secret, record.header);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  forget(endpoint) {
+    try {
+      const key = this.storageKey(endpoint);
+      if (key && typeof localStorage !== "undefined") localStorage.removeItem(key);
+    } catch {}
+    if (this.endpoint === endpoint) this.clear();
   }
 
   forEndpoint(endpoint) {
@@ -708,10 +751,16 @@ const page = {
   authHeaderField: document.getElementById("auth-header-field"),
   authSecret: document.getElementById("auth-secret"),
   authSecretLabel: document.getElementById("auth-secret-label"),
+  authSecretField: document.getElementById("auth-secret-field"),
   authError: document.getElementById("auth-error"),
   authClear: document.getElementById("auth-clear"),
   authCancel: document.getElementById("auth-cancel"),
   endpoint: document.getElementById("endpoint"),
+  endpointManual: document.getElementById("endpoint-manual"),
+  endpointDeclared: document.getElementById("endpoint-declared"),
+  endpointSelect: document.getElementById("endpoint-select"),
+  endpointDescription: document.getElementById("endpoint-description"),
+  endpointParameters: document.getElementById("endpoint-parameters"),
   revision: document.getElementById("revision"),
   answerable: document.getElementById("answerable"),
   notifications: document.getElementById("notifications"),
@@ -744,6 +793,8 @@ let serverInstructions = "";
 let endpointUrl = null;
 //: Where the page was told the endpoint is. The field starts from it and may add a query.
 let configuredEndpoint = null;
+let endpointDeclarations = [];
+let endpointFields = [];
 const credentials = new ConsoleCredentials();
 let authEndpoint = null;
 let authSchemes = [];
@@ -782,7 +833,7 @@ async function signInOAuth() {
   if (!oauthConfig) return;
   cancelOAuth?.();
   const config = oauthConfig;
-  const endpoint = chosenEndpoint().href;
+  const endpoint = authenticationEndpoint().href;
   const popup = window.open("about:blank", "_blank", "popup,width=600,height=760");
   if (!popup) { page.authError.textContent = "Allow pop-up windows to sign in."; return; }
   const verifier = oauthRandom(), state = oauthRandom();
@@ -828,7 +879,9 @@ async function signInOAuth() {
     });
     const token = await exchangeOAuthCode(config, clientId, redirectUri, verifier, state, response);
     if (cancelled) throw new Error("OAuth sign-in was cancelled.");
-    if (endpoint !== chosenEndpoint().href) throw new Error("The MCP endpoint changed during sign-in.");
+    if (endpoint !== authenticationEndpoint().href) throw new Error("The MCP endpoint changed during sign-in.");
+    const url = new URL(endpoint);
+    page.endpoint.value = url.pathname + url.search;
     credentials.set(endpoint, "bearer", "", token, "");
     page.authenticate.textContent = "Authentication: OAuth";
     page.authentication.close();
@@ -855,9 +908,43 @@ function authFields() {
   const method = page.authMethod.value;
   page.authUserField.hidden = method !== "basic";
   page.authHeaderField.hidden = method !== "custom";
-  page.authSecretLabel.textContent = { basic: "Password", bearer: "Token", custom: "Header value" }[method];
+  page.authSecretField.hidden = !["basic", "bearer", "custom"].includes(method);
+  page.authSecret.required = !page.authSecretField.hidden;
+  page.authSecretLabel.textContent = { basic: "Password", bearer: "Token", custom: "Header value" }[method] || "Token";
   page.authSecret.value = "";
+  page.authSecret.edited = false;
   page.authError.textContent = "";
+  let url;
+  try { url = authenticationEndpoint(); } catch { return; }
+  const saved = new ConsoleCredentials();
+  saved.restore(url.href);
+  if (saved.method === method && saved.record) {
+    page.authUser.value = saved.record.username;
+    page.authHeader.value = saved.record.header || "X-API-Key";
+    page.authSecret.value = saved.record.secret;
+  }
+}
+
+function updateAuthMethods(url) {
+  if (url) page.authEndpoint.textContent = url.pathname + url.search;
+  const declaration = selectedDeclaration();
+  const labels = {none: "None", basic: "Basic", bearer: "Bearer token", query: "Query parameters",
+    custom: "Custom header", oauth: "OAuth"};
+  const methods = declaration?.auth || ["none", "basic", "bearer", "query", "custom"];
+  const previous = page.authMethod.value;
+  const saved = new ConsoleCredentials();
+  if (url) saved.restore(url.href);
+  page.authMethod.textContent = "";
+  for (const method of methods) {
+    const option = element("option", null, labels[method]);
+    option.value = method;
+    page.authMethod.append(option);
+  }
+  const preferred = saved.method || (url?.searchParams.has("token") ? "query" : "") ||
+    authSchemes.find(scheme => methods.includes(scheme)) || previous;
+  page.authMethod.value = methods.includes(preferred) ? preferred : methods[0];
+  authFields();
+  if (declaration?.auth && !declaration.auth.includes("oauth")) resetOAuth();
 }
 
 function openAuthentication(error) {
@@ -865,23 +952,20 @@ function openAuthentication(error) {
   try { url = chosenEndpoint(); }
   catch (failure) { say(failure.message, "off"); return; }
   if (authEndpoint !== url.href) {
-    clearCredentials();
     resetOAuth();
     authSchemes = [];
     authEndpoint = url.href;
   }
   if (error) authSchemes = error.schemes;
-  if (error?.resourceMetadata && error.resourceMetadata !== oauthMetadata) {
+  endpointDialog(url);
+  if (error?.resourceMetadata && error.resourceMetadata !== oauthMetadata &&
+      (!selectedDeclaration()?.auth || selectedDeclaration().auth.includes("oauth"))) {
     oauthMetadata = error.resourceMetadata;
     offerOAuth(oauthMetadata, url.href);
   }
-  const offered = authSchemes.filter((scheme) => scheme === "basic" || scheme === "bearer");
-  page.authMethod.value = credentials.method || offered[0] || (authSchemes.length ? "custom" : "basic");
   page.authMessage.textContent = authSchemes.length
     ? `Server authentication: ${authSchemes.join(", ")}.`
-    : "Choose the method your server accepts.";
-  page.authEndpoint.textContent = url.pathname + url.search;
-  authFields();
+    : "Choose an endpoint and its authentication method.";
   if (error) page.authError.textContent = error.message;
   if (!page.authentication.open) page.authentication.showModal();
 }
@@ -890,22 +974,43 @@ function setupAuthentication() {
   page.authOAuth.onclick = signInOAuth;
   page.authenticate.onclick = () => openAuthentication();
   page.authMethod.onchange = authFields;
+  page.authSecret.oninput = () => { page.authSecret.edited = true; };
   page.authCancel.onclick = () => page.authentication.close();
   page.authentication.addEventListener("close", () => {
     page.authSecret.value = "";
     cancelOAuth?.();
   });
   page.authClear.onclick = () => {
+    let url;
+    try { url = authenticationEndpoint(); } catch { url = chosenEndpoint(); }
+    credentials.forget(url.href);
+    credentials.forget(chosenEndpoint().href);
+    for (const name of [...url.searchParams.keys()]) {
+      if (name.toLowerCase() === "token") url.searchParams.delete(name);
+    }
+    try { localStorage.setItem(endpointKey(), url.pathname + url.search); } catch {}
     disconnect();
     clearCredentials();
+    page.endpoint.value = url.pathname + url.search;
+    resetOAuth();
     page.authentication.close();
   };
   page.authForm.onsubmit = async (event) => {
     event.preventDefault();
     try {
-      const url = chosenEndpoint();
-      credentials.set(url.href, page.authMethod.value, page.authUser.value,
-        page.authSecret.value, page.authHeader.value);
+      const url = authenticationEndpoint();
+      const method = page.authMethod.value;
+      if (method === "oauth" && oauthConfig) {
+        await signInOAuth();
+        return;
+      }
+      if (method === "oauth") {
+        if (credentials.endpoint !== url.href) credentials.restore(url.href);
+        if (credentials.method !== "bearer") credentials.apply(url.href, "none", "", "", "");
+      } else {
+        credentials.set(url.href, method, page.authUser.value, page.authSecret.value, page.authHeader.value);
+      }
+      page.endpoint.value = url.pathname + url.search;
       page.authenticate.textContent = `Authentication: ${page.authMethod.selectedOptions[0].textContent}`;
       page.authentication.close();
       disconnect();
@@ -914,27 +1019,165 @@ function setupAuthentication() {
       page.authError.textContent = error.message;
     }
   };
-  page.endpoint.addEventListener("input", () => {
-    clearCredentials();
-    resetOAuth();
-    authEndpoint = null;
-    authSchemes = [];
-  });
+  page.endpoint.addEventListener("input", endpointChanged);
 }
 
-// The endpoint field: the path, plus any query string a person adds, such as
-// `?mcp=2025-06-18` to pin a revision or whatever the server reads from the URL.
-// The value is kept for the next visit while its path is still the configured one,
-// so a server moved elsewhere is not chased at a stale address.
+function endpointChanged() {
+  clearCredentials();
+  resetOAuth();
+  authEndpoint = null;
+  authSchemes = [];
+  try {
+    const typed = page.endpoint.value.trim();
+    if (!typed) return;
+    const url = new URL(typed, location.origin);
+    if (url.origin === location.origin && !url.username && !url.password) {
+      localStorage.setItem(endpointKey(), url.pathname + url.search);
+    }
+  } catch {}
+}
+
+function selectedDeclaration() {
+  return page.endpointSelect.value === "" ? null : endpointDeclarations[Number(page.endpointSelect.value)];
+}
+
+function setupEndpoints() {
+  endpointDeclarations = JSON.parse(document.documentElement.dataset.endpoints || "[]");
+  if (!endpointDeclarations.length) return;
+  page.endpointDeclared.hidden = false;
+  const custom = element("option", null, "Custom URL");
+  custom.value = "";
+  page.endpointSelect.append(custom);
+  endpointDeclarations.forEach((endpoint, index) => {
+    const option = element("option", null, endpoint.path);
+    option.value = String(index);
+    page.endpointSelect.append(option);
+  });
+  page.endpointSelect.onchange = () => {
+    resetOAuth();
+    updateDeclaredEndpoint();
+    if (page.authMethod) {
+      let url;
+      try { url = authenticationEndpoint(); } catch {}
+      updateAuthMethods(url);
+    }
+  };
+  const changed = () => {
+    resetOAuth();
+    let url;
+    try {
+      url = authenticationEndpoint();
+      page.authEndpoint.textContent = url.pathname + url.search;
+    } catch {}
+    if (page.authSecret && !page.authSecret.edited) authFields();
+  };
+  page.endpointParameters.addEventListener("input", changed);
+  page.endpointParameters.addEventListener("change", changed);
+}
+
+function endpointDialog(url) {
+  const matches = endpointDeclarations.flatMap((item, index) => {
+    const declared = new URL(item.path, location.origin);
+    const fixed = [...declared.searchParams].filter(([name]) => !Object.hasOwn(item.query.properties || {}, name));
+    return declared.pathname === url.pathname && fixed.every(([name, value]) => url.searchParams.getAll(name).includes(value))
+      ? [{index, specificity: fixed.length}] : [];
+  }).sort((first, second) => second.specificity - first.specificity);
+  page.endpointSelect.value = matches.length ? String(matches[0].index) : "";
+  updateDeclaredEndpoint(url);
+  page.authEndpoint.textContent = url.pathname + url.search;
+  updateAuthMethods(url);
+}
+
+function authenticationEndpoint() {
+  return selectedDeclaration() ? declaredEndpoint() : chosenEndpoint();
+}
+
+function updateDeclaredEndpoint(url = null) {
+  const selected = selectedDeclaration();
+  page.endpointDescription.textContent = selected?.description || "Edit the endpoint URL in the main toolbar.";
+  page.endpointParameters.textContent = "";
+  page.endpointParameters.endpoint = url?.href || null;
+  endpointFields = selected && Object.keys(selected.query.properties || {}).length
+    ? buildFields(selected.query, page.endpointParameters) : [];
+  for (const input of endpointFields) {
+    if (input.dataset.name.toLowerCase() === "token" && input.dataset.kind === "string") {
+      input.type = "password";
+      input.autocomplete = "off";
+    }
+    const values = url?.searchParams.getAll(input.dataset.name);
+    if (!values?.length) continue;
+    if (input.nullToggle) {
+      input.nullToggle.checked = false;
+      input.nullToggle.onchange();
+    }
+    const kind = input.dataset.kind;
+    if (kind === "boolean") input.checked = values[0] === "true" || values[0] === "1";
+    else if (kind === "choice") {
+      const option = [...input.options].find(option => option.value && String(JSON.parse(option.value)) === values[0]);
+      if (option) input.value = option.value;
+    } else if (kind === "choices") {
+      for (const option of input.choiceInputs) option.checked = values.includes(String(JSON.parse(option.value)));
+    } else if (kind === "array") {
+      const property = selected.query.properties[input.dataset.name];
+      const schema = property.items ? property : (property.anyOf || []).find(branch => branch.items);
+      const itemType = schema?.items.type;
+      const converted = values.map(value => ["number", "integer"].includes(itemType) ? Number(value)
+        : itemType === "boolean" ? value === "true" : value);
+      input.value = JSON.stringify(converted);
+    } else input.value = values[0];
+  }
+}
+
+function setEndpointDisabled(disabled) {
+  page.endpoint.disabled = disabled;
+}
+
+function declaredEndpoint() {
+  const selected = selectedDeclaration();
+  if (!selected) throw new Error("Choose an MCP endpoint.");
+  const url = new URL(page.endpointParameters.endpoint || selected.path, location.origin);
+  if (url.origin !== location.origin || url.username || url.password || url.hash) {
+    throw new Error("The endpoint must be a path on this server.");
+  }
+  const absent = missing(endpointFields);
+  if (absent.length) throw new Error(`Fill in query parameters: ${absent.map(input => input.dataset.name).join(", ")}.`);
+  const values = readFields(endpointFields);
+  for (const input of endpointFields) {
+    if (input.dataset.kind === "string" && values[input.dataset.name] !== undefined && values[input.dataset.name] !== null) {
+      values[input.dataset.name] = input.value;
+    }
+  }
+  for (const name of selected.query.required || []) {
+    if (values[name] === null || values[name] === undefined || (Array.isArray(values[name]) && !values[name].length)) {
+      throw new Error(`Fill in query parameter: ${name}.`);
+    }
+  }
+  for (const name of Object.keys(selected.query.properties || {})) {
+    url.searchParams.delete(name);
+  }
+  for (const [name, value] of Object.entries(values)) {
+    for (const item of Array.isArray(value) ? value : [value]) {
+      if (item === null) continue;
+      if (!["string", "boolean", "number"].includes(typeof item) || (typeof item === "number" && !Number.isFinite(item))) {
+        throw new Error(`${name}: query parameters must contain scalar values.`);
+      }
+      url.searchParams.append(name, String(item));
+    }
+  }
+  return url;
+}
+
 function endpointKey() {
   return `mcp-console-endpoint:${location.pathname}`;
 }
 
 function rememberedEndpoint() {
-  const kept = localStorage.getItem(endpointKey());
-  if (!kept) return null;
-  const url = new URL(kept, location.origin);
-  return url.pathname === configuredEndpoint.pathname ? kept : null;
+  try {
+    const kept = localStorage.getItem(endpointKey());
+    if (!kept) return null;
+    const url = new URL(kept, location.origin);
+    return url.origin === location.origin && !url.username && !url.password ? kept : null;
+  } catch { return null; }
 }
 
 function chosenEndpoint() {
@@ -946,7 +1189,7 @@ function chosenEndpoint() {
   if (url.username || url.password) throw new Error("Enter credentials through Authentication.");
   url.hash = "";
   page.endpoint.value = url.pathname + url.search;
-  localStorage.setItem(endpointKey(), page.endpoint.value);
+  try { localStorage.setItem(endpointKey(), page.endpoint.value); } catch {}
   return url;
 }
 
@@ -2051,7 +2294,7 @@ function disconnect() {
   page.revision.disabled = false;
   page.answerable.disabled = false;
   page.notifications.disabled = false;
-  page.endpoint.disabled = false;
+  setEndpointDisabled(false);
   page.connect.textContent = "Connect";
   say("not connected", "");
 }
@@ -2062,12 +2305,13 @@ async function connect() {
   page.revision.disabled = true;
   page.answerable.disabled = true;
   page.notifications.disabled = true;
-  page.endpoint.disabled = true;
+  setEndpointDisabled(true);
   say("connecting", "");
   page.outcome.textContent = "";
   try {
     endpointUrl = chosenEndpoint();
-    if (credentials.endpoint && credentials.endpoint !== endpointUrl.href) clearCredentials();
+    if (credentials.endpoint !== endpointUrl.href) credentials.restore(endpointUrl.href);
+    page.authenticate.textContent = credentials.method ? `Authentication: ${credentials.method}` : "Authentication";
     client = new Client(endpointUrl.href, page.revision.value, {
       authHeaders: credentials.forEndpoint(endpointUrl.href),
       onAuthError: openAuthentication,
@@ -2095,7 +2339,7 @@ async function connect() {
     page.revision.disabled = false;
     page.answerable.disabled = false;
     page.notifications.disabled = false;
-    page.endpoint.disabled = false;
+    setEndpointDisabled(false);
     page.connect.textContent = "Connect";
     say(error.message, "off");
     report("Could not connect", connectionHelp(error), true);
@@ -2175,11 +2419,21 @@ function start() {
     option.value = version;
     page.revision.append(option);
   });
-  const remembered = localStorage.getItem("mcp-console-revision");
+  let remembered;
+  try { remembered = localStorage.getItem("mcp-console-revision"); } catch {}
   page.revision.value = REVISIONS[remembered] ? remembered : Object.keys(REVISIONS)[0];
 
   configuredEndpoint = new URL(document.documentElement.dataset.endpoint || "/mcp", location.origin);
+  setupEndpoints();
   page.endpoint.value = rememberedEndpoint() || configuredEndpoint.pathname + configuredEndpoint.search;
+  if (!rememberedEndpoint() && endpointDeclarations.length) {
+    page.endpointSelect.value = "0";
+    updateDeclaredEndpoint();
+    try {
+      const url = declaredEndpoint();
+      page.endpoint.value = url.pathname + url.search;
+    } catch {}
+  }
   page.endpoint.onkeydown = (event) => {
     if (event.key === "Enter" && !client) {
       event.preventDefault();
@@ -2214,10 +2468,8 @@ function start() {
     page.traffic.append(element("p", "empty", "Every message, as it goes over the wire."));
   };
   page.revision.onchange = () => {
-    localStorage.setItem("mcp-console-revision", page.revision.value);
+    try { localStorage.setItem("mcp-console-revision", page.revision.value); } catch {}
   };
-
-  connect();
 }
 
 if (document.documentElement.dataset.oauthCallback === "true") {
