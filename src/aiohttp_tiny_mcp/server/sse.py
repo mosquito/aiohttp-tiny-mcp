@@ -11,6 +11,7 @@ from typing import Any
 
 from aiohttp import web
 
+from aiohttp_tiny_mcp.access_log import install_token_filter
 from aiohttp_tiny_mcp.auth import Principal, Unauthorized
 from aiohttp_tiny_mcp.protocol.adapter import Adapter
 from aiohttp_tiny_mcp.protocol.core import (
@@ -326,7 +327,10 @@ class SseEndpoint:
         message_path: str | None = None,
         *,
         metadata: bool = True,
+        mask_tokens_in_logs: bool = True,
     ) -> web.Application:
+        if mask_tokens_in_logs:
+            install_token_filter()
         log.debug("adding the HTTP+SSE routes to %r", app)
         app.add_routes(self.routes(sse_path, message_path, metadata=metadata))
         return app

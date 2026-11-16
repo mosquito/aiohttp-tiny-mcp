@@ -23,8 +23,8 @@ app = web.Application()
 app.add_routes(endpoint.routes("/mcp"))
 ```
 
-`setup` adds the same routes and returns the application, and `app` calls it on
-a new one. They are shorthands for the line above, not another code path:
+`setup` adds the same routes and returns the application. `app` creates an
+application with the same routes:
 
 <!-- name: test_transports -->
 ```python
@@ -41,6 +41,44 @@ through `subscriptions/listen` and is told so with a `405`.
 
 A reply is a single JSON body, or a stream of `data:` events where the call has
 something to send before its result -- progress, log messages, or a question.
+
+### Access logs
+
+`Endpoint.setup()` and `SseEndpoint.setup()` enable token masking on
+`aiohttp.access` by default. `Endpoint.app()` uses the same setup. Normal runners
+need no extra arguments:
+
+<!-- name: test_transports -->
+```python
+app = web.Application()
+endpoint.setup(app, "/mcp")
+runner = web.AppRunner(app)
+```
+
+A logging filter replaces every `token` query value with `[REDACTED]` in request
+lines and logged URL headers, including `Referer`. Text and structured fields
+are both masked. Repeated and percent-encoded parameter names are recognized.
+The filter preserves the original request, log format, handlers, and logger class.
+It also covers refusals before an MCP handler runs.
+
+To skip filter installation, pass `mask_tokens_in_logs=False` at setup:
+
+<!-- name: test_transports -->
+```python
+app = web.Application()
+endpoint.setup(app, "/mcp", mask_tokens_in_logs=False)
+
+standalone = endpoint.app("/mcp", mask_tokens_in_logs=False)
+```
+
+`SseEndpoint.setup()` accepts the same option. The logger is shared across the
+process, so this opt-out does not remove a filter installed by another setup.
+Endpoint construction and low-level `routes()` or `view` registration do not
+configure logging.
+
+The filter applies to the process's standard `aiohttp.access` logger, including
+other routes logged there. Custom named access loggers, replacement access logger
+implementations, proxy logs, and server error logs need their own filtering.
 
 ### The event stream
 
