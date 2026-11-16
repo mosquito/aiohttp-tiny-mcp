@@ -97,6 +97,7 @@ class Adapter(ABC):
             FailureKind.UNKNOWN_METHOD: (-32601, 200),
             FailureKind.UNKNOWN_TARGET: (-32601, 200),
             FailureKind.RESOURCE_NOT_FOUND: (-32002, 200),
+            FailureKind.ACCESS_DENIED: (-32003, 403),
             FailureKind.HEADER_MISMATCH: (-32603, 200),
             FailureKind.UNSUPPORTED_VERSION: (-32600, 400),
             FailureKind.INPUT_UNSUPPORTED: (-32603, 200),

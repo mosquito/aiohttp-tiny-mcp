@@ -226,9 +226,15 @@ It is injected by the server and does not appear in the input schema.
 required scopes produce HTTP 403 before dispatch.
 
 `@registry.tool(scopes=[...])` checks the verified principal before calling the
-tool. A missing tool scope returns an error tool result. Resource, prompt,
-and extension handlers must implement their own operation-specific checks;
-they can also receive `Principal` through dependency injection. Application
+tool. A missing tool scope returns an error tool result.
+`@registry.resource(uri, scopes=[...])` applies the same scope requirement to
+fixed resources and resource templates, including reads and subscriptions.
+`Extension.resource(..., scopes=[...])` also protects legacy URI aliases.
+These resources remain visible in listings; their handlers and dependency
+providers run only after scope checks succeed.
+
+Prompt and extension method handlers must implement their own operation-specific
+checks. They can receive `Principal` through dependency injection. Application
 permissions, such as access to one project or database row, remain application
 logic. Client-reported names and capabilities are not verified identities.
 
@@ -617,7 +623,7 @@ The permission layers have separate roles:
 | `OAuthServer(scopes=[...])` | MCP scope names the authorization server accepts. |
 | Mapper's `Principal.scopes` | Maximum MCP permissions allowed for this account. |
 | Client's OAuth `scope` parameter | Permissions requested for this MCP token. |
-| `required_scopes` / tool `scopes` | Permissions required to accept a request or call a tool. |
+| `required_scopes` / tool or resource `scopes` | Permissions required to accept a request, call a tool, or access a resource. |
 
 The server rejects a request if any requested scope is unavailable or exceeds
 the mapped account's permissions. It does not silently reduce the request.

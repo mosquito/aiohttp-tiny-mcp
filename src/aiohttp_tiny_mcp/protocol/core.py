@@ -84,6 +84,7 @@ class FailureKind(StringEnum):
     UNKNOWN_METHOD = "unknown_method"
     UNKNOWN_TARGET = "unknown_target"
     RESOURCE_NOT_FOUND = "resource_not_found"
+    ACCESS_DENIED = "access_denied"
     INVALID_PARAMS = "invalid_params"
     INVALID_ARGUMENTS = "invalid_arguments"
     HEADER_MISMATCH = "header_mismatch"

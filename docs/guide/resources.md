@@ -74,6 +74,63 @@ assert {resource.uri for resource in listed} == {"config://app"}
 assert read.contents[0].text == "entry 42"
 ```
 
+## Required scopes
+
+Use `scopes` to restrict reads and subscriptions to verified callers with every
+required permission. The same parameter works for fixed resources and templates:
+
+<!-- name: test_resource_scopes -->
+```python
+from pydantic import BaseModel
+
+from aiohttp_tiny_mcp import Registry, StaticBasicAuth
+
+secured = Registry(
+    "files",
+    "1.0",
+    auth=StaticBasicAuth(("reader", "example-password", ["files:read"])),
+)
+
+
+class NoArguments(BaseModel):
+    pass
+
+
+class File(BaseModel):
+    id: int
+
+
+@secured.resource("files://index", scopes={"files:read"})
+async def index(args: NoArguments) -> str:
+    return "File index"
+
+
+@secured.resource("files://entries/{id}", scopes={"files:read"})
+async def file(args: File) -> str:
+    return f"File {args.id}"
+```
+
+Configure `Registry(auth=...)` before registering a resource with nonempty
+scopes. Registration fails without an authentication policy. Omitted or empty
+scopes add no resource-specific requirement; endpoint authentication still applies.
+
+Scope checks run before the handler and its dependency providers. Resources and
+templates remain visible in their listing methods, including to callers who lack
+their scopes. Listing a resource does not authorize reading or subscribing to it.
+`Extension.resource(..., scopes=...)` applies the same requirements to canonical
+and legacy resource URIs. Record-level permissions remain application logic;
+see [Handler permissions](auth.md#handler-permissions).
+
+Denied reads, legacy subscriptions, and resource-template completions return
+JSON-RPC error `-32003`. Ordinary HTTP JSON responses use status `403`; errors
+on an already open stream remain protocol replies. Modern subscription
+acknowledgements omit resources the caller cannot access. Notification streams
+also check resource scopes before relaying updates from saved subscriptions.
+Unsubscribe remains available without the resource's scopes.
+
+Resources with scopes cannot declare `cache_scope="public"`. Use private
+caching, which is the default, to keep their contents scoped to the caller.
+
 ## What a handler may return
 
 <!-- name: test_resources -->

@@ -48,6 +48,7 @@ from aiohttp_tiny_mcp.transport.sse import SSEResponse
 from .dispatcher import Dispatcher
 from .exchange import Exchange, is_reply, relay_reply
 from .registry import Registry
+from .resource_auth import allowed_resource
 from .subscriptions import relays, wanted
 from .tasks import stop
 
@@ -451,7 +452,9 @@ class Endpoint:
 
         response = SSEResponse(compress=self.compress)
         await response.prepare(request)
-        relay = asyncio.create_task(self.relay_notifications(request, response, adapter))
+        relay = asyncio.create_task(
+            self.relay_notifications(request, response, adapter, principal=principal)
+        )
         try:
             while not relay.done():
                 await asyncio.wait({relay}, timeout=0.05)
@@ -463,7 +466,12 @@ class Endpoint:
         return response
 
     async def relay_notifications(
-        self, request: web.Request, response: SSEResponse, adapter: Adapter
+        self,
+        request: web.Request,
+        response: SSEResponse,
+        adapter: Adapter,
+        *,
+        principal: Principal | None = None,
     ) -> None:
         """Relay changes with their hub ids, re-reading subscriptions each pass."""
         capabilities = adapter.capabilities(self.registry)
@@ -477,6 +485,12 @@ class Endpoint:
                 self.open_values(request, await self.stored(request)),
                 self.registry.broadcasts,
             )
+            if "resourceSubscriptions" in accepted:
+                accepted["resourceSubscriptions"] = [
+                    uri
+                    for uri in accepted["resourceSubscriptions"]
+                    if allowed_resource(self.registry, adapter, uri, principal)
+                ]
             for event in found:
                 if relays(event.message, accepted):
                     text = serialized(event.message).decode()

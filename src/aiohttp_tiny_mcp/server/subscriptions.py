@@ -15,6 +15,8 @@ from aiohttp_tiny_mcp.protocol.models import EmptyResult, ListenParams, Meta, Me
 from aiohttp_tiny_mcp.storage import hub as hubs
 from aiohttp_tiny_mcp.storage.sessions import SUBSCRIPTIONS_KEY, Session
 
+from .resource_auth import allowed_resource
+
 if TYPE_CHECKING:
     from .exchange import Exchange
 
@@ -116,7 +118,11 @@ async def listen(ex: Exchange) -> EmptyResult:
         if requested.get(field) and caps.get(capability, {}).get("listChanged"):
             accepted[field] = True
     if caps.get("resources", {}).get("subscribe"):
-        uris = [uri for uri in wanted.resource_subscriptions if ex.registry.match_resource(uri)]
+        uris = [
+            uri
+            for uri in wanted.resource_subscriptions
+            if allowed_resource(ex.registry, ex.adapter, uri, ex.principal)
+        ]
         if uris:
             accepted["resourceSubscriptions"] = list(dict.fromkeys(uris))
     declared = broadcasts_for(ex)
