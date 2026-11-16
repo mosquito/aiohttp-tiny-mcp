@@ -740,6 +740,7 @@ const page = {
   agentSetup: document.getElementById("agent-setup"),
   agentForm: document.getElementById("agent-form"),
   agentMethod: document.getElementById("agent-method"),
+  agentLevel: document.getElementById("agent-level"),
   agentName: document.getElementById("agent-name"),
   agentEndpoint: document.getElementById("agent-endpoint"),
   agentHeadersField: document.getElementById("agent-headers-field"),
@@ -822,6 +823,17 @@ let oauthGeneration = 0;
 let cancelOAuth = null;
 let agentConnection = null;
 
+function agentLevelKey() {
+  return `mcp-console-agent-level:${location.pathname}`;
+}
+
+function rememberedAgentLevel() {
+  try {
+    if (localStorage.getItem(agentLevelKey()) === "project") return "project";
+  } catch {}
+  return "user";
+}
+
 function renderAgentSetup() {
   page.agentCopyStatus.textContent = "";
   page.agentError.textContent = "";
@@ -835,20 +847,20 @@ function renderAgentSetup() {
     if (!agentConnection) return;
     const variants = agentConfigurations({
       endpoint: agentConnection.url,
+      level: page.agentLevel.value,
       name: page.agentName.value,
       headers: page.agentHeaders.checked ? agentConnection.headers : {},
     });
     const choice = page.agentMethod.value;
-    if (!page.agentMethod.options.length) {
-      for (const variant of variants) {
-        const option = element("option", null, variant.label);
-        option.value = variant.id;
-        page.agentMethod.append(option);
-      }
+    page.agentMethod.textContent = "";
+    for (const variant of variants) {
+      const option = element("option", null, variant.label);
+      option.value = variant.id;
+      page.agentMethod.append(option);
     }
     const variant = variants.find(item => item.id === choice) || variants[0];
     page.agentMethod.value = variant.id;
-    page.agentTarget.textContent = variant.target;
+    page.agentTarget.textContent = `Configuration file: ${variant.target}`;
     page.agentInstructions.textContent = variant.instructions;
     page.agentLanguage.textContent = variant.language.toUpperCase();
     page.agentCode.value = variant.code;
@@ -864,6 +876,7 @@ function renderAgentSetup() {
 function openAgentSetup() {
   agentConnection = null;
   page.agentMethod.textContent = "";
+  page.agentLevel.value = rememberedAgentLevel();
   page.agentHeaders.checked = true;
   page.agentHeadersField.hidden = true;
   page.agentEndpoint.textContent = "";
@@ -894,6 +907,10 @@ function setupAgentDialog() {
   if (!page.addAgent || !page.agentSetup) return;
   page.addAgent.onclick = openAgentSetup;
   page.agentMethod.onchange = renderAgentSetup;
+  page.agentLevel.onchange = () => {
+    try { localStorage.setItem(agentLevelKey(), page.agentLevel.value); } catch {}
+    renderAgentSetup();
+  };
   page.agentName.oninput = renderAgentSetup;
   page.agentHeaders.onchange = renderAgentSetup;
   page.agentClose.onclick = () => page.agentSetup.close();

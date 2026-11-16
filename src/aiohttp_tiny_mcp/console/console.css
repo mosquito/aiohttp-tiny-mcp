@@ -561,14 +561,21 @@ dialog.question .argument { margin-bottom: 10px; }
 
 .auth-field { display: flex; flex-direction: column; gap: 4px; margin: 12px 0; }
 .auth-field[hidden] { display: none; }
-.auth-field > input, .auth-field > select { width: 100%; min-width: 0; }
+.auth-field > input, .auth-field > select {
+  width: 100%;
+  min-width: 0;
+  height: calc(1.5em + 12px);
+  line-height: 1.5;
+}
 .auth-endpoint { overflow-wrap: anywhere; font-family: var(--mono); }
 .auth-help { color: var(--ink-soft); font-size: 12px; }
 .auth-error { color: var(--bad); }
 
 
 dialog.agent-setup { max-width: 680px; width: calc(100vw - 32px); max-height: calc(100vh - 32px); overflow: auto; }
-.agent-options { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+dialog.agent-setup menu { align-items: center; flex-wrap: wrap; }
+#agent-docs { margin-right: auto; }
+.agent-options { display: grid; grid-template-columns: minmax(0, 1.5fr) repeat(2, minmax(0, 1fr)); gap: 12px; }
 #agent-headers-field[hidden] { display: none; }
 .agent-target { font-family: var(--mono); font-weight: 600; overflow-wrap: anywhere; }
 #agent-code { width: 100%; font-family: var(--mono); font-size: 12px; resize: vertical; }

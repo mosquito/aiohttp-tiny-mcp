@@ -147,8 +147,14 @@
     <p class="auth-help">Connect an agent to this MCP endpoint.</p>
     <p id="agent-endpoint" class="auth-endpoint"></p>
     <div class="agent-options">
-      <label class="auth-field">Configuration
+      <label class="auth-field">Agent
         <select id="agent-method"></select>
+      </label>
+      <label class="auth-field">Configuration level
+        <select id="agent-level">
+          <option value="user">User</option>
+          <option value="project">Project</option>
+        </select>
       </label>
       <label class="auth-field">Server name
         <input id="agent-name" type="text" spellcheck="false" maxlength="64" required>
@@ -164,10 +170,10 @@
       <textarea id="agent-code" rows="12" readonly spellcheck="false" wrap="off"></textarea>
     </label>
     <p id="agent-verify" class="auth-help"></p>
-    <a id="agent-docs" target="_blank" rel="noopener noreferrer">Agent documentation</a>
     <p id="agent-error" class="auth-error" role="alert"></p>
     <p id="agent-copy-status" class="auth-help" role="status"></p>
     <menu>
+      <a id="agent-docs" target="_blank" rel="noopener noreferrer">Agent documentation</a>
       <button id="agent-close" class="quiet" type="button">Close</button>
       <button id="agent-copy" class="primary" type="button">Copy configuration</button>
     </menu>

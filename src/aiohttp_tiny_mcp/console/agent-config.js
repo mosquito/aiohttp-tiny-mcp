@@ -1,6 +1,9 @@
 "use strict";
 
-function agentConfigurations({endpoint, name = 'mcp', headers = {}} = {}) {
+function agentConfigurations({endpoint, name = 'mcp', headers = {}, level = 'user'} = {}) {
+  if (!['project', 'user'].includes(level)) {
+    throw new Error('Choose Project or User configuration level.');
+  }
   if (typeof name !== 'string' || !/^[A-Za-z0-9_-]{1,64}$/.test(name)) {
     throw new Error('Use 1–64 letters, numbers, underscores, or hyphens for the server name.');
   }
@@ -33,7 +36,13 @@ function agentConfigurations({endpoint, name = 'mcp', headers = {}} = {}) {
   const server = {url: endpoint, ...credentials};
   const json = value => JSON.stringify(value, null, 2);
   const named = value => ({mcpServers: {[name]: value}});
-  const merge = 'Merge this server entry into the file. Keep existing settings.';
+  const merge = 'Create the file if it does not exist. Merge this server entry with existing settings.';
+  const userLevel = level === 'user';
+  const file = (projectPath, userPath) => {
+    const target = userLevel ? userPath : projectPath;
+    const location = userLevel ? 'your home directory for all your projects' : 'your project root';
+    return {target, instructions: `Add the configuration below to ${target} in ${location}. ${merge}`};
+  };
   const signIn = entries.length || url.searchParams.has('token')
     ? '' : ' If the server requires OAuth, sign in from the agent.';
   const tomlHeaders = entries.length
@@ -43,52 +52,56 @@ function agentConfigurations({endpoint, name = 'mcp', headers = {}} = {}) {
   if (entries.length || url.searchParams.has('token')) remote.oauth = false;
   return [
     {
-      id: 'mcp-json', label: '.mcp.json · Claude Code', target: '.mcp.json',
-      instructions: 'Create this file in the project root. ' + merge,
+      id: 'mcp-json', label: 'Claude Code',
+      ...file('.mcp.json', '~/.claude.json'),
       code: json(named({type: 'http', ...server})), language: 'json',
-      verify: 'Start Claude Code in this project, approve the server, and open /mcp.' + signIn,
-      link: 'https://code.claude.com/docs/en/mcp#project-scope',
+      verify: (userLevel ? 'Start Claude Code and open /mcp.'
+        : 'Start Claude Code in this project, approve the server, and open /mcp.') + signIn,
+      link: `https://code.claude.com/docs/en/mcp#${level}-scope`,
     },
     {
-      id: 'codex', label: 'Codex', target: '~/.codex/config.toml',
-      instructions: merge + ' For this project only, use .codex/config.toml in a trusted project.',
+      id: 'codex', label: 'Codex',
+      ...file('.codex/config.toml', '~/.codex/config.toml'),
       code: `[mcp_servers.${JSON.stringify(name)}]\nurl = ${JSON.stringify(endpoint)}${tomlHeaders}\n`,
       language: 'toml',
-      verify: 'Run codex mcp list to check the server.'
+      verify: (userLevel ? '' : 'Trust this project in Codex first. ')
+        + 'Run codex mcp list to check the server.'
         + (signIn ? ` For OAuth, run codex mcp login ${name}.` : ''),
       link: 'https://learn.chatgpt.com/docs/extend/mcp?surface=cli',
     },
     {
-      id: 'cursor', label: 'Cursor', target: '.cursor/mcp.json',
-      instructions: 'Create this file in the project. ' + merge,
+      id: 'cursor', label: 'Cursor',
+      ...file('.cursor/mcp.json', '~/.cursor/mcp.json'),
       code: json(named(server)), language: 'json',
       verify: 'Open Cursor Settings → Tools & MCP and check the server.' + signIn,
       link: 'https://cursor.com/docs/mcp',
     },
     {
-      id: 'copilot', label: 'GitHub Copilot', target: '.mcp.json',
-      instructions: 'Create this file in the project root. ' + merge,
+      id: 'copilot', label: 'GitHub Copilot',
+      ...file('.mcp.json', '~/.copilot/mcp-config.json'),
       code: json(named({type: 'http', ...server, tools: ['*']})), language: 'json',
       verify: 'In VS Code, run MCP: List Servers and start the server.' + signIn,
       link: 'https://code.visualstudio.com/docs/agents/reference/mcp-configuration',
     },
     {
-      id: 'gemini', label: 'Gemini CLI', target: '.gemini/settings.json',
-      instructions: 'Create this file in the project. ' + merge,
+      id: 'gemini', label: 'Gemini CLI',
+      ...file('.gemini/settings.json', '~/.gemini/settings.json'),
       code: json(named({httpUrl: endpoint, ...credentials})), language: 'json',
-      verify: 'Start Gemini CLI in this project and open /mcp.' + signIn,
+      verify: (userLevel ? 'Start Gemini CLI and open /mcp.'
+        : 'Start Gemini CLI in this project and open /mcp.') + signIn,
       link: 'https://geminicli.com/docs/tools/mcp-server/',
     },
     {
-      id: 'pi', label: 'Pi', target: '.pi/mcp.json',
-      instructions: 'Create this file in the project. ' + merge,
+      id: 'pi', label: 'Pi',
+      ...file('.pi/mcp.json', '~/.pi/agent/mcp.json'),
       code: json(named(server)), language: 'json',
-      verify: 'Start Pi in this project and check the MCP server status.' + signIn,
+      verify: (userLevel ? 'Start Pi and open /mcp.'
+        : 'Trust this project in Pi, then open /mcp.') + signIn,
       link: 'https://docs.pi.dev/latest/mcp',
     },
     {
-      id: 'opencode', label: 'OpenCode V2', target: 'opencode.json',
-      instructions: 'Create this file in the project root. ' + merge,
+      id: 'opencode', label: 'OpenCode V2',
+      ...file('opencode.json', '~/.config/opencode/opencode.json'),
       code: json({$schema: 'https://opencode.ai/config.json', mcp: {servers: {[name]: remote}}}),
       language: 'json',
       verify: 'Run opencode mcp list to check the server.' + signIn,

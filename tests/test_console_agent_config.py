@@ -24,7 +24,7 @@ def run(body: str) -> str:
 def test_agent_schemas() -> None:
     run(r"""
 const endpoint = 'https://example.com/mcp?org=one&user=alice';
-const configs = agentConfigurations({endpoint});
+const configs = agentConfigurations({endpoint, level: 'project'});
 assert.deepEqual(configs.map(config => config.id), [
   'mcp-json', 'codex', 'cursor', 'copilot', 'gemini', 'pi', 'opencode',
 ]);
@@ -39,7 +39,7 @@ for (const config of configs) {
 }
 const byId = Object.fromEntries(configs.map(config => [config.id, config]));
 assert.equal(byId['mcp-json'].target, '.mcp.json');
-assert.equal(byId['codex'].target, '~/.codex/config.toml');
+assert.equal(byId['codex'].target, '.codex/config.toml');
 assert.equal(byId['cursor'].target, '.cursor/mcp.json');
 assert.equal(byId['copilot'].target, '.mcp.json');
 assert.equal(byId['gemini'].target, '.gemini/settings.json');
@@ -91,6 +91,34 @@ assert.equal(JSON.parse(headerOnly.find(config => config.id === 'opencode').code
 """)
 
 
+def test_user_configuration_paths_preserve_server_settings() -> None:
+    run(r"""
+const options = {endpoint: 'https://example.com/mcp?token=query', name: 'team',
+  headers: {'Authorization': 'Bearer test'}};
+const project = agentConfigurations({...options, level: 'project'});
+const user = agentConfigurations({...options, level: 'user'});
+assert.deepEqual(agentConfigurations(options), user);
+assert.deepEqual(user.map(config => config.target), [
+  '~/.claude.json', '~/.codex/config.toml', '~/.cursor/mcp.json',
+  '~/.copilot/mcp-config.json', '~/.gemini/settings.json', '~/.pi/agent/mcp.json',
+  '~/.config/opencode/opencode.json',
+]);
+for (let index = 0; index < user.length; index += 1) {
+  assert.equal(user[index].code, project[index].code);
+  assert.ok(user[index].instructions.includes(user[index].target));
+  assert.match(user[index].instructions, /all your projects/);
+  assert.match(project[index].instructions, /project root/);
+  assert.match(user[index].instructions, /Merge/);
+}
+assert.equal(user[0].label, 'Claude Code');
+assert.equal(project[0].label, 'Claude Code');
+assert.match(user[0].link, /#user-scope$/);
+assert.match(project[0].link, /#project-scope$/);
+assert.match(project[1].verify, /Trust this project/);
+assert.ok(!user[1].verify.includes('Trust this project'));
+""")
+
+
 def test_codex_toml_round_trip() -> None:
     tomllib = pytest.importorskip("tomllib")
     endpoint = 'https://example.com/mcp?name="quoted"&path=\\&token=a%2Bb'
@@ -108,6 +136,9 @@ def test_codex_toml_round_trip() -> None:
 def test_invalid_configuration_inputs() -> None:
     run(r"""
 const endpoint = 'https://example.com/mcp';
+for (const level of ['', 'local', 'global', null, 1]) {
+  assert.throws(() => agentConfigurations({endpoint, level}), /configuration level/);
+}
 for (const name of ['', 'a b', 'a.b', 'a"b', 'a/b', 'a'.repeat(65), null, 1]) {
   assert.throws(() => agentConfigurations({endpoint, name}), /server name/);
 }

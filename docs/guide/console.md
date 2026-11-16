@@ -222,24 +222,37 @@ the same name. Fill required fields before submitting the dialog.
 
 Click **Add agent** to generate configuration for the current endpoint URL.
 The dialog works while disconnected and does not make an MCP request. Choose
-a server name and a configuration format, then copy the result into the file
-shown in the dialog. Merge the server entry with existing settings.
+a server name, an **Agent**, and a **Configuration level**, then copy
+the result into the file shown in the dialog. **Project** applies to the current
+project; **User** applies across your projects. Merge the server entry with
+existing settings.
 
-The default is **.mcp.json · Claude Code**, in the project root. The dialog also
-provides these client-specific formats, checked against their official
+The default level is **User**. The console remembers your level choice in
+`localStorage` for each console path, including after reopening or reloading.
+Missing, invalid, or unavailable storage uses **User**. The file path depends
+on the selected agent. These formats were checked against their official
 references on 2026-11-16:
 
-| Agent | Configuration file | HTTP configuration |
-| --- | --- | --- |
-| [Claude Code](https://code.claude.com/docs/en/mcp#project-scope) | `.mcp.json` | `mcpServers`, `type: "http"`, `url` |
-| [Codex](https://learn.chatgpt.com/docs/extend/mcp?surface=cli) | `~/.codex/config.toml` | `mcp_servers`, `url`, `http_headers` |
-| [Cursor](https://cursor.com/docs/mcp) | `.cursor/mcp.json` | `mcpServers`, `url` |
-| [VS Code / Copilot](https://code.visualstudio.com/docs/agents/reference/mcp-configuration) | `.mcp.json` | `mcpServers`, `type: "http"`, `url`, `tools` |
-| [Gemini CLI](https://geminicli.com/docs/tools/mcp-server/) | `.gemini/settings.json` | `mcpServers`, `httpUrl` |
-| [Pi](https://docs.pi.dev/latest/mcp) | `.pi/mcp.json` | `mcpServers`, `url` |
-| [OpenCode V2](https://opencode.ai/docs/mcp-servers/) | `opencode.json` | `mcp.servers`, `type: "remote"`, `url` |
+| Agent | Project file | User file | HTTP configuration |
+| --- | --- | --- | --- |
+| [Claude Code](https://code.claude.com/docs/en/mcp#user-scope) | `.mcp.json` | `~/.claude.json` | `mcpServers`, `type: "http"`, `url` |
+| [Codex](https://learn.chatgpt.com/docs/config-file/config-basic) | `.codex/config.toml` | `~/.codex/config.toml` | `mcp_servers`, `url`, `http_headers` |
+| [Cursor](https://cursor.com/docs/mcp) | `.cursor/mcp.json` | `~/.cursor/mcp.json` | `mcpServers`, `url` |
+| [VS Code / Copilot](https://code.visualstudio.com/docs/agents/reference/mcp-configuration) | `.mcp.json` | `~/.copilot/mcp-config.json` | `mcpServers`, `type: "http"`, `url`, `tools` |
+| [Gemini CLI](https://geminicli.com/docs/tools/mcp-server/) | `.gemini/settings.json` | `~/.gemini/settings.json` | `mcpServers`, `httpUrl` |
+| [Pi](https://docs.pi.dev/latest/mcp) | `.pi/mcp.json` | `~/.pi/agent/mcp.json` | `mcpServers`, `url` |
+| [OpenCode V2](https://opencode.ai/docs/config/#locations) | `opencode.json` | `~/.config/opencode/opencode.json` | `mcp.servers`, `type: "remote"`, `url` |
 
-These formats are not interchangeable. For example, Gemini's `url` field selects
+Paths use each agent's default configuration directory. If you override that
+directory, use the corresponding file there; for example, Copilot uses
+`$COPILOT_HOME/mcp-config.json` when `COPILOT_HOME` is set. Codex and Pi require
+project trust before reading project configuration. Claude's `~/.claude.json`
+contains other settings: merge the generated top-level `mcpServers` entry and
+preserve those settings, including any `projects` entries.
+
+The project-level `.mcp.json` file supports both Claude Code and Copilot;
+it is not exclusive to Claude Code. Their user-level files differ, as shown above.
+Other formats are not interchangeable. For example, Gemini's `url` field selects
 legacy SSE, while `httpUrl` selects Streamable HTTP. Current VS Code Copilot
 uses the portable `.mcp.json` format; its older `.vscode/mcp.json` format uses
 `servers` and is intended for Local harness compatibility.

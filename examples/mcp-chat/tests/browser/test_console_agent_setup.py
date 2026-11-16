@@ -47,7 +47,7 @@ async def generated_server(page: Page) -> dict:
     return config["mcpServers"]["mcp_chat"]
 
 
-async def test_agent_dialog_defaults_to_mcp_json_and_copies_without_connecting(
+async def test_agent_dialog_defaults_to_user_and_copies_without_connecting(
     browser: Browser, server: BaseTestServer
 ) -> None:
     page, requests = await open_console(browser, server)
@@ -64,10 +64,23 @@ async def test_agent_dialog_defaults_to_mcp_json_and_copies_without_connecting(
         assert bounds is not None
         assert 0 <= bounds["x"] <= width - bounds["width"]
         assert 0 <= bounds["y"] <= height - bounds["height"]
+        link = await page.locator("#agent-docs").bounding_box()
+        close = await page.locator("#agent-close").bounding_box()
+        copy = await page.locator("#agent-copy").bounding_box()
+        assert link is not None and close is not None and copy is not None
+        for control in (link, close, copy):
+            assert bounds["x"] <= control["x"]
+            assert control["x"] + control["width"] <= bounds["x"] + bounds["width"]
+        if width == 1440:
+            assert link["x"] + link["width"] < close["x"] < copy["x"]
+            assert abs(link["y"] + link["height"] / 2 - close["y"] - close["height"] / 2) < 1
     await expect(page.locator("#agent-method")).to_have_value("mcp-json")
+    await expect(page.locator("#agent-level")).to_have_value("user")
+    await expect(page.locator("#agent-method option:checked")).to_have_text("Claude Code")
+    await expect(page.get_by_role("combobox", name="Agent", exact=True)).to_have_value("mcp-json")
     await expect(page.locator("#agent-name")).to_have_value("mcp_chat")
     await expect(page.locator("#agent-code")).to_have_attribute("readonly", "")
-    await expect(page.locator("#agent-target")).to_contain_text(".mcp.json")
+    await expect(page.locator("#agent-target")).to_have_text("Configuration file: ~/.claude.json")
     url = str(server.make_url(endpoint))
     await expect(page.locator("#agent-endpoint")).to_have_text(url)
     assert await generated_server(page) == {"type": "http", "url": url}
@@ -118,7 +131,9 @@ async def test_agent_dialog_switches_formats_and_rejects_invalid_names(
         )
         if method == "codex":
             assert '[mcp_servers."mcp_chat"]' in code
-            await expect(page.locator("#agent-target")).to_contain_text("config.toml")
+            await expect(page.locator("#agent-target")).to_have_text(
+                "Configuration file: ~/.codex/config.toml"
+            )
         else:
             assert isinstance(json.loads(code), dict)
         outputs[method] = code
@@ -129,6 +144,7 @@ async def test_agent_dialog_switches_formats_and_rejects_invalid_names(
     await page.locator("#agent-name").fill("invalid name")
     await expect(page.locator("#agent-code")).to_have_value("")
     await expect(page.locator("#agent-copy")).to_be_disabled()
+    await expect(page.locator("#agent-docs")).to_be_hidden()
     await page.locator("#agent-name").fill("custom_agent")
     await expect(page.locator("#agent-copy")).to_be_enabled()
     config = json.loads(await page.locator("#agent-code").input_value())
@@ -175,6 +191,8 @@ async def test_agent_dialog_exports_saved_headers_only_for_the_exact_endpoint(
         await expect(page.locator("#agent-headers")).to_be_checked()
         assert (await generated_server(page))["headers"] == {"Authorization": f"Bearer {token}"}
         await page.locator("#agent-headers").uncheck()
+        await page.locator("#agent-level").select_option("project")
+        await expect(page.locator("#agent-headers")).not_to_be_checked()
         assert "headers" not in await generated_server(page)
         assert token not in await page.locator("#agent-code").input_value()
         await page.locator("#agent-headers").check()
@@ -188,3 +206,101 @@ async def test_agent_dialog_exports_saved_headers_only_for_the_exact_endpoint(
         await expect(page.locator("#connect")).to_have_text("Connect")
         assert not [request for request in requests if request.method == "POST"]
         await page.close()
+
+
+async def test_agent_configuration_levels_update_paths_and_preserve_values(
+    browser: Browser, server: BaseTestServer
+) -> None:
+    page, requests = await open_console(browser, server)
+    await page.evaluate(
+        "Object.defineProperty(navigator, 'clipboard', {configurable: true, value: {"
+        "writeText: async text => {window.copiedConfiguration = text;}}})"
+    )
+    await page.locator("#add-agent").click()
+    await page.locator("#agent-name").fill("my_agent")
+    paths = {
+        "mcp-json": (".mcp.json", "~/.claude.json"),
+        "codex": (".codex/config.toml", "~/.codex/config.toml"),
+        "cursor": (".cursor/mcp.json", "~/.cursor/mcp.json"),
+        "copilot": (".mcp.json", "~/.copilot/mcp-config.json"),
+        "gemini": (".gemini/settings.json", "~/.gemini/settings.json"),
+        "pi": (".pi/mcp.json", "~/.pi/agent/mcp.json"),
+        "opencode": ("opencode.json", "~/.config/opencode/opencode.json"),
+    }
+    for method, (project_path, user_path) in paths.items():
+        await page.locator("#agent-method").select_option(method)
+        for level, path in (("user", user_path), ("project", project_path)):
+            await page.locator("#agent-level").select_option(level)
+            await expect(page.locator("#agent-method")).to_have_value(method)
+            await expect(page.locator("#agent-name")).to_have_value("my_agent")
+            await expect(page.locator("#agent-target")).to_have_text(f"Configuration file: {path}")
+            await expect(page.locator("#agent-instructions")).to_contain_text(path)
+            await page.locator("#agent-copy").click()
+            assert (
+                await page.evaluate("window.copiedConfiguration")
+                == await page.locator("#agent-code").input_value()
+            )
+    await page.locator("#agent-close").click()
+    await page.locator("#add-agent").click()
+    await expect(page.locator("#agent-level")).to_have_value("project")
+    await page.reload()
+    await page.locator("#add-agent").click()
+    await expect(page.locator("#agent-level")).to_have_value("project")
+    await page.locator("#agent-level").select_option("user")
+    await page.reload()
+    await page.locator("#add-agent").click()
+    await expect(page.locator("#agent-level")).to_have_value("user")
+    await expect(page.locator("#connect")).to_have_text("Connect")
+    assert not [request for request in requests if request.method == "POST"]
+
+
+@pytest.mark.parametrize("storage", ["invalid", "unavailable", "write-denied"])
+async def test_agent_level_storage_failures_use_user(
+    browser: Browser, server: BaseTestServer, storage: str
+) -> None:
+    page, requests = await open_console(browser, server)
+    if storage == "invalid":
+        await page.evaluate(
+            "localStorage.setItem('mcp-console-agent-level:' + location.pathname, 'global')"
+        )
+    elif storage == "unavailable":
+        await page.evaluate(
+            "Object.defineProperty(window, 'localStorage', {get() {"
+            "throw new DOMException('Storage blocked', 'SecurityError');}})"
+        )
+    else:
+        await page.evaluate(
+            "() => {Storage.prototype.setItem = () => {"
+            "throw new DOMException('Storage full', 'QuotaExceededError');};}"
+        )
+    await page.locator("#add-agent").click()
+    await expect(page.locator("#agent-level")).to_have_value("user")
+    await page.locator("#agent-level").select_option("project")
+    await expect(page.locator("#agent-target")).to_have_text("Configuration file: .mcp.json")
+    if storage == "invalid":
+        await page.evaluate(
+            "localStorage.setItem('mcp-console-agent-level:' + location.pathname, 'invalid')"
+        )
+    await page.locator("#agent-close").click()
+    await page.locator("#add-agent").click()
+    await expect(page.locator("#agent-level")).to_have_value("user")
+    await expect(page.locator("#agent-copy")).to_be_enabled()
+    assert not [request for request in requests if request.method == "POST"]
+
+
+async def test_agent_level_is_scoped_to_console_path_and_browser_storage(
+    browser: Browser, server: BaseTestServer
+) -> None:
+    page, requests = await open_console(browser, server)
+    await page.evaluate("localStorage.setItem('mcp-console-agent-level:/other-console', 'project')")
+    await page.locator("#add-agent").click()
+    await expect(page.locator("#agent-level")).to_have_value("user")
+    await page.locator("#agent-level").select_option("project")
+    assert (
+        await page.evaluate("localStorage.getItem('mcp-console-agent-level:' + location.pathname)")
+        == "project"
+    )
+    other, other_requests = await open_console(browser, server)
+    await other.locator("#add-agent").click()
+    await expect(other.locator("#agent-level")).to_have_value("user")
+    assert not [request for request in requests + other_requests if request.method == "POST"]
