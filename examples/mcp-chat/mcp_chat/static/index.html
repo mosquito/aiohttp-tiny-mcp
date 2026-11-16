@@ -45,7 +45,7 @@
       </aside>
       <main class="main-panel" id="main-panel">
         <div class="panel-heading">
-          <div><p class="eyebrow" id="view-eyebrow">Your workspace</p><h1 id="view-title">Inbox</h1><p id="view-description" class="muted">Unread messages from your channels and direct messages.</p></div>
+          <div><p class="eyebrow" id="view-eyebrow">Your workspace</p><h1 id="view-title">Inbox</h1><p id="view-description" class="muted">Unread messages delivered to you.</p></div>
           <div class="view-actions"><button id="subscribe-toggle" hidden type="button">Join channel</button><button id="mark-read" hidden type="button">Mark shown read</button><button id="refresh" class="quiet" type="button" aria-label="Refresh messages">Refresh</button></div>
         </div>
         <form id="search-form" class="search-form" hidden>
@@ -62,12 +62,13 @@
         </form>
       </main>
       <aside id="thread-panel" class="thread-panel" aria-label="Message thread" hidden>
-        <div class="thread-heading"><div><p class="eyebrow" id="thread-channel">Conversation</p><h2>Thread</h2></div><button id="thread-close" class="quiet" type="button" aria-label="Close thread">×</button></div>
+        <div class="thread-heading"><div><p class="eyebrow" id="thread-channel">Conversation</p><h2>Thread</h2></div><div class="thread-actions"><button id="thread-mark-read" type="button" hidden>Mark shown read</button><button id="thread-close" class="quiet" type="button" aria-label="Close thread">×</button></div></div>
         <div id="thread-messages" class="messages" aria-live="polite"></div>
         <button id="thread-more" type="button" hidden>Load more replies</button>
         <form id="thread-composer" class="composer">
           <label for="reply-text">Reply in thread</label>
           <textarea id="reply-text" rows="3" maxlength="16000" placeholder="Write a reply…" required></textarea>
+          <label class="reply-options"><input id="reply-send-to-channel" type="checkbox" /><span id="reply-send-label">Also send to channel</span></label>
           <div class="composer-bottom"><span id="reply-note" class="muted">Replies stay in this thread.</span><button id="send-reply" class="primary" type="submit">Send reply</button></div>
         </form>
       </aside>
@@ -108,11 +109,16 @@
     <dialog id="agent-dialog" aria-labelledby="agent-title">
       <div class="dialog-heading"><div><p class="eyebrow">Streamable HTTP · <span id="agent-org"></span></p><h2 id="agent-title">How to connect an agent</h2></div><button id="agent-close" class="quiet" type="button" aria-label="Close agent connection guide">×</button></div>
       <div class="agent-settings">
-        <label>Agent user<input id="agent-user" maxlength="64" required autocomplete="off" /></label>
+        <label>Agent user<input id="agent-user" maxlength="64" required autocomplete="off" autofocus /></label>
         <label>Client<select id="agent-client"></select></label>
       </div>
-      <p class="muted">Use a different user for a separate inbox. Reusing your browser user shares subscriptions and read positions.</p>
+      <p class="muted">Use a different user for a separate inbox. Reusing your browser user shares subscriptions and read acknowledgements.</p>
       <div id="agent-auth-settings" hidden>
+        <div class="agent-settings">
+          <label>Token lifetime<input id="agent-ttl" type="number" min="1" max="30" step="1" value="30" required /></label>
+          <label>Unit<select id="agent-ttl-unit"><option value="86400" selected>Days</option><option value="3600">Hours</option><option value="60">Minutes</option><option value="1">Seconds</option></select></label>
+        </div>
+        <p class="muted">Choose a lifetime from 1 second to 30 days. The default is 30 days.</p>
         <div class="agent-settings">
           <label>Issued agent token<input id="agent-token" type="password" readonly autocomplete="off" placeholder="Issue a token for this agent" /></label>
           <label>Authentication<select id="agent-auth"><option value="bearer">Bearer header (recommended)</option><option value="url">Token in URL</option></select></label>

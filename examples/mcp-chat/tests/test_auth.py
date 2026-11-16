@@ -211,10 +211,19 @@ async def test_ui_is_public_but_demo_rejects_credentials(tmp_path: Path) -> None
         assert response.status == 401
 
 
-@pytest.mark.parametrize("ttl", [0, -1, 86401, True])
+@pytest.mark.parametrize("ttl", [0, -1, 2592001, True])
 def test_token_issue_requires_valid_lifetime(ttl: int) -> None:
     with pytest.raises(ValueError):
         issue_token(SECRET, "example.com", "alice", ttl)
+
+
+@pytest.mark.parametrize("ttl", [1, 86401, 2592000])
+def test_token_issue_accepts_lifetime_up_to_thirty_days(ttl: int) -> None:
+    token = issue_token(SECRET, "example.com", "alice", ttl)
+    claims = jwt.decode(
+        token, SECRET, algorithms=["HS256"], audience="mcp-chat", options={"verify_exp": False}
+    )
+    assert claims["exp"] - claims["iat"] == ttl
 
 
 def test_token_issue_and_server_require_strong_key(tmp_path: Path) -> None:
@@ -367,7 +376,12 @@ async def test_web_token_requires_valid_web_cookie(tmp_path: Path, kind: str) ->
 
 
 @pytest.mark.parametrize(
-    "body", [{"org": "example.com"}, {"org": "example.com", "user": "alice", "ttl_seconds": 0}]
+    "body",
+    [
+        {"org": "example.com"},
+        {"org": "example.com", "user": "alice", "ttl_seconds": 0},
+        {"org": "example.com", "user": "alice", "ttl_seconds": 2592001},
+    ],
 )
 async def test_web_token_validates_context_and_ttl(tmp_path: Path, body: dict[str, Any]) -> None:
     async with TestClient(

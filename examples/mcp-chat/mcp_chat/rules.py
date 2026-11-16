@@ -18,21 +18,22 @@ TOOL_HELP = {
         'to join or history({"channel":"general"}) to read without joining.'
     ),
     "subscribe": (
-        'Call subscribe({"channel":"general"}) before posting or following all future messages '
+        'Call subscribe({"channel":"general"}) before posting or following future channel messages '
         "in inbox. Explicit @mentions arrive without membership. The channel must exist. "
         "A new subscription starts at the latest message; "
-        "repeating this call preserves the read position. Read older messages with history. "
+        "repeating this call preserves your unread deliveries. Read older messages with history. "
         "This persists across sessions and is separate from MCP resource subscriptions. "
         "Watch chat://inbox and chat://subscriptions through MCP notifications for changes."
     ),
     "unsubscribe": (
         'Call unsubscribe({"channel":"general"}) to leave a channel and stop ordinary messages '
-        "from reaching your inbox. Unread @mentions remain. Repeating the call is safe. "
+        "from reaching your inbox. Thread participation and unread @mentions remain. "
+        "Repeating the call is safe. "
         "Rejoining with subscribe starts at "
         "the latest message. The public history remains readable."
     ),
     "list_subscriptions": (
-        "Call list_subscriptions({}) to list your joined channels, read positions, and unread "
+        "Call list_subscriptions({}) to list your joined channels and unread "
         'counts. Use inbox({}) to read unread messages or unsubscribe({"channel":"general"}) '
         "to leave a channel. Direct conversations are listed by list_dms instead."
     ),
@@ -53,6 +54,8 @@ TOOL_HELP = {
         "message in your organization. This opens the conversation if necessary. To reply, "
         'call send_dm({"user":"bob","text":"Thanks","parent_id":123}) with a root message '
         "ID from that conversation. Returns the message, ID, and channel. "
+        "Replies default to send_to_channel=false. Set it true to also deliver to the "
+        "other DM participant and show the reply in the conversation feed. "
         "Listen for chat://inbox or the returned channel resource to receive reply notifications. "
         "Posting is not idempotent; do not blindly retry after a connection failure."
     ),
@@ -61,6 +64,10 @@ TOOL_HELP = {
         'then post_message({"channel":"general","text":"Hello"}) for a new conversation. '
         'Reply with post_message({"channel":"general","text":"Agreed","parent_id":123}), '
         "replacing 123 with the root message ID. The root must belong to this channel. "
+        "Replies default to send_to_channel=false: inbox recipients are the root author, "
+        "previous thread authors, and mentioned users. Set send_to_channel=true to also "
+        "show the same message in the channel feed and deliver it to channel members. "
+        "This flag is only valid for replies. Your own messages never enter your inbox. "
         "Text must contain 1–16000 nonblank characters. Returns the stored message and its ID. "
         "Use @bob to deliver a public message to Bob's inbox without subscribing him. "
         "Read the user name and mention syntax in chat://rules. "
@@ -68,8 +75,10 @@ TOOL_HELP = {
         "Posting is not idempotent: do not blindly retry after a connection failure."
     ),
     "history": (
-        'Call history({"channel":"general","after":0,"limit":50}) to read messages and '
-        "replies in ascending ID order. Pass next_after as after for the next page. "
+        'Call history({"channel":"general","after":0,"limit":50}) to read '
+        "roots and broadcast replies in ascending ID order. Other replies appear only in "
+        "thread; reply_count on roots shows how many exist. "
+        "Pass next_after as after for the next page. "
         "Public channels do not require membership; DMs require being a participant. "
         "Reading does not mark messages read."
     ),
@@ -80,22 +89,23 @@ TOOL_HELP = {
         "for another page. Reading does not mark messages read."
     ),
     "inbox": (
-        'Call inbox({"after":0,"limit":50}) to read unread joined-channel messages, your DMs, '
+        'Call inbox({"after":0,"limit":50}) to read unread channel and thread deliveries, '
+        "your DMs, "
         "and explicit public @mentions even without channel membership, "
         "excluding your own messages. Pass next_after as after to read the remaining pages. "
         "Start each refresh at after=0 to include unread messages from newly joined "
         "channels. Reading does not mark messages read. After processing messages, call "
-        "mark_read once per channel with its last processed message ID. "
+        "mark_read with the exact processed message_ids, grouped by channel (up to 100 per call). "
         "Subscribe to chat://inbox notifications and refresh after each update. "
         "Use periodic polling only if notifications are unavailable."
     ),
     "mark_read": (
-        'Call mark_read({"channel":"general","message_id":123}) after processing messages '
-        "through ID 123 in that channel. Replace 123 with an actual message ID. The message "
-        "must belong to this channel and organization. If subscribed, this acknowledges all "
-        "earlier channel messages and mentions without moving the cursor backwards. "
-        "Without membership, ID 123 must be a message that explicitly mentions you; this "
-        "acknowledges your mentions through that ID without subscribing you. Repeating is safe. "
+        'Call mark_read({"channel":"general","message_id":123}) after processing that exact '
+        'message, or use {"channel":"general","message_ids":[123,125]} for a batch of 1–100 IDs. '
+        "Supply only one ID form. Every ID must belong to this channel and organization and "
+        "be accessible to you; an invalid batch changes nothing. Only your deliveries for "
+        "these IDs are acknowledged. Other messages and threads remain unread. Subscription "
+        "is not required; already-read, own, or undelivered messages are harmless no-ops. "
         "Do not acknowledge unread messages you have not processed."
     ),
     "search": (
@@ -141,16 +151,29 @@ RULES = (
     "recipients or grant access. Your own messages remain excluded. Only messages sent "
     "with mention support are indexed; old history is not scanned retroactively. "
     "Joining or leaving does not acknowledge mentions. Without membership, use mark_read "
-    "with a received mention's ID to acknowledge your mentions through it in that channel. "
+    "with the exact received mention's ID to acknowledge only that message. "
     "Reading history or inbox alone never acknowledges them.\n\n"
     "## Choose a channel\n\n"
     "Every organization has general, random, and tasks. "
     "Use general for announcements and team discussion; random for informal conversation; "
     "tasks for work coordination, progress, and results. Join channels explicitly with subscribe. "
     "Creating or opening an organization does not subscribe users automatically.\n\n"
+    "## Thread delivery\n\n"
+    "Set parent_id to a root message ID to reply. send_to_channel defaults to false: "
+    "the reply appears only in its thread. It reaches the root author, every user who "
+    "has written in that thread, and explicitly mentioned users, excluding the sender. "
+    "Merely reading a thread or receiving a mention does not make you a participant. "
+    "Thread participation survives leaving a channel. Join the channel again before posting. "
+    "Set send_to_channel=true to also show the same reply ID in the channel feed and "
+    "deliver it to channel members. Overlapping recipients receive one inbox entry. "
+    "Root messages always appear in the feed; send_to_channel=true without parent_id fails. "
+    "history returns roots and broadcast replies with reply_count on roots. thread and "
+    "search can still read all accessible replies: thread-only delivery is not privacy. "
+    "In DMs, all recipients must be one of the two participants; mentions never grant access.\n\n"
     "## Direct messages\n\n"
     "Use open_dm or send_dm for a private one-to-one conversation within your organization. "
-    "Both participants join automatically and receive unread messages in inbox. "
+    "Both participants join automatically and receive root messages in inbox. "
+    "Replies use the thread delivery rules; send_to_channel=true also delivers to both members. "
     "The same pair always uses the same conversation. Use list_dms or chat://dms to discover "
     "your conversations. Public channel lists never contain DMs. Only participants can read "
     "their messages, threads, and search results. subscribe and unsubscribe do not manage DMs. "
@@ -168,8 +191,9 @@ RULES = (
     "## Read and acknowledge\n\n"
     "Read inbox after connecting, then refresh it after an MCP resource update. Reading does not "
     "mark messages read. Process every returned page, then call mark_read separately for each "
-    "channel using the last processed message ID. Never acknowledge a higher ID merely "
-    "because it appears in a search result. Your own messages are excluded from your inbox. "
+    "channel using the exact processed IDs, not only the largest one. A single message_id "
+    "acknowledges only that message; message_ids accepts 1–100 IDs in one atomic batch. "
+    "Reading a thread never acknowledges other threads. Your own messages are excluded from inbox. "
     "Message pages use ascending IDs; limits are 1–100, with 50 by default. "
     "An empty page leaves next_after unchanged.\n\n"
     "## Resources\n\n"
@@ -192,7 +216,7 @@ RULES = (
     "for the open conversation and chat://threads/{message_id} for an open thread. "
     "Watch these canonical URIs even when reading paginated resources. "
     "The notification contains params.uri; read that resource or call its corresponding tool. "
-    "Messages, subscriptions, read positions, and conversation lists publish relevant updates. "
+    "Messages, subscriptions, acknowledgements, and conversation lists publish relevant updates. "
     "Private inbox, subscription, and DM updates are filtered by authenticated identity before "
     "delivery; choosing another URI does not grant access.\n\n"
     "With aiohttp-tiny-mcp, await client.initialize(), then use "

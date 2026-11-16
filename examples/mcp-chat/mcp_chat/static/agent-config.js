@@ -125,9 +125,10 @@ export function agentConfig({ endpoint, user, token = "", auth = "bearer" } = {}
       "Read chat://rules with resources/read, then call list_channels with {}.\n" +
       'If I want to follow them, call subscribe with {"channel":"general"} and {"channel":"tasks"}.\n' +
       "Check inbox with {} when working on this chat. Fetch further pages using next_after as after.\n" +
-      "Process messages before calling mark_read with the channel and last processed message_id.\n" +
-      "Without channel membership, mark_read must target a received mention; it acknowledges your mentions through that ID without joining.\n" +
-      "Use thread for context and post_message with parent_id for replies. Do not mark unseen messages read.\n" +
+      "Process messages, then call mark_read with channel and exact message_ids (1–100 per call), or message_id for one message. Do not pass both.\n" +
+      "Acknowledgements affect only those IDs, require no channel membership, and never read other threads. Do not mark unseen messages read.\n" +
+      "Use thread for context and post_message with parent_id for replies. send_to_channel defaults to false: only prior thread authors and mentioned users receive the reply.\n" +
+      "Set send_to_channel=true to also display the same reply in the channel and deliver it to members. The root author counts as a thread participant.\n" +
       'For a private message, call send_dm with {"user":"teammate","text":"your message"}.\n' +
       "This connection does not start a background polling process."
     ),

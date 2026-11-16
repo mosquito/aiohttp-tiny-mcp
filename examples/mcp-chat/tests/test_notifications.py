@@ -120,7 +120,14 @@ async def test_membership_messages_threads_and_read_positions_notify(
         thread_events = await stack.enter_async_context(
             listening(thread_watch, [f"chat://threads/{root['id']}"], monkeypatch)
         )
-        await call(alice, "post_message", channel="news", text="More detail", parent_id=root["id"])
+        await call(
+            alice,
+            "post_message",
+            channel="news",
+            text="More detail",
+            parent_id=root["id"],
+            send_to_channel=True,
+        )
         assert await next_uri(thread_events) == f"chat://threads/{root['id']}"
         assert await next_uri(bob_events) == "chat://inbox"
         await call(bob, "unsubscribe", channel="news")
@@ -156,7 +163,14 @@ async def test_dm_notifications_do_not_leak_to_guessed_uris_or_other_organizatio
                 monkeypatch,
             )
         )
-        await call(alice, "send_dm", user="bob", text="Private reply", parent_id=root["id"])
+        await call(
+            alice,
+            "send_dm",
+            user="bob",
+            text="Private reply",
+            parent_id=root["id"],
+            send_to_channel=True,
+        )
         assert {await next_uri(bob_events) for index in range(4)} == set(watched)
         await call(alice, "open_dm", user="bob")
         assert await next_uri(bob_events) == "chat://dms"
@@ -167,6 +181,54 @@ async def test_dm_notifications_do_not_leak_to_guessed_uris_or_other_organizatio
         await call(foreign, "create_channel", name="marker")
         await call(foreign, "post_message", channel="marker", text="Other org sentinel")
         assert await next_uri(foreign_events) == "chat://channels/marker"
+
+
+@pytest.mark.parametrize("adapter", ADAPTERS, ids=["modern", "legacy"])
+@pytest.mark.parametrize("direct", [False, True], ids=["public", "dm"])
+async def test_thread_readers_receive_updates_without_inbox_delivery(
+    tmp_path: Path, adapter: Adapter, direct: bool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async with AsyncExitStack() as stack:
+        server = await stack.enter_async_context(
+            TestServer(create_app(tmp_path / "chat.sqlite3", jwt_secret=SECRET))
+        )
+        alice = await client_for(stack, server, adapter, "alice")
+        bob = await client_for(stack, server, adapter, "bob")
+        charlie = await client_for(stack, server, adapter, "charlie")
+        foreign = await client_for(stack, server, adapter, "bob", "other.example")
+        await call(alice, "create_channel", name="marker")
+        await call(foreign, "create_channel", name="marker")
+        if direct:
+            root = await call(alice, "send_dm", user="bob", text="Private root")
+            await call(bob, "mark_read", channel=root["channel"], message_id=root["id"])
+        else:
+            await call(alice, "create_channel", name="news")
+            root = await call(alice, "post_message", channel="news", text="Public root")
+        thread_uri = f"chat://threads/{root['id']}"
+        marker_uri = "chat://channels/marker"
+        watched = [thread_uri, "chat://inbox", marker_uri]
+        bob_events = await stack.enter_async_context(listening(bob, watched, monkeypatch))
+        charlie_events = await stack.enter_async_context(listening(charlie, watched, monkeypatch))
+        foreign_events = await stack.enter_async_context(listening(foreign, watched, monkeypatch))
+        reply = await call(
+            alice,
+            "post_message",
+            channel=root["channel"],
+            text="Thread-only reply",
+            parent_id=root["id"],
+        )
+        await call(alice, "post_message", channel="marker", text="Public sentinel")
+        assert await next_uri(bob_events) == thread_uri
+        assert await next_uri(bob_events) == marker_uri
+        if not direct:
+            assert await next_uri(charlie_events) == thread_uri
+        assert await next_uri(charlie_events) == marker_uri
+        await call(foreign, "post_message", channel="marker", text="Other org sentinel")
+        assert await next_uri(foreign_events) == marker_uri
+        assert (await call(bob, "inbox"))["messages"] == []
+        assert (await call(charlie, "inbox"))["messages"] == []
+        thread = await call(bob, "thread", message_id=root["id"])
+        assert [message["id"] for message in thread["messages"]] == [root["id"], reply["id"]]
 
 
 async def test_private_filter_fails_closed_and_advances_the_cursor() -> None:

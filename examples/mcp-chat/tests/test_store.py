@@ -36,6 +36,8 @@ async def test_concurrent_writes_keep_messages_and_unread_state(store: Store) ->
         store.mark_read("example.com", "bob", "general", ids[-1]),
         store.mark_read("example.com", "bob", "general", ids[0]),
     )
+    assert [row["id"] for row in await store.inbox("example.com", "bob")] == ids[1:-1]
+    await store.mark_read("example.com", "bob", "general", ids[1:-1])
     assert await store.inbox("example.com", "bob") == []
 
 
@@ -54,8 +56,8 @@ async def test_invalid_references_do_not_change_channel_or_read_state(store: Sto
         await store.post_message("example.com", "alice", "general", "Wrong parent", foreign["id"])
     with pytest.raises(ValueError):
         await store.post_message("example.com", "alice", "general", "Nested reply", reply["id"])
-    assert len(await store.inbox("example.com", "bob")) == 2
-    assert len(await store.history("example.com", "general")) == 2
+    assert len(await store.inbox("example.com", "bob")) == 1
+    assert len(await store.history("example.com", "general")) == 1
     assert await store.post_message("example.com", "alice", "general", "Still usable")
 
 

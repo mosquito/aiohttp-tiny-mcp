@@ -121,7 +121,8 @@ async def test_public_mentions_are_paged_and_acknowledged_without_membership(
         page = await call(bob, "inbox", after=page["next_after"], limit=1)
         assert [message["id"] for message in page["messages"]] == [reply["id"]]
         assert (await call(bob, "inbox", after=page["next_after"]))["messages"] == []
-        await refused(bob, "mark_read", channel="news", message_id=plain["id"])
+        await call(bob, "mark_read", channel="news", message_id=plain["id"])
+        assert len((await call(bob, "inbox"))["messages"]) == 2
         await call(bob, "mark_read", channel="news", message_id=root["id"])
         await call(bob, "mark_read", channel="news", message_id=root["id"])
         assert [message["id"] for message in (await call(bob, "inbox"))["messages"]] == [
@@ -134,7 +135,7 @@ async def test_public_mentions_are_paged_and_acknowledged_without_membership(
             reply["id"],
             both["id"],
         ]
-        await call(bob, "mark_read", channel="news", message_id=both["id"])
+        await call(bob, "mark_read", channel="news", message_ids=[reply["id"], both["id"]])
         await call(bob, "unsubscribe", channel="news")
         assert (await call(bob, "inbox"))["messages"] == []
         late = await call(alice, "post_message", channel="news", text="@bob after leaving")

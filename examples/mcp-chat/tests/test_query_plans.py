@@ -44,7 +44,8 @@ async def test_thread_seeks_root_and_replies_instead_of_organization(store: Quer
         root["id"],
         reply["id"],
     ]
-    plan = await store.plan(store.queries[-1])
+    query = next(query for query in reversed(store.queries) if "UNION ALL SELECT" in query[0])
+    plan = await store.plan(query)
     assert "messages_thread" in plan
     assert "messages_org_id" not in plan
 
@@ -54,7 +55,8 @@ async def test_fts_uses_ordered_cursor_without_sorting_all_matches(store: QueryS
     reply = await store.post_message("example.com", "alice", "general", "common token")
     result = await store.search("example.com", "common", after=root["id"])
     assert [row["id"] for row in result] == [reply["id"]]
-    plan = await store.plan(store.queries[-1])
+    query = next(query for query in reversed(store.queries) if "FROM messages_fts" in query[0])
+    plan = await store.plan(query)
     assert "messages_fts VIRTUAL TABLE" in plan
     assert "TEMP B-TREE FOR ORDER BY" not in plan
 
@@ -85,6 +87,10 @@ async def test_inbox_work_is_bounded_for_large_unread_backlog(store: QueryStore)
             "INSERT INTO messages(org,channel,user,text) VALUES (?,?,?,?)",
             [("example.com", "general", "alice", "unread") for number in range(20000)],
         )
+        await connection.execute(
+            "INSERT INTO deliveries(org,user,channel,message_id) "
+            "SELECT org,'bob',channel,id FROM messages"
+        )
     callbacks = 0
 
     def progress() -> int:
@@ -99,7 +105,10 @@ async def test_inbox_work_is_bounded_for_large_unread_backlog(store: QueryStore)
         await store.connection.set_progress_handler(progress, 0)
     assert [message["id"] for message in page] == list(range(1, 11))
     assert callbacks < 20
-    await store.mark_read("example.com", "bob", "general", 20000)
+    for offset in range(0, 20000, 100):
+        await store.mark_read(
+            "example.com", "bob", "general", list(range(offset + 1, offset + 101))
+        )
     last = await store.post_message("example.com", "alice", "general", "last unread")
     callbacks = 0
     await store.connection.set_progress_handler(progress, 1000)
@@ -124,3 +133,24 @@ async def test_inbox_limits_apply_after_excluding_own_messages(store: QueryStore
     assert [
         row["id"] for row in await store.inbox("example.com", "bob", after=first["id"], limit=1)
     ] == [second["id"]]
+
+
+async def test_feed_and_delivery_queries_use_selective_indexes(store: QueryStore) -> None:
+    await store.subscribe("example.com", "bob", "general")
+    root = await store.post_message("example.com", "alice", "general", "Root")
+    await store.post_message("example.com", "bob", "general", "Reply", root["id"])
+    await store.history("example.com", "general")
+    feed = next(query for query in reversed(store.queries) if "send_to_channel = 1" in query[0])
+    assert "messages_feed" in await store.plan(feed)
+    await store.inbox("example.com", "alice")
+    inbox = next(
+        query for query in reversed(store.queries) if "FROM deliveries n CROSS JOIN" in query[0]
+    )
+    plan = await store.plan(inbox)
+    assert "deliveries_unread" in plan
+    assert "TEMP B-TREE FOR ORDER BY" not in plan
+    await store.mark_read("example.com", "alice", "general", root["id"])
+    validation = next(
+        query for query in reversed(store.queries) if query[0].startswith("SELECT id FROM messages")
+    )
+    assert "SEARCH messages" in await store.plan(validation)

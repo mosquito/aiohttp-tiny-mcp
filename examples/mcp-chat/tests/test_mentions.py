@@ -46,6 +46,7 @@ async def test_root_and_reply_mentions_arrive_without_membership(store: Store) -
     root = await store.post_message("example.com", "alice", "random", "@bob please review")
     reply = await store.post_message("example.com", "alice", "random", "Follow up @bob", root["id"])
     await store.post_message("example.com", "alice", "random", "Unrelated")
+    root["reply_count"] = 1
     assert await store.inbox("example.com", "bob") == [root, reply]
     assert await store.list_subscriptions("example.com", "bob") == []
     channel = next(
@@ -53,7 +54,7 @@ async def test_root_and_reply_mentions_arrive_without_membership(store: Store) -
     )
     assert channel["subscribed"] is False
     assert channel["unread"] == 2
-    result = await store.mark_read("example.com", "bob", "random", reply["id"])
+    result = await store.mark_read("example.com", "bob", "random", [root["id"], reply["id"]])
     assert result["subscribed"] is False
     assert result["last_read_id"] == reply["id"]
     assert await store.inbox("example.com", "bob") == []
@@ -71,7 +72,7 @@ async def test_subscribed_and_repeated_mentions_are_not_duplicated(store: Store)
         row for row in await store.list_channels("example.com", "bob") if row["name"] == "general"
     )
     assert channel["unread"] == 1
-    await store.mark_read("example.com", "bob", "general", own["id"])
+    await store.mark_read("example.com", "bob", "general", [message["id"], own["id"]])
     await store.unsubscribe("example.com", "bob", "general")
     assert await store.inbox("example.com", "bob") == []
 
@@ -104,12 +105,13 @@ async def test_mentions_mix_with_subscriptions_in_paginated_id_order(store: Stor
     await store.post_message("example.com", "alice", "random", "Not for bob")
     third = await store.post_message("example.com", "alice", "general", "@bob repeated @bob")
     fourth = await store.post_message("example.com", "alice", "random", "@bob reply", second["id"])
+    second["reply_count"] = 1
     page = await store.inbox("example.com", "bob", limit=2)
     assert page == [first, second]
     page = await store.inbox("example.com", "bob", after=page[-1]["id"], limit=2)
     assert page == [third, fourth]
     assert await store.inbox("example.com", "bob", after=page[-1]["id"], limit=2) == []
-    await store.mark_read("example.com", "bob", "random", fourth["id"])
+    await store.mark_read("example.com", "bob", "random", [second["id"], fourth["id"]])
     assert await store.inbox("example.com", "bob") == [first, third]
 
 
@@ -131,11 +133,10 @@ async def test_mentions_do_not_cross_orgs_or_private_conversations(store: Store)
     assert await store.inbox("example.com", "carol") == [private]
 
 
-async def test_nonmembers_can_acknowledge_only_their_delivered_mentions(store: Store) -> None:
+async def test_nonmember_acknowledgement_does_not_change_other_deliveries(store: Store) -> None:
     first = await store.post_message("example.com", "alice", "random", "@bob first")
     unrelated = await store.post_message("example.com", "alice", "random", "@carol second")
-    with pytest.raises(ValueError, match="received mention"):
-        await store.mark_read("example.com", "bob", "random", unrelated["id"])
+    await store.mark_read("example.com", "bob", "random", unrelated["id"])
     with pytest.raises(ValueError, match="this channel"):
         await store.mark_read("example.com", "bob", "general", first["id"])
     assert await store.inbox("example.com", "bob") == [first]
@@ -148,17 +149,20 @@ async def test_notification_recipients_include_only_current_public_mentions(stor
     second = await store.post_message("example.com", "alice", "random", "@carol")
     assert await store.notification_recipients("example.com", "alice", "random", first["id"]) == {
         "kind": "channel",
+        "viewers": None,
         "users": ["alice", "bob", "member"],
     }
     assert await store.notification_recipients("example.com", "alice", "random", second["id"]) == {
         "kind": "channel",
+        "viewers": None,
         "users": ["alice", "carol", "member"],
     }
     assert await store.notification_recipients("example.com", "alice", "random") == {
         "kind": "channel",
+        "viewers": None,
         "users": ["alice", "member"],
     }
     private = await store.send_dm("example.com", "alice", "carol", "@bob")
     assert await store.notification_recipients(
         "example.com", "alice", private["channel"], private["id"]
-    ) == {"kind": "dm", "users": ["alice", "carol"]}
+    ) == {"kind": "dm", "users": ["alice", "carol"], "viewers": ["alice", "carol"]}
