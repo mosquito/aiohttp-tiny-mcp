@@ -736,6 +736,24 @@ function encodeHeader(value) {
 
 
 const page = {
+  addAgent: document.getElementById("add-agent"),
+  agentSetup: document.getElementById("agent-setup"),
+  agentForm: document.getElementById("agent-form"),
+  agentMethod: document.getElementById("agent-method"),
+  agentName: document.getElementById("agent-name"),
+  agentEndpoint: document.getElementById("agent-endpoint"),
+  agentHeadersField: document.getElementById("agent-headers-field"),
+  agentHeaders: document.getElementById("agent-headers"),
+  agentTarget: document.getElementById("agent-target"),
+  agentInstructions: document.getElementById("agent-instructions"),
+  agentLanguage: document.getElementById("agent-language"),
+  agentCode: document.getElementById("agent-code"),
+  agentVerify: document.getElementById("agent-verify"),
+  agentDocs: document.getElementById("agent-docs"),
+  agentError: document.getElementById("agent-error"),
+  agentCopyStatus: document.getElementById("agent-copy-status"),
+  agentClose: document.getElementById("agent-close"),
+  agentCopy: document.getElementById("agent-copy"),
   serverTitle: document.getElementById("server-title"),
   authOAuth: document.getElementById("auth-oauth"),
   authOAuthStatus: document.getElementById("auth-oauth-status"),
@@ -802,6 +820,101 @@ let oauthConfig = null;
 let oauthMetadata = null;
 let oauthGeneration = 0;
 let cancelOAuth = null;
+let agentConnection = null;
+
+function renderAgentSetup() {
+  page.agentCopyStatus.textContent = "";
+  page.agentError.textContent = "";
+  page.agentCode.value = "";
+  page.agentCopy.disabled = true;
+  page.agentTarget.textContent = "";
+  page.agentInstructions.textContent = "";
+  page.agentVerify.textContent = "";
+  page.agentDocs.hidden = true;
+  try {
+    if (!agentConnection) return;
+    const variants = agentConfigurations({
+      endpoint: agentConnection.url,
+      name: page.agentName.value,
+      headers: page.agentHeaders.checked ? agentConnection.headers : {},
+    });
+    const choice = page.agentMethod.value;
+    if (!page.agentMethod.options.length) {
+      for (const variant of variants) {
+        const option = element("option", null, variant.label);
+        option.value = variant.id;
+        page.agentMethod.append(option);
+      }
+    }
+    const variant = variants.find(item => item.id === choice) || variants[0];
+    page.agentMethod.value = variant.id;
+    page.agentTarget.textContent = variant.target;
+    page.agentInstructions.textContent = variant.instructions;
+    page.agentLanguage.textContent = variant.language.toUpperCase();
+    page.agentCode.value = variant.code;
+    page.agentVerify.textContent = variant.verify;
+    page.agentDocs.href = variant.link;
+    page.agentDocs.hidden = false;
+    page.agentCopy.disabled = false;
+  } catch (error) {
+    page.agentError.textContent = error.message;
+  }
+}
+
+function openAgentSetup() {
+  agentConnection = null;
+  page.agentMethod.textContent = "";
+  page.agentHeaders.checked = true;
+  page.agentHeadersField.hidden = true;
+  page.agentEndpoint.textContent = "";
+  page.agentName.value = (page.serverTitle.textContent.trim().toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 64)) || "mcp";
+  renderAgentSetup();
+  try {
+    const typed = page.endpoint.value.trim() || configuredEndpoint.href;
+    const url = new URL(typed, location.origin);
+    if (url.origin !== location.origin) throw new Error("The endpoint must be on this server.");
+    if (url.username || url.password) throw new Error("Enter credentials through Authentication.");
+    url.hash = "";
+    const saved = new ConsoleCredentials();
+    saved.restore(url.href);
+    const headers = credentials.endpoint === url.href
+      ? credentials.forEndpoint(url.href) : saved.forEndpoint(url.href);
+    agentConnection = {url: url.href, headers};
+    page.agentEndpoint.textContent = url.href;
+    page.agentHeadersField.hidden = !Object.keys(headers).length;
+    renderAgentSetup();
+  } catch (error) {
+    page.agentError.textContent = error.message;
+  }
+  if (!page.agentSetup.open) page.agentSetup.showModal();
+}
+
+function setupAgentDialog() {
+  if (!page.addAgent || !page.agentSetup) return;
+  page.addAgent.onclick = openAgentSetup;
+  page.agentMethod.onchange = renderAgentSetup;
+  page.agentName.oninput = renderAgentSetup;
+  page.agentHeaders.onchange = renderAgentSetup;
+  page.agentClose.onclick = () => page.agentSetup.close();
+  page.agentForm.onsubmit = event => event.preventDefault();
+  page.agentSetup.addEventListener("close", () => {
+    agentConnection = null;
+    page.agentCode.value = "";
+    page.agentEndpoint.textContent = "";
+  });
+  page.agentCopy.onclick = async () => {
+    if (!page.agentCode.value) return;
+    try {
+      await navigator.clipboard.writeText(page.agentCode.value);
+      page.agentCopyStatus.textContent = "Configuration copied.";
+    } catch {
+      page.agentCode.focus();
+      page.agentCode.select();
+      page.agentCopyStatus.textContent = "Copy the selected configuration with your keyboard.";
+    }
+  };
+}
 
 function resetOAuth() {
   oauthGeneration++;
@@ -1621,11 +1734,18 @@ function markdownHtml(text) {
       continue;
     }
 
-    const heading = line.match(/^(#{1,6})\s+(.*)$/);
-    if (heading) {
+    const heading = line.match(/^ {0,3}(#{1,7})(?:[\t ]+(.*)|[\t ]*)$/);
+    const headingTag = line.match(/^ {0,3}<h([1-7])>(.*?)<\/h\1>[\t ]*$/i);
+    if (heading || headingTag) {
       endBoth();
-      const level = Math.min(heading[1].length + 2, 6); // the panel owns h1 and h2
-      out.push(`<h${level}>${inline(escapeHtml(heading[2]))}</h${level}>`);
+      const level = heading ? heading[1].length : Number(headingTag[1]);
+      const content = heading
+        ? (heading[2] || "").replace(/[\t ]+#+[\t ]*$/, "").trim()
+        : headingTag[2];
+      const rendered = inline(escapeHtml(content));
+      out.push(level === 7
+        ? `<div role="heading" aria-level="7">${rendered}</div>`
+        : `<h${level}>${rendered}</h${level}>`);
       continue;
     }
 
@@ -1673,7 +1793,7 @@ function plain(text) {
     .replace(/`([^`]+)`/g, "$1")
     .replace(/\*\*([^*]+)\*\*/g, "$1")
     .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
-    .replace(/^#{1,6}\s+/, "")
+    .replace(/^#{1,7}\s+/, "")
     .replace(/^\s*[-*+]\s+/, "");
 }
 
@@ -2277,7 +2397,39 @@ function showServerInstructions(clearFragment = true) {
   if (catalogue) catalogue.fold();
 }
 
+function rememberConnection(connected) {
+  try {
+    const key = `mcp-console-connection:${location.pathname}`;
+    if (!connected) {
+      sessionStorage.removeItem(key);
+      return;
+    }
+    sessionStorage.setItem(key, JSON.stringify({
+      endpoint: endpointUrl.href,
+      revision: page.revision.value,
+      answerable: page.answerable.checked,
+      notifications: page.notifications.checked,
+    }));
+  } catch {}
+}
+
+function restoreConnection() {
+  try {
+    const saved = JSON.parse(sessionStorage.getItem(`mcp-console-connection:${location.pathname}`));
+    if (!saved || typeof saved.endpoint !== "string" || !REVISIONS[saved.revision]
+        || typeof saved.answerable !== "boolean" || typeof saved.notifications !== "boolean") return;
+    const url = new URL(saved.endpoint);
+    if (url.origin !== location.origin || url.username || url.password || url.hash) return;
+    page.endpoint.value = url.pathname + url.search;
+    page.revision.value = saved.revision;
+    page.answerable.checked = saved.answerable;
+    page.notifications.checked = saved.notifications;
+    connect();
+  } catch {}
+}
+
 function disconnect() {
+  rememberConnection(false);
   // Sessions expire server-side; there is no close request.
   client?.abort.abort();
   client = null;
@@ -2300,6 +2452,7 @@ function disconnect() {
 }
 
 async function connect() {
+  rememberConnection(false);
   page.connect.disabled = true;
   page.authenticate.disabled = true;
   page.revision.disabled = true;
@@ -2331,6 +2484,7 @@ async function connect() {
     page.connect.textContent = "Disconnect";
     if (!chosen) showServerInstructions(false);
     client.startNotifications();
+    rememberConnection(true);
   } catch (error) {
     client?.abort.abort();
     setServerInstructions("");
@@ -2414,6 +2568,7 @@ function markTraffic() {
 function start() {
   if (page.serverTitle) page.serverTitle.onclick = () => showServerInstructions();
   setupAuthentication();
+  setupAgentDialog();
   Object.keys(REVISIONS).forEach((version) => {
     const option = element("option", null, version);
     option.value = version;
@@ -2470,6 +2625,7 @@ function start() {
   page.revision.onchange = () => {
     try { localStorage.setItem("mcp-console-revision", page.revision.value); } catch {}
   };
+  restoreConnection();
 }
 
 if (document.documentElement.dataset.oauthCallback === "true") {

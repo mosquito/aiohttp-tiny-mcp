@@ -23,6 +23,7 @@ HERE = Path(__file__).parent
 FILES = {
     "": ("index.html", "text/html"),
     "console.js": ("console.js", "application/javascript"),
+    "agent-config.js": ("agent-config.js", "application/javascript"),
     "console.css": ("console.css", "text/css"),
     "oauth-callback": ("oauth-callback.html", "text/html"),
 }

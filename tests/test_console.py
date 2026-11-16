@@ -19,11 +19,12 @@ async def served(registry):
         yield client
 
 
-async def test_the_page_and_its_two_files_are_served(served):
+async def test_the_page_and_its_assets_are_served(served):
     for path, kind in (
         ("/console", "text/html"),
         ("/console/console.css", "text/css"),
         ("/console/console.js", "application/javascript"),
+        ("/console/agent-config.js", "application/javascript"),
     ):
         response = await served.get(path)
         assert response.status == 200, path
@@ -42,6 +43,7 @@ async def test_the_assets_are_addressed_absolutely(served):
     body = await (await served.get("/console")).text()
     assert 'href="/console/console.css"' in body
     assert 'src="/console/console.js"' in body
+    assert 'src="/console/agent-config.js"' in body
     assert "{{BASE}}" not in body
 
     with_slash = await (await served.get("/console/")).text()

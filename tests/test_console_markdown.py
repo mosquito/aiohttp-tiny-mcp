@@ -76,9 +76,62 @@ def test_an_indented_block_is_code_too():
     )
 
 
-def test_a_heading_starts_below_the_panel_own_headings():
-    """The panel owns h1 and h2, so a description's `##` cannot take one."""
-    assert render("## Notes\n\nSomething.") == "<h4>Notes</h4><p>Something.</p>"
+@pytest.mark.parametrize("level", range(1, 8))
+def test_headings_keep_their_level(level: int):
+    expected = (
+        '<div role="heading" aria-level="7">Notes</div>'
+        if level == 7
+        else f"<h{level}>Notes</h{level}>"
+    )
+    assert render("#" * level + " Notes\n\nSomething.") == expected + "<p>Something.</p>"
+    assert render(f"<h{level}>Notes</h{level}>") == expected
+
+
+def test_headings_support_inline_formatting_and_closing_hashes():
+    assert render("  ## **Notes** and `code` ###  ") == (
+        "<h2><strong>Notes</strong> and <code>code</code></h2>"
+    )
+    assert render("<H3>*Notes* and `code`</H3>") == "<h3><em>Notes</em> and <code>code</code></h3>"
+    assert render("#") == "<h1></h1>"
+    assert render("## C#") == "<h2>C#</h2>"
+
+
+def test_headings_end_paragraphs_and_lists():
+    assert render("Before\n# Notes\nAfter\n- Item\n<h2>More</h2>") == (
+        "<p>Before</p><h1>Notes</h1><p>After</p><ul><li>Item</li></ul><h2>More</h2>"
+    )
+
+
+@pytest.mark.parametrize("text", ["# Notes", "<h1>Notes</h1>"])
+def test_headings_inside_code_remain_code(text: str):
+    escaped = text.replace("<", "&lt;").replace(">", "&gt;")
+    assert render(f"```\n{text}\n```") == f"<pre><code>{escaped}</code></pre>"
+    assert render("    " + text) == f"<pre><code>{escaped}</code></pre>"
+    assert render(f"`{text}`") == f"<p><code>{escaped}</code></p>"
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        '<h1 onclick="alert(1)">Notes</h1>',
+        "<h1>Notes</h2>",
+        "<h8>Notes</h8>",
+        "######## Notes",
+        "#Notes",
+    ],
+)
+def test_invalid_heading_syntax_stays_text(text: str):
+    escaped = text.replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
+    assert render(text) == f"<p>{escaped}</p>"
+
+
+def test_heading_content_cannot_inject_html():
+    assert render('<h1><img src=x onerror="alert(1)"></h1>') == (
+        "<h1>&lt;img src=x onerror=&quot;alert(1)&quot;&gt;</h1>"
+    )
+    assert render("<h7><script>alert(1)</script></h7>") == (
+        '<div role="heading" aria-level="7">&lt;script&gt;alert(1)&lt;/script&gt;</div>'
+    )
 
 
 def test_a_link_is_a_link():

@@ -78,6 +78,7 @@ page.catalogue = {{querySelectorAll() {{ return []; }} }};
 function rememberTool(name) {{ remembered = name; }}
 const credentials = {{restore() {{}}, forEndpoint() {{ return {{}}; }} }};
 function chosenEndpoint() {{ return new URL("http://localhost/mcp"); }}
+function rememberConnection() {{}}
 function setEndpointDisabled(disabled) {{ page.endpoint.disabled = disabled; }}
 function clearCredentials() {{}}
 function openAuthentication() {{}}

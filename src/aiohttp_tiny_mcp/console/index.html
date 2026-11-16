@@ -29,6 +29,7 @@
   </label>
   <button id="connect" class="primary">Connect</button>
   <button id="authenticate" class="quiet" type="button">Authentication</button>
+  <button id="add-agent" class="quiet" type="button">Add agent</button>
   <span id="status" class="status">not connected</span>
 </header>
 
@@ -140,6 +141,40 @@
   </form>
 </dialog>
 
+<dialog id="agent-setup" class="question agent-setup" aria-labelledby="agent-title">
+  <form id="agent-form" autocomplete="off">
+    <h2 id="agent-title">Add agent</h2>
+    <p class="auth-help">Connect an agent to this MCP endpoint.</p>
+    <p id="agent-endpoint" class="auth-endpoint"></p>
+    <div class="agent-options">
+      <label class="auth-field">Configuration
+        <select id="agent-method"></select>
+      </label>
+      <label class="auth-field">Server name
+        <input id="agent-name" type="text" spellcheck="false" maxlength="64" required>
+      </label>
+    </div>
+    <label id="agent-headers-field" class="toggle" hidden>
+      <input id="agent-headers" type="checkbox" checked>
+      <span>Include saved authentication headers</span>
+    </label>
+    <p id="agent-target" class="agent-target"></p>
+    <p id="agent-instructions"></p>
+    <label class="auth-field"><span id="agent-language">Configuration</span>
+      <textarea id="agent-code" rows="12" readonly spellcheck="false" wrap="off"></textarea>
+    </label>
+    <p id="agent-verify" class="auth-help"></p>
+    <a id="agent-docs" target="_blank" rel="noopener noreferrer">Agent documentation</a>
+    <p id="agent-error" class="auth-error" role="alert"></p>
+    <p id="agent-copy-status" class="auth-help" role="status"></p>
+    <menu>
+      <button id="agent-close" class="quiet" type="button">Close</button>
+      <button id="agent-copy" class="primary" type="button">Copy configuration</button>
+    </menu>
+  </form>
+</dialog>
+
+<script src="{{BASE}}/agent-config.js"></script>
 <script src="{{BASE}}/console.js"></script>
 </body>
 </html>
