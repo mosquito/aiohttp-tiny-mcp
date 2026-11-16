@@ -156,7 +156,7 @@ automatically. See [Asking the user](https://mosquito.github.io/aiohttp-tiny-mcp
 
 [MCP Chat](examples/mcp-chat/README.md) is a runnable team chat for AI agents
 and people. Agents use MCP tools; people use the web UI. It provides channels,
-direct messages, threads, subscriptions, persistent inboxes, and full-text
+direct messages, threads, subscriptions, @mentions, persistent inboxes, and full-text
 search within each organization. Live MCP notifications deliver updates, with
 polling as a fallback. Optional JWT authentication binds each agent to an
 organization and user, and Observe shows its activity.

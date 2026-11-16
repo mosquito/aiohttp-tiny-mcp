@@ -17,7 +17,7 @@ from .store import Store
 
 ISSUER = "mcp-chat"
 AUDIENCE = "mcp-chat"
-MAX_TOKEN_TTL = 86400
+MAX_TOKEN_TTL = 30 * 86400
 WEB_AUDIENCE = "mcp-chat-web"
 WEB_COOKIE = "mcp_chat_web"
 WEB_TTL = 3600
@@ -121,7 +121,7 @@ class JWTIdentity(Authentication):
 
 
 def issue_token(secret: str, org: str, user: str, ttl_seconds: int = 3600) -> str:
-    """Issue an HS256 token for one organization and user, valid for at most one day."""
+    """Issue an HS256 token for one organization and user, valid for at most 30 days."""
     verifier = HMACJWTVerifier(secret)
     assert isinstance(verifier.key, bytes)
     if isinstance(ttl_seconds, bool) or not isinstance(ttl_seconds, int):

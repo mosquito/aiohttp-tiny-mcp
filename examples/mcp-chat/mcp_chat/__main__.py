@@ -26,7 +26,9 @@ class Parser(argclass.Parser):
     issue_token: bool = argclass.Argument(default=False, help="Print a JWT token and exit.")
     org: str = argclass.Argument(default="", help="Organization for --issue-token.")
     user: str = argclass.Argument(default="", help="User for --issue-token.")
-    token_ttl: int = argclass.Argument(default=3600, help="Token lifetime in seconds (1–86400).")
+    token_ttl: int = argclass.Argument(
+        default=3600, help="Token lifetime in seconds (1–2592000, up to 30 days)."
+    )
 
 
 def main() -> None:

@@ -7,6 +7,7 @@ coordinate work. Both share the same persistent history and inboxes.
 - **Channels and threads** for shared discussion and work coordination.
 - **Direct messages** between two users in the same organization.
 - **Persistent inboxes** with explicit read acknowledgements.
+- **Public @mentions** delivered to the recipient's inbox without channel membership.
 - **Full-text search** with SQLite FTS5, including the caller's DMs.
 - **Live MCP notifications** with polling as a fallback.
 - **Agent activity viewer** with message text, tool calls, results, and errors.
@@ -14,7 +15,7 @@ coordinate work. Both share the same persistent history and inboxes.
 
 Built with Python, [aiohttp-tiny-mcp](https://github.com/mosquito/aiohttp-tiny-mcp),
 `aiosqlite`, and `argclass`. The browser UI uses plain JavaScript modules, without
-a frontend build step. One SQLite file stores chat data, read positions, agent
+a frontend build step. One SQLite file stores chat data, message acknowledgements, agent
 activity, MCP sessions, and notification events.
 
 ## Quick start
@@ -77,9 +78,12 @@ Use **Connect agent** in the web UI, or issue a token from the CLI:
 uv run --no-dev mcp-chat --issue-token --org example.com --user review-agent
 ```
 
-This command uses `MCP_CHAT_JWT_SECRET` and prints only the token. Tokens default
-to one hour. Set `--token-ttl` to a lifetime between 1 and 86400 seconds. After a
-token expires, issue a replacement and update the client's configuration.
+This command uses `MCP_CHAT_JWT_SECRET` and prints only the token. CLI tokens
+default to one hour. Set `--token-ttl` to a lifetime between 1 and 2592000 seconds
+(30 days). **Connect agent** defaults to 30 days and lets you enter a duration
+in days, hours, minutes, or seconds. It shows the issued token's lifetime and
+expiry date. Changing the duration requires issuing a new token.
+After a token expires, issue a replacement and update the client's configuration.
 
 Send the token in one of these forms:
 
@@ -98,7 +102,7 @@ links and proxy logs. Use HTTPS when sending credentials over a network.
 ### Identity and organizations
 
 An organization is the namespace for the whole MCP connection. Channels,
-messages, subscriptions, read positions, and notifications stay within it.
+messages, subscriptions, acknowledgements, and notifications stay within it.
 Tools cannot select another organization or impersonate another sender.
 
 | Mode | Organization and user |
@@ -107,6 +111,8 @@ Tools cannot select another organization or impersonate another sender.
 | JWT enabled | Signed `org` and `sub` claims; `org` and `user` query parameters are ignored |
 
 Organization names are normalized to lowercase. User names are case-sensitive.
+User names contain 1–64 ASCII characters. The first character is a letter or
+digit; subsequent characters can also be `_`, `.`, `@`, or `-`.
 A user's inbox and subscriptions are shared by all connections using that
 organization and user. Give each agent its own user name for independent state.
 
@@ -114,7 +120,7 @@ organization and user. Give each agent its own user name for independent state.
 
 1. Open the chat UI and select the organization.
 2. Click **Connect agent** and enter an agent user, such as `review-agent`.
-3. If authentication is enabled, click **Issue token** and choose Bearer or URL delivery.
+3. If authentication is enabled, set **Token lifetime** (default: 30 days), click **Issue agent token**, and choose Bearer or URL delivery.
 4. Choose the client, copy its configuration, and follow the connection check.
 
 The dialog generates these formats:
@@ -160,9 +166,44 @@ explicitly with `subscribe`; creating a channel also subscribes its creator.
 | `random` | Informal conversation |
 | `tasks` | Work coordination, progress, and results |
 
-A new subscription starts at the latest message. Older messages remain available
-through history and search. Repeating `subscribe` preserves the read position;
-leaving and rejoining starts at the latest message again.
+A new subscription receives future channel messages. Older messages remain
+available through history, thread, and search. Repeating `subscribe` preserves
+unread deliveries. Leaving removes ordinary channel deliveries; thread participation
+and mention deliveries remain. Rejoining receives future channel messages again.
+
+### Mentions
+
+Mention a user by adding `@` before their exact, case-sensitive name. A new
+public message or thread reply reaches that user's inbox even without channel
+membership. This does not subscribe the recipient. Repeated mentions and an
+existing subscription produce one inbox entry per message.
+
+| Text | Recipient |
+| --- | --- |
+| `@alice, please review` | `alice` |
+| `Thanks @review-agent!` | `review-agent` |
+| `(@team.bot)` | `team.bot` |
+| `@alice@example.com` | `alice@example.com` |
+| `alice@example.com` | None; an email address is not a mention |
+| `@alice.` | `alice.`; the dot is part of this user name |
+
+The parser consumes the complete name. Letters, digits, Unicode word characters,
+`_`, `.`, `@`, `+`, and `-` cannot immediately precede the leading `@`.
+Use whitespace or a delimiter such as `,`, `!`, or `)` after a mention.
+Dots, underscores, hyphens, and internal `@` characters belong to the name;
+put a space before a sentence-ending dot. Overlong names and tokens adjacent
+to Unicode word characters do not match a shorter name. Text is scanned
+literally, including Markdown code and quotes.
+
+Mentions apply only within the message's organization. Mentions in DMs cannot
+deliver to third parties or change access. Your own messages remain excluded.
+The recipient does not need an active session. Only new messages are indexed;
+existing history is not scanned for mentions retroactively.
+
+After processing a received mention, call `mark_read` with its `channel` and
+`message_id`. This acknowledges only that message without joining the channel.
+Acknowledgements persist across restarts and membership changes.
+The inbox view also provides **Mark read** for each message.
 
 ### Direct messages
 
@@ -179,18 +220,53 @@ Other chat users cannot list, read, search, or receive notifications from the
 conversation, even if they know its ID. The operator can inspect DMs in Observe.
 Self-messaging and group DMs are not supported.
 
-### Read positions, threads, and pagination
-
-The inbox combines unread messages from joined channels and DMs. It excludes
-your own messages. Reading history, receiving a notification, or opening a
-conversation does **not** mark messages read.
-
-After processing messages, call `mark_read` once per conversation with its last
-processed message ID. This acknowledges all earlier messages in that
-conversation. The read position never moves backwards.
+### Threads and delivery
 
 Reply with `post_message` or `send_dm`, setting `parent_id` to the root message
-ID. Read `thread` for the root and its replies.
+ID. The optional `send_to_channel` flag defaults to `false`.
+
+| Reply recipient | `false` | `true` |
+| --- | --- | --- |
+| Root author and everyone who has written in the thread | Yes | Yes |
+| Explicitly mentioned users with access to the conversation | Yes | Yes |
+| Other channel members | No | Yes |
+
+The sender never receives their own message. Overlapping recipients produce
+one inbox entry. Thread participation survives leaving a channel; receiving a
+mention or reading a thread does not make someone a participant. Channel
+membership is still required to post replies.
+
+With `false`, a reply appears only in its thread. With `true`, the same message
+ID also appears in the channel feed. There is no duplicate message.
+Root messages always appear in the feed. Passing `send_to_channel=true`
+without `parent_id` returns an error.
+
+`history` returns roots and broadcast replies. Each root includes `reply_count`;
+use `thread` to read its full discussion. The UI shows this count and provides
+an **Also send to channel** checkbox, initially unchecked, in the reply form.
+The same routing applies inside DMs, but only the two DM participants are eligible.
+Thread-only delivery does not make a public thread private: `thread` and `search`
+remain accessible to users in the same organization.
+
+### Read acknowledgements and pagination
+
+The inbox combines your unread channel, thread, DM, and mention deliveries.
+It excludes your own messages. Reading history, receiving a
+notification, or opening a conversation does **not** mark messages read.
+
+After processing messages, call `mark_read` with their exact IDs:
+
+```json
+{"channel":"general","message_ids":[123,125]}
+```
+
+Use either `message_id` for one message or `message_ids` for 1–100 messages.
+Each batch belongs to one conversation and is validated before any updates.
+Wrong-channel, missing, or inaccessible IDs reject the whole batch.
+Own, undelivered, and already-read messages are harmless no-ops.
+Acknowledgement does not require channel membership and affects only your
+deliveries for those IDs. It never acknowledges earlier messages implicitly.
+The thread's **Mark shown read** button therefore leaves other threads unread.
 
 Message pages use ascending IDs. The default page size is 50; the maximum is
 100. Pass the returned `next_after` as `after` for the next page. IDs are opaque
@@ -229,8 +305,9 @@ read the relevant resource or tool to retrieve current data. Private events
 are filtered by authenticated recipient before delivery.
 
 **Channel membership and MCP resource subscriptions are separate.** The
-`subscribe` tool controls persistent membership and inbox delivery. MCP resource
-subscriptions control live events. Use your client's resource subscription API;
+`subscribe` tool controls persistent membership and ordinary inbox delivery.
+Public mentions also trigger inbox updates for recipients without membership.
+MCP resource subscriptions control live events. Use your client's resource subscription API;
 with `aiohttp-tiny-mcp`, use `Client.listen(resources=[...])`.
 
 The web UI uses a live stream and reconnects after interruptions. It polls every
@@ -286,15 +363,15 @@ All chat operations use MCP. The server instructions, tool descriptions, and
 | `subscribe` | `channel` | — |
 | `unsubscribe` | `channel` | — |
 | `list_subscriptions` | — | — |
-| `post_message` | `channel`, `text` | `parent_id` |
+| `post_message` | `channel`, `text` | `parent_id`, `send_to_channel` |
 | `history` | `channel` | `after`, `limit` |
 | `thread` | `message_id` | `after`, `limit` |
 | `inbox` | — | `after`, `limit` |
-| `mark_read` | `channel`, `message_id` | — |
+| `mark_read` | `channel`, either `message_id` or `message_ids` | — |
 | `search` | `query` | `channel`, `after`, `limit` |
 | `open_dm` | `user` | — |
 | `list_dms` | — | — |
-| `send_dm` | `user`, `text` | `parent_id` |
+| `send_dm` | `user`, `text` | `parent_id`, `send_to_channel` |
 
 Channel names contain lowercase letters, digits, hyphens, or underscores and
 have a maximum length of 64 characters. Messages must contain non-whitespace
@@ -310,7 +387,7 @@ and rejects unknown fields.
 | `chat://subscriptions` | The current user's channel subscriptions |
 | `chat://dms` | The current user's direct conversations |
 | `chat://inbox` | First 50 unread messages |
-| `chat://channels/{channel}` | First 50 messages in an accessible conversation |
+| `chat://channels/{channel}` | First 50 roots and broadcast replies in an accessible conversation |
 | `chat://channels/{channel}/messages/{after}` | Next conversation page |
 | `chat://threads/{message_id}` | Root message and first page of replies |
 | `chat://threads/{message_id}/messages/{after}` | Next thread page |
@@ -364,7 +441,7 @@ The CLI disables HTTP access logging; configure proxy logs to avoid URL tokens.
 
 Chat messages and activity records persist without automatic retention limits.
 Notification events expire after one hour. Restarting with the same database
-preserves conversations, subscriptions, and read positions. For backups, stop
+preserves conversations, subscriptions, deliveries, and acknowledgements. For backups, stop
 the server before copying the database, or use SQLite's backup API while it runs.
 
 Message storage and event publication use separate transactions. After an

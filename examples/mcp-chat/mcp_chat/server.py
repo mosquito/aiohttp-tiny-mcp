@@ -72,15 +72,16 @@ def build_registry(
 
     async def message_updated(principal: Principal, message: dict[str, Any]) -> None:
         audience = await store.notification_recipients(
-            organization(principal), username(principal), message["channel"]
+            organization(principal), username(principal), message["channel"], message["id"]
         )
         private = audience["kind"] == "dm"
-        recipients = audience["users"] if private else None
-        await notifications.updated(f"chat://channels/{message['channel']}", users=recipients)
+        await notifications.updated(
+            f"chat://channels/{message['channel']}", users=audience["viewers"]
+        )
         root = message["parent_id"] or message["id"]
-        await notifications.updated(f"chat://threads/{root}", users=recipients)
+        await notifications.updated(f"chat://threads/{root}", users=audience["viewers"])
         if private:
-            await notifications.updated("chat://dms", users=recipients)
+            await notifications.updated("chat://dms", users=audience["viewers"])
         else:
             await notifications.updated("chat://channels")
             await notifications.updated("chat://subscriptions", users=audience["users"])
@@ -116,7 +117,7 @@ def build_registry(
 
     @registry.tool(annotations=IDEMPOTENT, description=TOOL_HELP["unsubscribe"])
     async def unsubscribe(args: Channel, principal: Principal) -> dict:
-        """Leave a channel and remove its unread messages from your inbox."""
+        """Leave a channel; unread mentions remain in your inbox."""
         result = await store.unsubscribe(organization(principal), username(principal), args.channel)
         await membership_updated(principal)
         return result
@@ -146,23 +147,33 @@ def build_registry(
     async def send_dm(args: DirectMessage, principal: Principal) -> dict:
         """Send a private message or thread reply to another user."""
         result = await store.send_dm(
-            organization(principal), username(principal), args.user, args.text, args.parent_id
+            organization(principal),
+            username(principal),
+            args.user,
+            args.text,
+            args.parent_id,
+            args.send_to_channel,
         )
         await message_updated(principal, result)
         return result
 
     @registry.tool(annotations=APPEND, description=TOOL_HELP["post_message"])
     async def post_message(args: PostMessage, principal: Principal) -> dict:
-        """Post to a subscribed channel; set parent_id to reply to a root message."""
+        """Post a root or thread reply; send_to_channel also delivers replies to channel members."""
         result = await store.post_message(
-            organization(principal), username(principal), args.channel, args.text, args.parent_id
+            organization(principal),
+            username(principal),
+            args.channel,
+            args.text,
+            args.parent_id,
+            args.send_to_channel,
         )
         await message_updated(principal, result)
         return result
 
     @registry.tool(annotations=READ_ONLY, description=TOOL_HELP["history"])
     async def history(args: History, principal: Principal) -> dict:
-        """Read channel messages and replies in ascending ID order without marking them read."""
+        """Read roots and broadcast replies in ID order without acknowledgement."""
         return message_page(
             await store.history(
                 organization(principal),
@@ -190,7 +201,7 @@ def build_registry(
 
     @registry.tool(annotations=READ_ONLY, description=TOOL_HELP["inbox"])
     async def inbox(args: Page, principal: Principal) -> dict:
-        """Read unread messages from subscribed channels, excluding your own messages."""
+        """Read your unread channel, thread, and mention deliveries, excluding your own messages."""
         return message_page(
             await store.inbox(organization(principal), username(principal), args.after, args.limit),
             args.after,
@@ -198,9 +209,11 @@ def build_registry(
 
     @registry.tool(annotations=IDEMPOTENT, description=TOOL_HELP["mark_read"])
     async def mark_read(args: MarkRead, principal: Principal) -> dict:
-        """Mark a channel read through message_id; never move the read position backwards."""
+        """Acknowledge exact message IDs without changing other messages or threads."""
+        selected = args.message_ids if args.message_ids is not None else args.message_id
+        assert selected is not None
         result = await store.mark_read(
-            organization(principal), username(principal), args.channel, args.message_id
+            organization(principal), username(principal), args.channel, selected
         )
         if await store.is_direct(organization(principal), username(principal), args.channel):
             await notifications.updated("chat://dms", users=[username(principal)])

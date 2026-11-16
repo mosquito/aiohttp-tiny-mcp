@@ -180,20 +180,22 @@ requires-dist = [
     { name = "aiosqlite", marker = "extra == 'sqlite'", specifier = ">=0.20" },
     { name = "psycopg", extras = ["binary", "pool"], marker = "extra == 'postgres'", specifier = ">=3" },
     { name = "pydantic", specifier = ">=2.13" },
+    { name = "pyjwt", extras = ["crypto"], marker = "extra == 'jwt'", specifier = ">=2.13" },
     { name = "pyyaml", marker = "extra == 'skills'", specifier = ">=6" },
     { name = "redis", marker = "extra == 'redis'", specifier = ">=5" },
 ]
-provides-extras = ["skills", "sqlite", "redis", "postgres"]
+provides-extras = ["jwt", "skills", "sqlite", "redis", "postgres"]
 
 [package.metadata.requires-dev]
 dev = [
     { name = "aiosqlite", specifier = ">=0.20" },
     { name = "furo", specifier = ">=2025.12.19" },
+    { name = "jsonschema", specifier = ">=4.26" },
     { name = "markdown-pytest", specifier = ">=0.6.6" },
     { name = "mcp", extras = ["cli"], specifier = "==2.0.0" },
     { name = "myst-parser", specifier = ">=4.0.1" },
     { name = "psycopg", extras = ["binary", "pool"], specifier = ">=3" },
-    { name = "pyjwt", specifier = ">=2.13" },
+    { name = "pyjwt", extras = ["crypto"], specifier = ">=2.13" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
     { name = "pytest-cov", specifier = ">=7.1.0" },

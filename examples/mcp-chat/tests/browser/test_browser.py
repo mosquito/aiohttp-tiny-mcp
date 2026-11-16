@@ -5,10 +5,11 @@ import json
 import re
 from collections.abc import AsyncIterator
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 from urllib.parse import urlsplit
 
 import aiohttp
+import jwt
 import pytest
 from aiohttp.test_utils import BaseTestServer, TestServer
 from aiohttp_tiny_mcp import AdapterSet, CallToolResult, Client
@@ -104,6 +105,7 @@ async def test_chat_workflow_uses_mcp_and_polls_inbox(
         .click()
     )
     await bob.locator("#reply-text").fill("Reviewed and approved.")
+    await bob.locator("#reply-send-to-channel").check()
     await bob.locator("#send-reply").click()
     await expect(bob.locator("#thread-messages")).to_contain_text("Reviewed and approved.")
     await expect(alice.locator("#messages")).to_contain_text(
@@ -445,9 +447,12 @@ async def test_agent_guide_without_auth(browser: Browser, server: BaseTestServer
     await expect(page.locator("#login-dialog")).not_to_be_visible()
     await page.locator("#agent-open").click()
     await expect(page.locator("#agent-dialog")).to_be_visible()
+    await expect(page.locator("#agent-user")).to_have_value("agent")
+    await expect(page.locator("#agent-endpoint")).to_have_value(re.compile("user=agent"))
     await expect(page.locator("#agent-token")).not_to_be_visible()
     await expect(page.locator("#agent-auth")).not_to_be_visible()
     await expect(page.locator("#agent-issue")).not_to_be_visible()
+    await expect(page.locator("#agent-ttl")).not_to_be_visible()
     await page.locator("#agent-user").fill("review-agent")
     for variant in ["codex-once", "codex-persistent", "claude-code"]:
         await page.locator("#agent-client").select_option(variant)
@@ -468,6 +473,48 @@ async def test_agent_guide_without_auth(browser: Browser, server: BaseTestServer
     await page.keyboard.press("Escape")
     await expect(page.locator("#agent-dialog")).not_to_be_visible()
     assert not auth_requests
+
+
+@pytest.mark.parametrize("width", [390, 1440])
+@pytest.mark.parametrize("color_scheme", ["light", "dark"])
+async def test_agent_form_layout(
+    browser: Browser, tmp_path: Path, width: int, color_scheme: Literal["light", "dark"]
+) -> None:
+    secret = "browser-layout-secret-at-least-thirty-two-bytes"
+    async with TestServer(create_app(tmp_path / "layout.sqlite3", jwt_secret=secret)) as server:
+        page = await browser.new_page(viewport={"width": width, "height": 900})
+        await page.emulate_media(color_scheme=color_scheme)
+        await page.goto(str(server.make_url("/ui/?org=example.com&user=agent")))
+        await page.locator("#login-secret").fill(secret)
+        await page.locator("#login-submit").click()
+        await expect(page.locator("#channels")).to_contain_text("general")
+        await page.locator("#agent-open").click()
+        await expect(page.locator("#agent-user")).to_have_value("chat-agent")
+        await expect(page.locator("#agent-user")).to_be_focused()
+        rows = await page.locator(".agent-settings").evaluate_all(
+            "rows => rows.map(row => Array.from(row.querySelectorAll('input, select'), "
+            "element => { const r = element.getBoundingClientRect(); "
+            "return {x: r.x, y: r.y, width: r.width, height: r.height}; }))"
+        )
+        for left, right in rows:
+            assert left["height"] == right["height"] == 40
+            assert left["width"] == pytest.approx(right["width"], abs=1)
+            if width > 650:
+                assert left["y"] == right["y"]
+                assert left["x"] + left["width"] < right["x"]
+            else:
+                assert left["x"] == right["x"]
+                assert left["y"] + left["height"] < right["y"]
+        assert await page.locator("#agent-dialog").evaluate(
+            "dialog => dialog.scrollWidth <= dialog.clientWidth"
+        )
+        close = await page.locator("#agent-close").bounding_box()
+        assert close and close["height"] == close["width"] == 36
+        await page.locator("#agent-issue").scroll_into_view_if_needed()
+        await expect(page.locator("#agent-issue")).to_be_in_viewport()
+        await page.locator("#agent-close").click()
+        await expect(page.locator("#agent-dialog")).not_to_be_visible()
+        await page.close()
 
 
 async def test_secret_login_and_agent_token(browser: Browser, tmp_path: Path) -> None:
@@ -500,10 +547,16 @@ async def test_secret_login_and_agent_token(browser: Browser, tmp_path: Path) ->
         await page.locator("#connect").click()
         await expect(page.locator("#workspace-name")).to_have_text("other.example")
         await page.locator("#agent-open").click()
+        await expect(page.locator("#agent-user")).to_have_value("agent")
         await page.locator("#agent-user").fill("review-agent")
+        await expect(page.locator("#agent-ttl")).to_have_value("30")
+        await expect(page.locator("#agent-ttl-unit")).to_have_value("86400")
         await page.locator("#agent-issue").click()
         await expect(page.locator("#agent-token")).not_to_have_value("")
         token = await page.locator("#agent-token").input_value()
+        claims = jwt.decode(token, secret, algorithms=["HS256"], audience="mcp-chat")
+        assert claims["exp"] - claims["iat"] == 30 * 86400
+        await expect(page.locator("#agent-expiry")).to_contain_text("30 days")
         await page.locator("#agent-client").select_option("claude-project")
         config = json.loads(await page.locator("#agent-code").input_value())["mcpServers"][
             "mcp_chat"
@@ -526,6 +579,27 @@ async def test_secret_login_and_agent_token(browser: Browser, tmp_path: Path) ->
                 "user": "review-agent",
             }
         assert token not in await page.evaluate("JSON.stringify(localStorage)")
+        await page.locator("#agent-ttl-unit").select_option("3600")
+        await page.locator("#agent-ttl").fill("2")
+        await expect(page.locator("#agent-token")).to_have_value("")
+        async with page.expect_request("**/admin/token") as issued:
+            await page.locator("#agent-issue").click()
+        request_body = (await issued.value).post_data_json
+        assert isinstance(request_body, dict)
+        assert request_body["ttl_seconds"] == 7200
+        await expect(page.locator("#agent-token")).not_to_have_value("")
+        custom_token = await page.locator("#agent-token").input_value()
+        claims = jwt.decode(custom_token, secret, algorithms=["HS256"], audience="mcp-chat")
+        assert claims["exp"] - claims["iat"] == 7200
+        await expect(page.locator("#agent-expiry")).to_contain_text("2 hours")
+        await expect(page.locator("#agent-expiry")).to_contain_text("expires")
+        requests: list[str] = []
+        page.on("request", lambda request: requests.append(request.url))
+        await page.locator("#agent-ttl").fill("721")
+        await page.locator("#agent-issue").click()
+        assert not await page.locator("#agent-ttl").evaluate("node => node.checkValidity()")
+        assert not any(url.endswith("/admin/token") for url in requests)
+        await expect(page.locator("#agent-token")).to_have_value("")
         assert not failures
         await page.context.close()
 
@@ -557,6 +631,8 @@ async def test_direct_messages_poll_reply_and_stay_private(
     message = bob.locator("#messages article[data-message-id]")
     await message.get_by_role("button", name="Reply in thread").click()
     await bob.locator("#reply-text").fill("Private response confirmed")
+    await expect(bob.locator("#reply-send-label")).to_have_text("Also send to conversation")
+    await bob.locator("#reply-send-to-channel").check()
     await bob.locator("#send-reply").click()
     await expect(bob.locator("#thread-messages")).to_contain_text("Private response confirmed")
     await expect(alice.locator("#messages")).to_contain_text(
@@ -584,3 +660,368 @@ async def test_direct_messages_poll_reply_and_stay_private(
     await expect(alice.locator("#channels")).to_contain_text("general")
     await expect(alice.locator("#direct-messages button[data-channel]")).to_have_count(0)
     assert not failures
+
+
+async def test_mention_inbox_can_be_acknowledged_without_joining(
+    browser: Browser, server: BaseTestServer
+) -> None:
+    bob = await open_chat(browser, server, "bob")
+    failures: list[str] = []
+    bob.on("pageerror", lambda error: failures.append(str(error)))
+    async with Client(str(server.make_url("/mcp?org=example.com&user=alice")), MODERN) as alice:
+        await call(alice, "subscribe", channel="random")
+        mention = await call(
+            alice, "post_message", channel="random", text="@bob, review without joining"
+        )
+        await expect(bob.locator("#messages")).to_contain_text(
+            "@bob, review without joining", timeout=10000
+        )
+        await expect(bob.locator("#inbox-badge")).to_have_text("1")
+        row = bob.locator(f'#messages [data-message-id="{mention["id"]}"]')
+        await row.get_by_role("button", name="Mark read", exact=True).click()
+        await expect(bob.locator("#inbox-badge")).to_have_text("0")
+        await expect(bob.locator("#messages")).not_to_contain_text("review without joining")
+        await channel(bob, "random")
+        await expect(bob.locator("#subscribe-toggle")).to_have_text("Join channel")
+    async with Client(str(server.make_url("/mcp?org=example.com&user=bob")), MODERN) as client:
+        assert (await call(client, "list_subscriptions"))["subscriptions"] == []
+        assert (await call(client, "inbox"))["messages"] == []
+    assert not failures
+
+
+async def test_long_thread_keeps_desktop_panes_and_responsive_overlay_within_viewport(
+    browser: Browser, server: BaseTestServer
+) -> None:
+    async with Client(str(server.make_url("/mcp?org=example.com&user=alice")), MODERN) as client:
+        await call(client, "create_channel", name="long-thread")
+        root = await call(
+            client,
+            "post_message",
+            channel="long-thread",
+            text="Long root\n" + "A full line of discussion.\n" * 80 + "x" * 700,
+        )
+        for index in range(8):
+            await call(
+                client,
+                "post_message",
+                channel="long-thread",
+                text=f"Long reply {index}\n" + "Further discussion.\n" * 12,
+                parent_id=root["id"],
+            )
+    page = await open_chat(browser, server)
+    await page.set_viewport_size({"width": 1440, "height": 1000})
+    await channel(page, "long-thread")
+    root_row = page.locator(f'#messages [data-message-id="{root["id"]}"]')
+    await root_row.get_by_role("button", name="View thread (8 replies)", exact=True).click()
+    await expect(page.locator("#thread-messages .message")).to_have_count(9)
+    await page.evaluate("window.scrollTo(0, 0)")
+    dimensions = await page.evaluate("""() => ({
+        height: Math.max(document.body.scrollHeight, document.documentElement.scrollHeight),
+        width: document.documentElement.scrollWidth,
+        viewportHeight: window.innerHeight,
+        viewportWidth: window.innerWidth,
+    })""")
+    assert dimensions["height"] <= dimensions["viewportHeight"] + 1
+    assert dimensions["width"] <= dimensions["viewportWidth"]
+    for selector in (
+        ".topbar",
+        ".panel-heading",
+        "#composer",
+        ".thread-heading",
+        "#thread-composer",
+        "#thread-close",
+    ):
+        await expect(page.locator(selector)).to_be_in_viewport(ratio=1)
+    for selector in ("#messages", "#thread-messages"):
+        assert await page.locator(selector).evaluate(
+            "node => node.scrollHeight > node.clientHeight"
+        )
+    await page.locator("#messages").evaluate("node => { node.scrollTop = 150; }")
+    await page.locator("#thread-messages").evaluate("node => { node.scrollTop = 0; }")
+    main_scroll = await page.locator("#messages").evaluate("node => node.scrollTop")
+    topbar_top = await page.locator(".topbar").evaluate("node => node.getBoundingClientRect().top")
+    await page.locator("#thread-messages").hover()
+    await page.mouse.wheel(0, 600)
+    await page.wait_for_function("document.querySelector('#thread-messages').scrollTop > 0")
+    assert await page.locator("#messages").evaluate("node => node.scrollTop") == main_scroll
+    assert (
+        await page.locator(".topbar").evaluate("node => node.getBoundingClientRect().top")
+        == topbar_top
+    )
+    assert await page.evaluate("window.scrollY") == 0
+    await expect(page.locator("#thread-composer")).to_be_in_viewport(ratio=1)
+    for viewport in ({"width": 900, "height": 700}, {"width": 390, "height": 844}):
+        await page.set_viewport_size({"width": viewport["width"], "height": viewport["height"]})
+        for selector in (".thread-heading", "#thread-composer", "#thread-close"):
+            await expect(page.locator(selector)).to_be_in_viewport(ratio=1)
+        box = await page.locator("#thread-panel").bounding_box()
+        assert box is not None
+        assert box["y"] >= 0 and box["y"] + box["height"] <= viewport["height"] + 1
+        assert box["x"] >= 0 and box["x"] + box["width"] <= viewport["width"] + 1
+        assert await page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+        await page.locator("#thread-close").click()
+        await expect(page.locator("#thread-panel")).not_to_be_visible()
+        await root_row.get_by_role("button", name="View thread (8 replies)", exact=True).click()
+        await expect(page.locator("#thread-close")).to_be_in_viewport(ratio=1)
+        await expect(page.locator("#thread-composer")).to_be_in_viewport(ratio=1)
+    await page.set_viewport_size({"width": 1440, "height": 1000})
+    await page.locator("#thread-close").click()
+    await expect(page.locator("#thread-panel")).not_to_be_visible()
+    assert await page.evaluate("document.documentElement.scrollHeight <= innerHeight + 1")
+    await expect(page.locator("#composer")).to_be_in_viewport(ratio=1)
+
+
+async def test_thread_replies_stay_in_thread_and_can_be_broadcast(
+    browser: Browser, server: BaseTestServer
+) -> None:
+    async with (
+        Client(str(server.make_url("/mcp?org=example.com&user=alice")), MODERN) as alice,
+        Client(str(server.make_url("/mcp?org=example.com&user=bob")), MODERN) as bob,
+        Client(str(server.make_url("/mcp?org=example.com&user=carol")), MODERN) as carol,
+    ):
+        await call(alice, "create_channel", name="team")
+        await call(bob, "subscribe", channel="team")
+        await call(carol, "subscribe", channel="team")
+        root = await call(alice, "post_message", channel="team", text="First topic")
+        other = await call(alice, "post_message", channel="team", text="Second topic")
+        await call(carol, "mark_read", channel="team", message_ids=[root["id"], other["id"]])
+        page = await open_chat(browser, server, "bob")
+        await channel(page, "team")
+        row = page.locator(f'#messages [data-message-id="{root["id"]}"]')
+        await row.get_by_role("button", name="Reply in thread", exact=True).click()
+        await expect(page.locator("#reply-send-to-channel")).not_to_be_checked()
+        assert len((await call(bob, "inbox"))["messages"]) == 2
+        await page.locator("#reply-text").fill("Thread-only response")
+        await page.locator("#send-reply").click()
+        await expect(page.locator("#thread-messages")).to_contain_text("Thread-only response")
+        await expect(row.get_by_role("button", name="View thread (1 reply)")).to_be_visible()
+        await expect(page.locator("#messages")).not_to_contain_text("Thread-only response")
+        assert [message["text"] for message in (await call(alice, "inbox"))["messages"]] == [
+            "Thread-only response"
+        ]
+        assert (await call(carol, "inbox"))["messages"] == []
+        await page.locator("#thread-mark-read").click()
+        await expect(page.locator("#inbox-badge")).to_have_text("1")
+        assert [message["id"] for message in (await call(bob, "inbox"))["messages"]] == [
+            other["id"]
+        ]
+        await page.locator("#reply-send-to-channel").check()
+        await page.locator("#reply-text").fill("Broadcast response")
+        await page.locator("#send-reply").click()
+        await expect(page.locator("#messages")).to_contain_text("Broadcast response")
+        await expect(page.locator("#thread-messages")).to_contain_text("Broadcast response")
+        await expect(page.locator("#reply-send-to-channel")).not_to_be_checked()
+        history = (await call(bob, "history", channel="team"))["messages"]
+        thread = (await call(bob, "thread", message_id=root["id"]))["messages"]
+        broadcast = next(message for message in history if message["text"] == "Broadcast response")
+        assert broadcast["send_to_channel"] is True
+        assert [message["id"] for message in thread if message["text"] == "Broadcast response"] == [
+            broadcast["id"]
+        ]
+        assert [message["id"] for message in (await call(carol, "inbox"))["messages"]] == [
+            broadcast["id"]
+        ]
+        await page.locator("#reply-send-to-channel").check()
+        await page.locator("#thread-close").click()
+        await row.get_by_role("button", name="View thread (2 replies)", exact=True).click()
+        await expect(page.locator("#reply-send-to-channel")).not_to_be_checked()
+        assert [message["id"] for message in (await call(bob, "inbox"))["messages"]] == [
+            other["id"]
+        ]
+
+
+async def test_live_reply_counts_preserve_loaded_history_scroll_and_draft(
+    browser: Browser, server: BaseTestServer
+) -> None:
+    async with Client(str(server.make_url("/mcp?org=example.com&user=alice")), MODERN) as client:
+        await call(client, "create_channel", name="history")
+        roots = []
+        for index in range(105):
+            roots.append(
+                await call(client, "post_message", channel="history", text=f"Topic {index}")
+            )
+        page = await open_chat(browser, server)
+        await channel(page, "history")
+        await expect(page.locator("#messages .message")).to_have_count(50)
+        await page.locator("#load-more").click()
+        await expect(page.locator("#messages .message")).to_have_count(100)
+        await page.locator("#load-more").click()
+        await expect(page.locator("#messages .message")).to_have_count(105)
+        await page.locator("#message-text").fill("Unsent channel draft")
+        await page.locator("#messages").evaluate("node => { node.scrollTop = 250; }")
+        original_scroll = await page.locator("#messages").evaluate("node => node.scrollTop")
+        await call(
+            client,
+            "post_message",
+            channel="history",
+            text="Only in the thread",
+            parent_id=roots[0]["id"],
+        )
+        first = page.locator(f'#messages [data-message-id="{roots[0]["id"]}"]')
+        await expect(first.get_by_role("button", name="View thread (1 reply)")).to_be_attached()
+        await expect(page.locator("#messages .message")).to_have_count(105)
+        await expect(page.locator("#messages")).not_to_contain_text("Only in the thread")
+        await expect(page.locator("#message-text")).to_have_value("Unsent channel draft")
+        assert await page.locator("#messages").evaluate("node => node.scrollTop") == original_scroll
+        await expect(page.locator("#load-more")).not_to_be_visible()
+        acknowledgements: list[dict[str, Any]] = []
+
+        def record_acknowledgement(request: Any) -> None:
+            if request.method == "POST":
+                payload = request.post_data_json
+                if payload.get("params", {}).get("name") == "mark_read":
+                    acknowledgements.append(payload["params"]["arguments"])
+
+        page.on("request", record_acknowledgement)
+
+        def final_acknowledgement(response: Any) -> bool:
+            if response.request.method != "POST":
+                return False
+            payload = response.request.post_data_json or {}
+            return (
+                payload.get("params", {}).get("name") == "mark_read"
+                and len(payload["params"]["arguments"]["message_ids"]) == 5
+            )
+
+        async with page.expect_response(final_acknowledgement) as final_batch:
+            await page.locator("#mark-read").click()
+        await (await final_batch.value).finished()
+        assert [len(batch["message_ids"]) for batch in acknowledgements] == [100, 5]
+        assert [
+            message_id for batch in acknowledgements for message_id in batch["message_ids"]
+        ] == [root["id"] for root in roots]
+        assert all(batch["channel"] == "history" for batch in acknowledgements)
+
+
+@pytest.mark.parametrize("initial_count", [49, 50, 100])
+@pytest.mark.parametrize("sender", ["alice", "bob"])
+async def test_channel_at_end_keeps_live_messages_across_page_boundaries(
+    browser: Browser, server: BaseTestServer, initial_count: int, sender: str
+) -> None:
+    async with (
+        Client(str(server.make_url("/mcp?org=example.com&user=alice")), MODERN) as alice,
+        Client(str(server.make_url("/mcp?org=example.com&user=bob")), MODERN) as bob,
+    ):
+        await call(alice, "create_channel", name="boundary")
+        await call(bob, "subscribe", channel="boundary")
+        for index in range(initial_count):
+            await call(alice, "post_message", channel="boundary", text=f"Initial {index}")
+        page = await open_chat(browser, server)
+        await channel(page, "boundary")
+        await expect(page.locator("#messages .message")).to_have_count(min(initial_count, 50))
+        if initial_count > 50:
+            await page.locator("#load-more").click()
+            await expect(page.locator("#messages .message")).to_have_count(initial_count)
+        await expect(page.locator("#load-more")).not_to_be_visible()
+        for index in range(3):
+            text = f"New message from {sender}: {index}"
+            if sender == "alice":
+                await page.locator("#message-text").fill(text)
+                await page.locator("#send-message").click()
+                await expect(page.locator("#message-text")).to_have_value("")
+            else:
+                await call(bob, "post_message", channel="boundary", text=text)
+            await expect(page.locator("#messages")).to_contain_text(text)
+            await expect(page.locator("#messages .message")).to_have_count(
+                initial_count + index + 1
+            )
+        await expect(page.locator("#load-more")).not_to_be_visible()
+
+
+@pytest.mark.parametrize("existing_replies", [0, 55])
+async def test_reply_notification_opens_and_reveals_the_notified_message(
+    browser: Browser, server: BaseTestServer, existing_replies: int
+) -> None:
+    async with (
+        Client(str(server.make_url("/mcp?org=example.com&user=alice")), MODERN) as alice,
+        Client(str(server.make_url("/mcp?org=example.com&user=bob")), MODERN) as bob,
+    ):
+        await call(bob, "create_channel", name="notification-thread")
+        await call(alice, "subscribe", channel="notification-thread")
+        root = await call(bob, "post_message", channel="notification-thread", text="Root topic")
+        for index in range(existing_replies):
+            await call(
+                alice,
+                "post_message",
+                channel="notification-thread",
+                parent_id=root["id"],
+                text=f"Earlier reply {index}",
+            )
+        page = await browser.new_page(viewport={"width": 1440, "height": 900})
+        await page.add_init_script("""
+            window.alerts = [];
+            window.Notification = class {
+              static permission = 'granted';
+              constructor(title, options) {
+                Object.assign(this, {title}, options);
+                window.alerts.push(this);
+              }
+              close() {}
+            };
+            document.hasFocus = () => false;
+        """)
+        await page.goto(str(server.make_url("/ui/?org=example.com&user=bob")))
+        await expect(page.locator("#sync-note")).to_have_text("Live MCP updates")
+        reply = await call(
+            alice,
+            "post_message",
+            channel="notification-thread",
+            parent_id=root["id"],
+            text="Reply requiring attention",
+        )
+        await page.wait_for_function(
+            "alerts.some(alert => alert.body === 'Reply requiring attention')"
+        )
+        await page.evaluate(
+            "alerts.find(alert => alert.body === 'Reply requiring attention').onclick()"
+        )
+        await expect(page.locator("#view-title")).to_contain_text("notification-thread")
+        await expect(page.locator("#thread-panel")).to_be_visible()
+        target = page.locator(f'#thread-messages [data-message-id="{reply["id"]}"]')
+        await expect(target).to_contain_text("Reply requiring attention")
+        await expect(target).to_be_in_viewport()
+        await expect(page.locator("#messages")).not_to_contain_text("Reply requiring attention")
+
+
+async def test_history_refresh_preserves_pagination_and_ignores_previous_view(
+    browser: Browser, server: BaseTestServer
+) -> None:
+    async with Client(str(server.make_url("/mcp?org=example.com&user=alice")), MODERN) as client:
+        await call(client, "create_channel", name="paged")
+        roots = []
+        for index in range(60):
+            roots.append(await call(client, "post_message", channel="paged", text=f"Topic {index}"))
+        await call(client, "create_channel", name="other")
+        await call(client, "post_message", channel="other", text="Other conversation")
+        page = await open_chat(browser, server)
+        await channel(page, "paged")
+        await expect(page.locator("#messages .message")).to_have_count(50)
+        await call(client, "post_message", channel="paged", parent_id=roots[0]["id"], text="Reply")
+        await expect(page.get_by_role("button", name="View thread (1 reply)")).to_be_visible()
+        await expect(page.locator("#messages .message")).to_have_count(50)
+        await expect(page.locator("#load-more")).to_be_visible()
+        waiting = asyncio.Event()
+        release = asyncio.Event()
+
+        async def delay_history(route: Route) -> None:
+            payload = route.request.post_data_json if route.request.method == "POST" else None
+            params = (payload or {}).get("params", {})
+            if (
+                params.get("name") == "history"
+                and params.get("arguments", {}).get("channel") == "paged"
+            ):
+                waiting.set()
+                await release.wait()
+            await route.continue_()
+
+        await page.route("**/mcp**", delay_history)
+        try:
+            await page.locator("#refresh").click()
+            await asyncio.wait_for(waiting.wait(), timeout=5)
+            await channel(page, "other")
+        finally:
+            release.set()
+        await expect(page.locator("#messages")).to_contain_text("Other conversation")
+        await expect(page.locator("#messages .message")).to_have_count(1)
+        await expect(page.locator("#messages")).not_to_contain_text("Topic")
+        await expect(page.locator("#load-more")).not_to_be_visible()

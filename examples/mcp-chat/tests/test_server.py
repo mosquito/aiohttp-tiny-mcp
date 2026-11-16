@@ -69,12 +69,14 @@ async def test_chat_workflow(server: BaseTestServer, adapter: Any) -> None:
         thread = await call(alice, "thread", message_id=first["id"])
         assert [row["id"] for row in thread["messages"]] == [first["id"], reply["id"]]
         await call(bob, "mark_read", channel="team", message_id=second["id"])
+        assert [row["id"] for row in (await call(bob, "inbox"))["messages"]] == [first["id"]]
         await call(bob, "mark_read", channel="team", message_id=first["id"])
         assert (await call(bob, "inbox"))["messages"] == []
         assert [row["id"] for row in (await call(alice, "inbox"))["messages"]] == [reply["id"]]
 
         history = await call(bob, "history", channel="team", after=old["id"], limit=2)
-        assert [row["id"] for row in history["messages"]] == [first["id"], reply["id"]]
+        assert [row["id"] for row in history["messages"]] == [first["id"], second["id"]]
+        assert history["messages"][0]["reply_count"] == 1
         search = await call(bob, "search", query="Second", channel="team")
         assert [row["id"] for row in search["messages"]] == [second["id"]]
         await call(bob, "unsubscribe", channel="team")
@@ -299,15 +301,16 @@ async def test_chat_resources_and_rules(server: BaseTestServer, adapter: Any) ->
             alice, "post_message", channel="general", text="Reply", parent_id=root["id"]
         )
         channel = await read_json(bob, "chat://channels/general")
-        assert [row["id"] for row in channel["messages"]] == [root["id"], reply["id"]]
+        assert [row["id"] for row in channel["messages"]] == [root["id"]]
+        assert channel["messages"][0]["reply_count"] == 1
         page = await read_json(bob, f"chat://channels/general/messages/{root['id']}")
-        assert [row["id"] for row in page["messages"]] == [reply["id"]]
+        assert page["messages"] == []
         thread = await read_json(bob, f"chat://threads/{root['id']}")
-        assert thread == channel
+        assert [row["id"] for row in thread["messages"]] == [root["id"], reply["id"]]
         thread_page = await read_json(bob, f"chat://threads/{root['id']}/messages/{root['id']}")
-        assert thread_page == page
+        assert [row["id"] for row in thread_page["messages"]] == [reply["id"]]
         assert (await read_json(bob, "chat://inbox"))["messages"] == channel["messages"]
-        assert len((await call(bob, "inbox"))["messages"]) == 2
+        assert len((await call(bob, "inbox"))["messages"]) == 1
         assert (await read_json(other, "chat://channels/general"))["messages"] == []
         assert (await read_json(other, "chat://inbox"))["messages"] == []
         with pytest.raises(ClientError):

@@ -113,7 +113,7 @@ function renderNavigation() {
       node.dataset.channel = channel.name;
       node.setAttribute("aria-current", active.view === "channel" && active.channel === channel.name ? "page" : "false");
       node.setAttribute("aria-label", `${conversationLabel(channel.name)}${channel.unread ? `, ${channel.unread} unread` : ""}`);
-      node.title = direct ? `Private conversation with ${channel.peer}` : channel.subscribed ? "Following this channel" : "Public channel · join to receive messages";
+      node.title = direct ? `Private conversation with ${channel.peer}` : channel.subscribed ? "Following this channel" : "Public channel · join to follow channel posts; mentions arrive automatically";
       const label = element("span", "channel-label");
       label.append(element("span", "hash", direct ? "@" : "#"), document.createTextNode(direct ? channel.peer : channel.name));
       const meta = element("span", "channel-meta");
@@ -144,7 +144,7 @@ function renderHeading() {
   byId("view-title").textContent = isChannel ? conversationLabel(context.channel) : context.view === "search" ? "Search messages" : "Inbox";
   byId("view-description").textContent = isChannel
     ? direct ? `Only you and ${info.peer} can read this conversation.` : info?.description || "A public conversation in your organization."
-    : context.view === "search" ? 'Search public channels and your direct messages with FTS5: words, "quoted phrases", OR, or prefix*.' : "Unread messages from your channels and direct messages. Reading does not mark them read.";
+    : context.view === "search" ? 'Search public channels and your direct messages with FTS5: words, "quoted phrases", OR, or prefix*.' : "Unread messages delivered to you. Reading does not mark them read.";
   byId("subscribe-toggle").hidden = !isChannel || !info || direct;
   byId("subscribe-toggle").textContent = info?.subscribed ? "Leave channel" : "Join channel";
   byId("subscribe-toggle").classList.toggle("primary", !info?.subscribed);
@@ -156,13 +156,17 @@ function renderHeading() {
   byId("send-message").disabled = !info?.subscribed || context.sending;
   byId("composer-note").textContent = info?.subscribed
     ? "⌘ / Ctrl + Enter to send · Draft saved on this device"
-    : "Join this channel to send messages and receive them in your inbox.";
+    : "Join to send and follow channel posts. Mentions arrive without joining.";
   byId("load-more").hidden = !context.more;
   byId("page-note").textContent = context.messages.length ? `${context.messages.length} messages shown` : "";
   if (context.thread) {
-    const joined = channelInfo(context.thread.channel)?.subscribed;
+    const threadInfo = channelInfo(context.thread.channel);
+    const joined = threadInfo?.subscribed;
     byId("reply-text").disabled = !joined || context.thread.sending;
     byId("send-reply").disabled = !joined || context.thread.sending;
+    byId("reply-send-to-channel").disabled = !joined || context.thread.sending;
+    byId("reply-send-label").textContent = threadInfo?.kind === "dm" ? "Also send to conversation" : "Also send to channel";
+    byId("thread-mark-read").hidden = context.thread.messages.length === 0;
     byId("reply-note").textContent = joined ? "Replies stay in this thread." : "Join this channel to reply.";
   }
 }
@@ -186,8 +190,10 @@ function messageNode(message, inThread = false) {
   body.append(meta, element("p", "message-text", message.text));
   if (!inThread) {
     const actions = element("div", "message-actions");
-    actions.append(button(message.parent_id ? "View thread" : "Reply in thread", () => openThread(message)));
-    if (active.view === "inbox") actions.append(button("Mark read through here", () => markRead([{ channel: message.channel, id: message.id }])));
+    const replies = message.reply_count || 0;
+    const threadLabel = message.parent_id ? "View thread" : replies ? `View thread (${replies} ${replies === 1 ? "reply" : "replies"})` : "Reply in thread";
+    actions.append(button(threadLabel, () => openThread(message)));
+    if (active.view === "inbox") actions.append(button("Mark read", () => markRead([{ channel: message.channel, id: message.id }])));
     body.append(actions);
   }
   node.append(avatar, body);
@@ -199,17 +205,19 @@ function renderMessages() {
   const signature = JSON.stringify([active.view, active.channel, active.query, active.messages, active.loaded, active.conversations.map((item) => [item.name, item.peer])]);
   if (target.dataset.signature === signature) return;
   target.dataset.signature = signature;
+  const scrollTop = target.scrollTop;
   if (active.messages.length) {
     target.replaceChildren(...active.messages.map((message) => messageNode(message)));
   } else {
     const empty = element("div", "empty-state");
     const titles = { inbox: "You're all caught up", channel: "Start the conversation", search: active.query ? "No messages found" : "Find a conversation" };
     const direct = channelInfo(active.channel)?.kind === "dm";
-    const tips = { inbox: "Follow a channel or start a direct message. Your own messages do not appear in your inbox.", channel: direct ? "Send the first message to start your private conversation." : "Send the first message, or join this channel to take part.", search: "Search message text. You can narrow results to one conversation." };
+    const tips = { inbox: "Follow a channel, receive a mention, or start a direct message. Your own messages do not appear in your inbox.", channel: direct ? "Send the first message to start your private conversation." : "Send the first message, or join this channel to take part.", search: "Search message text. You can narrow results to one conversation." };
     empty.append(element("span", "empty-icon", active.view === "inbox" ? "✓" : "#"));
     empty.append(element("h2", "", active.loaded ? titles[active.view] : "Loading messages…"), element("p", "", active.loaded ? tips[active.view] : "Connecting through MCP."));
     target.replaceChildren(empty);
   }
+  target.scrollTop = scrollTop;
 }
 
 function renderThread() {
@@ -219,26 +227,27 @@ function renderThread() {
   byId("thread-channel").textContent = `${conversationLabel(thread.channel)} · message ${thread.root}`;
   const signature = JSON.stringify([thread.root, thread.messages]);
   if (byId("thread-messages").dataset.signature !== signature) {
+    const scrollTop = byId("thread-messages").scrollTop;
     byId("thread-messages").dataset.signature = signature;
     byId("thread-messages").replaceChildren(...thread.messages.map((message) => messageNode(message, true)));
+    byId("thread-messages").scrollTop = scrollTop;
   }
   byId("thread-more").hidden = !thread.more;
 }
 
 async function loadThread(context, more = false) {
   const thread = context.thread;
-  if (!thread || thread.loading || (thread.more && !more)) return;
-  thread.loading = true;
-  try {
+  if (!thread || (thread.more && !more)) return;
+  if (thread.loading) return thread.loading;
+  thread.loading = (async () => {
     const page = await context.client.call("thread", { message_id: thread.root, after: thread.messages.at(-1)?.id || 0, limit: PAGE_SIZE });
     if (!current(context) || context.thread !== thread) return;
     thread.messages = merged(thread.messages, page.messages);
     thread.more = page.messages.length === PAGE_SIZE;
     renderThread();
     renderHeading();
-  } finally {
-    thread.loading = false;
-  }
+  })().finally(() => { thread.loading = null; });
+  return thread.loading;
 }
 
 async function fetchInbox(context, count) {
@@ -250,6 +259,23 @@ async function fetchInbox(context, count) {
     more = page.messages.length === PAGE_SIZE;
     if (!more) break;
   } while (messages.length < count && current(context));
+  return { messages, more };
+}
+
+async function fetchHistory(context, channel, count, follow) {
+  const viewId = context.viewId;
+  let messages = [];
+  let more = false;
+  do {
+    const page = await context.client.call("history", { channel, after: messages.at(-1)?.id || 0, limit: PAGE_SIZE });
+    messages = messages.concat(page.messages);
+    more = page.messages.length === PAGE_SIZE;
+    if (!more) break;
+  } while ((follow || messages.length < count) && current(context) && context.viewId === viewId);
+  if (more && current(context) && context.viewId === viewId) {
+    const page = await context.client.call("history", { channel, after: messages.at(-1).id, limit: 1 });
+    more = page.messages.length > 0;
+  }
   return { messages, more };
 }
 
@@ -277,13 +303,13 @@ async function refresh(context = active, force = false) {
         if (view === "inbox") {
           context.messages = inbox.messages;
           context.more = inbox.more;
-        } else if (view === "channel" && (!context.loaded || !context.more || context.loadMore)) {
-          const page = await context.client.call("history", { channel: context.channel, after: context.messages.at(-1)?.id || 0, limit: PAGE_SIZE });
+        } else if (view === "channel") {
+          const page = await fetchHistory(context, context.channel, context.channelSize, context.loaded && !context.more);
           if (!current(context)) return;
           if (viewId === context.viewId) {
-            context.messages = merged(context.messages, page.messages);
-            context.more = page.messages.length === PAGE_SIZE;
-            context.loadMore = false;
+            context.messages = page.messages;
+            context.more = page.more;
+            context.channelSize = Math.max(context.channelSize, page.messages.length);
           }
         }
         if (viewId === context.viewId) context.loaded = true;
@@ -329,7 +355,7 @@ function navigate(view, channel = "") {
   active.channel = channel;
   active.messages = [];
   active.more = false;
-  active.loadMore = false;
+  active.channelSize = PAGE_SIZE;
   active.inboxSize = PAGE_SIZE;
   active.loaded = view === "search";
   active.query = "";
@@ -365,7 +391,7 @@ async function connect(org, user, initial = false) {
   active = {
     client, org, user, token: "", authPending: AUTH_REQUIRED, live: false, refreshTimer: null,
     notificationReady: false, notificationCursor: 0, notificationSync: null,
-    channels: [], conversations: [], inbox: [], inboxSize: PAGE_SIZE, messages: [], more: false, loadMore: false, loaded: false,
+    channels: [], conversations: [], inbox: [], inboxSize: PAGE_SIZE, channelSize: PAGE_SIZE, messages: [], more: false, loaded: false,
     view: channel ? "channel" : initial && url.searchParams.get("view") === "search" ? "search" : "inbox", channel, viewId: 0, thread: null,
     query: "", searchChannel: "", sending: false, refreshAgain: false, refreshing: null,
   };
@@ -468,7 +494,10 @@ async function syncNotifications(context) {
           });
           notification.onclick = () => {
             window.focus();
-            if (current(context)) navigate("channel", message.channel);
+            if (current(context)) {
+              navigate("channel", message.channel);
+              if (message.parent_id) openThread(message, true);
+            }
             notification.close();
           };
         } catch {
@@ -539,29 +568,45 @@ async function action(node, work) {
   }
 }
 
-async function markRead(messages = active.messages) {
+async function markRead(messages = active.messages, trigger = byId("mark-read")) {
   const context = active;
-  const latest = new Map();
-  for (const message of messages) latest.set(message.channel, Math.max(latest.get(message.channel) || 0, message.id));
-  await action(byId("mark-read"), async () => {
-    for (const [channel, message_id] of latest) {
-      if (!current(context)) return;
-      await context.client.call("mark_read", { channel, message_id });
+  const channels = new Map();
+  for (const message of messages) {
+    if (!channels.has(message.channel)) channels.set(message.channel, new Set());
+    channels.get(message.channel).add(message.id);
+  }
+  await action(trigger, async () => {
+    for (const [channel, ids] of channels) {
+      const ordered = [...ids].sort((first, second) => first - second);
+      for (let start = 0; start < ordered.length; start += 100) {
+        if (!current(context)) return;
+        await context.client.call("mark_read", { channel, message_ids: ordered.slice(start, start + 100) });
+      }
     }
     if (current(context)) await refresh(context, true);
   });
 }
 
-async function openThread(message) {
+async function openThread(message, reveal = false) {
   saveDrafts();
   const context = active;
-  context.thread = { root: message.parent_id || message.id, channel: message.channel, messages: [], more: false, loading: false, sending: false };
+  context.thread = { root: message.parent_id || message.id, channel: message.channel, messages: [], more: false, loading: null, sending: false };
+  const thread = context.thread;
+  byId("reply-send-to-channel").checked = false;
   byId("reply-text").value = readDraft(context, message.channel, context.thread.root);
   renderThread();
   renderHeading();
-  try { await loadThread(context); }
+  try {
+    await loadThread(context);
+    while (reveal && current(context) && context.thread === thread && thread.more && thread.messages.at(-1)?.id < message.id) {
+      await loadThread(context, true);
+    }
+  }
   catch (error) { report(error, context); }
-  if (current(context)) byId("thread-close").focus();
+  if (current(context) && context.thread === thread) {
+    byId("thread-close").focus();
+    if (reveal) byId("thread-messages").querySelector(`[data-message-id="${message.id}"]`)?.scrollIntoView({ block: "nearest" });
+  }
 }
 
 async function sendMessage(inThread) {
@@ -580,11 +625,15 @@ async function sendMessage(inThread) {
     renderHeading();
     try {
       const args = { channel, text };
-      if (thread) args.parent_id = thread.root;
+      if (thread) {
+        args.parent_id = thread.root;
+        args.send_to_channel = byId("reply-send-to-channel").checked;
+      }
       await context.client.call("post_message", args);
       writeDraft(context, channel, root, "");
       if (!current(context)) return;
       if ((thread && context.thread === thread) || (!thread && context.view === "channel" && context.channel === channel)) field.value = "";
+      if (thread && context.thread === thread) byId("reply-send-to-channel").checked = false;
       await refresh(context, true);
     } finally {
       if (thread) thread.sending = false;
@@ -661,6 +710,18 @@ function renderAgentGuide() {
   }
 }
 
+function agentTokenLifetime() {
+  const field = byId("agent-ttl");
+  const unit = Number(byId("agent-ttl-unit").value);
+  field.max = String(2592000 / unit);
+  field.setCustomValidity("");
+  const seconds = field.valueAsNumber * unit;
+  if (!Number.isInteger(seconds) || seconds < 1 || seconds > 2592000) {
+    field.setCustomValidity("Choose a token lifetime from 1 second to 30 days.");
+  }
+  return field.checkValidity() ? seconds : null;
+}
+
 async function issueAgentToken() {
   const context = active;
   if (!AUTH_REQUIRED || !current(context) || context.authPending || byId("agent-issue").disabled) return;
@@ -669,13 +730,21 @@ async function issueAgentToken() {
     renderAgentGuide();
     return;
   }
+  const ttl = agentTokenLifetime();
+  if (ttl === null) {
+    byId("agent-ttl").reportValidity();
+    return;
+  }
   byId("agent-issue").disabled = true;
   byId("agent-error").hidden = true;
   try {
-    const result = await authRequest("/admin/token", { org: context.org, user }, context);
-    if (!current(context) || !byId("agent-dialog").open || byId("agent-user").value.trim() !== user) return;
+    const result = await authRequest("/admin/token", { org: context.org, user, ttl_seconds: ttl }, context);
+    if (!current(context) || !byId("agent-dialog").open || byId("agent-user").value.trim() !== user || agentTokenLifetime() !== ttl) return;
     byId("agent-token").value = result.token;
-    byId("agent-expiry").textContent = `Token for ${user} · expires in ${Math.round(result.expires_in / 60)} minutes`;
+    const expires = new Date(Date.now() + result.expires_in * 1000);
+    const units = byId("agent-ttl-unit").selectedOptions[0].textContent.toLowerCase();
+    const unit = byId("agent-ttl").valueAsNumber === 1 ? units.slice(0, -1) : units;
+    byId("agent-expiry").textContent = `Token for ${user} · valid for ${byId("agent-ttl").value} ${unit} · expires ${expires.toLocaleString()}`;
     renderAgentGuide();
   } catch (error) {
     if (!current(context)) return;
@@ -756,6 +825,9 @@ byId("retry").addEventListener("click", async () => {
 });
 byId("error-dismiss").addEventListener("click", () => { byId("error-banner").hidden = true; });
 byId("mark-read").addEventListener("click", () => markRead());
+byId("thread-mark-read").addEventListener("click", () => {
+  if (active?.thread) markRead(active.thread.messages, byId("thread-mark-read"));
+});
 byId("subscribe-toggle").addEventListener("click", () => action(byId("subscribe-toggle"), async (context) => {
   const channel = context.channel;
   const subscribed = channelInfo(channel)?.subscribed;
@@ -771,7 +843,7 @@ byId("thread-more").addEventListener("click", () => action(byId("thread-more"), 
 byId("load-more").addEventListener("click", () => action(byId("load-more"), async (context) => {
   if (context.view === "search") return runSearch(true);
   if (context.view === "channel") {
-    context.loadMore = true;
+    context.channelSize += PAGE_SIZE;
     return refresh(context, true);
   }
   context.inboxSize += PAGE_SIZE;
@@ -845,10 +917,13 @@ byId("agent-open").addEventListener("click", () => {
     return;
   }
   byId("agent-org").textContent = active.org;
-  byId("agent-user").value = active.user;
+  byId("agent-user").value = active.user === "agent" ? "chat-agent" : "agent";
   byId("agent-token").value = "";
   byId("agent-expiry").textContent = "Issue a token for the selected agent user.";
   byId("agent-auth-settings").hidden = !AUTH_REQUIRED;
+  byId("agent-ttl").value = "30";
+  byId("agent-ttl-unit").value = "86400";
+  agentTokenLifetime();
   byId("agent-auth").value = "bearer";
   renderAgentGuide();
   byId("agent-dialog").showModal();
@@ -861,6 +936,14 @@ byId("agent-user").addEventListener("input", () => {
   renderAgentGuide();
 });
 byId("agent-client").addEventListener("change", renderAgentGuide);
+for (const id of ["agent-ttl", "agent-ttl-unit"]) {
+  byId(id).addEventListener("input", () => {
+    byId("agent-token").value = "";
+    byId("agent-expiry").textContent = "Issue a token with the selected lifetime.";
+    agentTokenLifetime();
+    renderAgentGuide();
+  });
+}
 byId("agent-issue").addEventListener("click", issueAgentToken);
 byId("agent-auth").addEventListener("change", renderAgentGuide);
 byId("agent-dialog").querySelectorAll("[data-copy]").forEach((node) => {
