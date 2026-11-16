@@ -79,6 +79,14 @@ body {
 .field.grow > input { flex: 1 1 auto; min-width: 8em; }
 .field > span { color: var(--ink-soft); font-size: 12px; }
 
+.endpoint-declared { min-width: 0; }
+.endpoint-declared[hidden] { display: none; }
+.endpoint-declared select { width: 100%; min-width: 0; }
+.endpoint-declared > p { margin: 4px 0; }
+.endpoint-parameters { display: grid; gap: 12px; border: 0; margin: 0; padding: 0; min-width: 0; }
+.endpoint-parameters:empty { display: none; }
+.endpoint-parameters .argument { min-width: 0; margin: 0; }
+
 input[type="text"], input[type="password"], input[type="number"], select, textarea {
   font: inherit;
   color: inherit;

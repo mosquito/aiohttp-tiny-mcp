@@ -137,6 +137,143 @@ def test_challenges_and_scoped_credentials():
 
 
 @pytest.mark.skipif(NODE is None, reason="node is not installed")
+def test_credentials_restore_raw_fields_and_headers_without_storage_writes():
+    run_js(r"""
+    globalThis.location = {pathname: "/console"};
+    const saved = new Map();
+    let writes = 0;
+    globalThis.localStorage = {
+      getItem(key) { return saved.get(key) ?? null; },
+      setItem(key, value) { writes++; saved.set(key, value); },
+      removeItem(key) { saved.delete(key); },
+    };
+    const url = "http://localhost/mcp?team=one";
+    const cases = [
+      ["basic", "алиса", "päss:word", ""],
+      ["bearer", "", "token.test", ""],
+      ["custom", "", "api-secret", "X-API-Key"],
+      ["none", "", "", ""],
+      ["query", "", "", ""],
+    ];
+    for (const [method, username, secret, header] of cases) {
+      const original = new ConsoleCredentials();
+      original.set(url, method, username, secret, header);
+      const headers = original.forEndpoint(url);
+      const count = writes;
+      original.clear();
+      assert.equal(original.record, null);
+      const restored = new ConsoleCredentials();
+      assert.equal(restored.restore(url), true);
+      assert.equal(writes, count);
+      assert.deepEqual(restored.forEndpoint(url), headers);
+      assert.deepEqual(restored.record, {endpoint: url, method, username, secret, header});
+      if (["none", "query"].includes(method)) assert.deepEqual(headers, {});
+    }
+    """)
+
+
+@pytest.mark.skipif(NODE is None, reason="node is not installed")
+def test_saved_credentials_are_scoped_and_forgotten_independently():
+    run_js("""
+    globalThis.location = {pathname: "/console"};
+    const saved = new Map();
+    globalThis.localStorage = {
+      getItem(key) { return saved.get(key) ?? null; },
+      setItem(key, value) { saved.set(key, value); },
+      removeItem(key) { saved.delete(key); },
+    };
+    const credentials = new ConsoleCredentials();
+    const first = "http://localhost/mcp?team=one";
+    const second = "http://localhost/mcp?team=two";
+    credentials.set(first, "bearer", "", "first-token", "");
+    credentials.set(second, "custom", "", "second-secret", "X-API-Key");
+    credentials.clear();
+    assert.equal(saved.size, 2);
+    assert.equal(credentials.restore(first), true);
+    assert.equal(credentials.forEndpoint(first).Authorization, "Bearer first-token");
+    assert.deepEqual(credentials.forEndpoint(second), {});
+    location.pathname = "/other-console";
+    assert.equal(credentials.restore(first), false);
+    assert.deepEqual(credentials.forEndpoint(first), {});
+    location.pathname = "/console";
+    assert.equal(credentials.restore(second), true);
+    credentials.forget(first);
+    assert.deepEqual(credentials.forEndpoint(second), {"X-API-Key": "second-secret"});
+    assert.equal(saved.size, 1);
+    credentials.forget(second);
+    assert.equal(credentials.record, null);
+    assert.deepEqual(credentials.forEndpoint(second), {});
+    assert.equal(saved.size, 0);
+    assert.equal(credentials.restore(first), false);
+    """)
+
+
+@pytest.mark.skipif(NODE is None, reason="node is not installed")
+def test_restored_credentials_reject_invalid_or_mismatched_records():
+    run_js(r"""
+    globalThis.location = {pathname: "/console"};
+    const url = "http://localhost/mcp";
+    const valid = {
+      version: 1, endpoint: url, method: "bearer", username: "", secret: "token", header: "",
+    };
+    let stored;
+    globalThis.localStorage = {getItem() { return stored; }};
+    const credentials = new ConsoleCredentials();
+    const invalid = [
+      null, [], {}, {...valid, version: 2}, {...valid, endpoint: url + "?different=1"},
+      {...valid, method: "unknown"}, {...valid, secret: "bad\r\nvalue"},
+      {...valid, secret: 42}, {...valid, username: null}, {...valid, header: false},
+      {...valid, method: "custom", header: "Cookie"},
+      {...valid, method: "basic", username: "a:b"},
+    ];
+    for (const record of invalid) {
+      credentials.set(url, "bearer", "", "old-token", "");
+      stored = JSON.stringify(record);
+      assert.equal(credentials.restore(url), false);
+      assert.deepEqual(credentials.forEndpoint(url), {});
+      assert.equal(credentials.record, null);
+    }
+    stored = "invalid JSON";
+    assert.equal(credentials.restore(url), false);
+    stored = JSON.stringify({...valid, headers: {Cookie: "injected"}});
+    assert.equal(credentials.restore(url), true);
+    assert.deepEqual(credentials.forEndpoint(url), {Authorization: "Bearer token"});
+    """)
+
+
+@pytest.mark.skipif(NODE is None, reason="node is not installed")
+def test_unavailable_storage_does_not_break_credential_operations():
+    run_js("""
+    const credentials = new ConsoleCredentials();
+    const url = "http://localhost/mcp";
+    credentials.set(url, "bearer", "", "token", "");
+    assert.equal(credentials.forEndpoint(url).Authorization, "Bearer token");
+    assert.equal(credentials.restore(url), false);
+    globalThis.location = {pathname: "/console"};
+    Object.defineProperty(globalThis, "localStorage", {
+      configurable: true,
+      get() { throw new Error("Storage blocked"); },
+    });
+    credentials.set(url, "bearer", "", "token", "");
+    assert.equal(credentials.forEndpoint(url).Authorization, "Bearer token");
+    assert.equal(credentials.restore(url), false);
+    credentials.set(url, "bearer", "", "token", "");
+    credentials.forget(url);
+    assert.deepEqual(credentials.forEndpoint(url), {});
+    delete globalThis.localStorage;
+    globalThis.localStorage = {
+      getItem() { return null; },
+      setItem() { throw new Error("Quota exceeded"); },
+      removeItem() { throw new Error("Storage blocked"); },
+    };
+    credentials.set(url, "basic", "alice", "secret", "");
+    assert.ok(credentials.forEndpoint(url).Authorization.startsWith("Basic "));
+    credentials.forget(url);
+    assert.equal(credentials.record, null);
+    """)
+
+
+@pytest.mark.skipif(NODE is None, reason="node is not installed")
 def test_all_requests_carry_credentials_without_logging_them():
     run_js("""
     for (const version of Object.keys(REVISIONS)) {

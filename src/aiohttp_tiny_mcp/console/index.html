@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en" data-endpoint="{{ENDPOINT}}" data-console="{{BASE}}" data-oauth-client-id="{{OAUTH_CLIENT_ID}}">
+<html lang="en" data-endpoint="{{ENDPOINT}}" data-endpoints="{{ENDPOINTS}}" data-console="{{BASE}}" data-oauth-client-id="{{OAUTH_CLIENT_ID}}">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -11,7 +11,7 @@
 
 <header class="bar">
   <h1><button id="server-title" type="button" title="Show server instructions" disabled>{{TITLE}}</button></h1>
-  <label class="field grow" title="The path the server serves MCP on. A query string is sent as typed">
+  <label id="endpoint-manual" class="field grow" title="The path the server serves MCP on. A query string is sent as typed">
     <span>Endpoint</span>
     <input id="endpoint" class="endpoint" type="text" spellcheck="false" autocomplete="off">
   </label>
@@ -105,8 +105,12 @@
     <h2 id="auth-title">Authentication</h2>
     <p id="auth-message">Enter credentials for this endpoint.</p>
     <p id="auth-endpoint" class="auth-endpoint"></p>
-    <button id="auth-oauth" class="primary" type="button" hidden>Sign in with OAuth</button>
-    <p id="auth-oauth-status" class="auth-help" role="status"></p>
+    <section id="endpoint-declared" class="endpoint-declared" hidden aria-label="MCP endpoint">
+      <label class="auth-field" for="endpoint-select"><span>Endpoint</span>
+        <select id="endpoint-select" class="endpoint" aria-describedby="endpoint-description"></select>
+      </label>
+      <p id="endpoint-description" class="hint"></p>
+    </section>
     <label class="auth-field">Method
       <select id="auth-method">
         <option value="basic">Basic</option>
@@ -114,17 +118,19 @@
         <option value="custom">Custom header</option>
       </select>
     </label>
+    <button id="auth-oauth" class="primary" type="button" hidden>Sign in with OAuth</button>
+    <p id="auth-oauth-status" class="auth-help" role="status"></p>
     <label id="auth-user-field" class="auth-field">Username
       <input id="auth-user" type="text" autocomplete="off" spellcheck="false">
     </label>
     <label id="auth-header-field" class="auth-field" hidden>Header name
       <input id="auth-header" type="text" value="X-API-Key" autocomplete="off" spellcheck="false">
     </label>
-    <label class="auth-field"><span id="auth-secret-label">Password</span>
+    <label id="auth-secret-field" class="auth-field"><span id="auth-secret-label">Password</span>
       <input id="auth-secret" type="password" autocomplete="off" required>
     </label>
-    <p class="auth-help">Credentials stay in this page's memory until you clear them or reload.
-      Enter an existing Bearer token or use configured OAuth sign-in.</p>
+    <fieldset id="endpoint-parameters" class="endpoint-parameters" aria-label="Query parameters"></fieldset>
+    <p class="auth-help">Credentials are saved in this browser. Clear removes saved credentials for this endpoint.</p>
     <p id="auth-error" class="auth-error" role="alert"></p>
     <menu>
       <button id="auth-clear" class="quiet" type="button">Clear</button>

@@ -352,8 +352,11 @@ def test_connection_controls_apply_notifications_and_reset_after_disconnect() ->
     page.revision.value = '2026-07-28';
     page.notifications.checked = true;
     let client = null, endpointUrl = null, chosen = null;
-    const credentials = {forEndpoint: () => ({Authorization: 'Bearer private-token'})};
+    const credentials = {
+      restore() {}, forEndpoint: () => ({Authorization: 'Bearer private-token'})
+    };
     function chosenEndpoint() { return new URL('http://localhost/mcp?org=example'); }
+    function setEndpointDisabled(disabled) { page.endpoint.disabled = disabled; }
     function clearCredentials() {}
     function openAuthentication() {}
     function setServerInstructions() {}

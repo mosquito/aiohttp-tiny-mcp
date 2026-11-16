@@ -2,12 +2,19 @@
 
 from __future__ import annotations
 
+import json
 import logging
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from html import escape
 from pathlib import Path
+from typing import Any, Literal
+from urllib.parse import urlsplit
 
 from aiohttp import web
+from pydantic import BaseModel
+
+from aiohttp_tiny_mcp.protocol.schema import inline_refs
 
 log = logging.getLogger("aiohttp_tiny_mcp")
 
@@ -19,6 +26,80 @@ FILES = {
     "console.css": ("console.css", "text/css"),
     "oauth-callback": ("oauth-callback.html", "text/html"),
 }
+
+
+def check_query_property(property_schema: dict[str, Any], name: str, *, item: bool = False) -> None:
+    """Require one scalar type or a list of scalars, with optional nullability."""
+    branches = property_schema.get("anyOf", property_schema.get("oneOf"))
+    if branches is not None:
+        candidates = [branch for branch in branches if branch.get("type") != "null"]
+        if len(candidates) != 1:
+            raise ValueError(f"Query parameter {name!r} must have one non-null type.")
+        check_query_property(candidates[0], name, item=item)
+        return
+    kind = property_schema.get("type")
+    if isinstance(kind, list):
+        kinds = set(kind) - {"null"}
+        if len(kinds) > 1:
+            raise ValueError(f"Query parameter {name!r} must have one non-null type.")
+        kind = next(iter(kinds), "null")
+    if kind == "array" and not item:
+        items = property_schema.get("items", {})
+        check_query_property(items, name, item=True)
+        return
+    if kind not in {"string", "integer", "number", "boolean", "null"}:
+        raise ValueError(f"Query parameter {name!r} must be a scalar or a list of scalars.")
+
+
+@dataclass(frozen=True)
+class ConsoleEndpoint:
+    """Describe an existing MCP route and its query fields for the console."""
+
+    path: str
+    description: str
+    query: type[BaseModel] | None = None
+    auth: Sequence[Literal["none", "basic", "bearer", "query", "custom", "oauth"]] | None = None
+
+    def definition(self) -> dict[str, Any]:
+        """Return validated, JSON-compatible endpoint metadata."""
+        if (
+            not isinstance(self.path, str)
+            or not self.path.startswith("/")
+            or self.path.startswith("//")
+            or "\\" in self.path
+            or "#" in self.path
+            or any(ord(character) < 32 or ord(character) == 127 for character in self.path)
+        ):
+            raise ValueError("A console endpoint needs a root-relative path without a fragment.")
+        address = urlsplit(self.path)
+        if address.scheme or address.netloc:
+            raise ValueError("A console endpoint must be on the same origin.")
+        if not isinstance(self.description, str) or not self.description.strip():
+            raise ValueError("A console endpoint needs a nonempty description.")
+        auth = list(self.auth) if self.auth is not None else None
+        if auth is not None:
+            supported = {"none", "basic", "bearer", "query", "custom", "oauth"}
+            if not auth or any(
+                not isinstance(method, str) or method not in supported for method in auth
+            ):
+                raise ValueError(
+                    "Console endpoint auth must contain supported authentication types."
+                )
+            if len(auth) != len(set(auth)):
+                raise ValueError("Console endpoint authentication types must be unique.")
+        schema: dict[str, Any] = {"type": "object", "properties": {}}
+        if self.query is not None:
+            if not isinstance(self.query, type) or not issubclass(self.query, BaseModel):
+                raise ValueError("A console endpoint query must be a Pydantic model class.")
+            try:
+                schema = inline_refs(self.query.model_json_schema())
+            except RecursionError as error:
+                raise ValueError("Recursive console query models are not supported.") from error
+            if schema.get("type") != "object" or "properties" not in schema:
+                raise ValueError("A console endpoint query must describe named fields.")
+            for name, property_schema in schema["properties"].items():
+                check_query_property(property_schema, name)
+        return {"path": self.path, "description": self.description, "query": schema, "auth": auth}
 
 
 class Console:
@@ -33,8 +114,18 @@ class Console:
         template: str | Path | None = None,
         variables: Mapping[str, str] | None = None,
         oauth_client_id: str | None = None,
+        endpoints: Sequence[ConsoleEndpoint] | None = None,
     ) -> None:
-        self.endpoint_path = endpoint_path
+        self.endpoints = tuple(endpoints or ())
+        self.endpoint_definitions = [endpoint.definition() for endpoint in self.endpoints]
+        paths = [endpoint.path for endpoint in self.endpoints]
+        if len(paths) != len(set(paths)):
+            raise ValueError("Console endpoint paths must be unique.")
+        if not oauth_client_id and any(
+            "oauth" in (definition["auth"] or []) for definition in self.endpoint_definitions
+        ):
+            raise ValueError("Declared OAuth authentication requires oauth_client_id.")
+        self.endpoint_path = paths[0] if paths else endpoint_path
         self.title = title
         self.description = description
         self.template = Path(template) if template else HERE / "index.html"
@@ -44,6 +135,7 @@ class Console:
     def substitutions(self, base: str) -> dict[str, str]:
         return {
             "ENDPOINT": self.endpoint_path,
+            "ENDPOINTS": json.dumps(self.endpoint_definitions),
             "BASE": base,
             "TITLE": self.title,
             "DESCRIPTION": self.description,
@@ -115,4 +207,4 @@ class Console:
         return app
 
 
-__all__ = ["Console"]
+__all__ = ["Console", "ConsoleEndpoint"]

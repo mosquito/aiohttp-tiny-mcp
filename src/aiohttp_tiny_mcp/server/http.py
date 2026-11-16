@@ -13,6 +13,7 @@ from typing import Any
 
 from aiohttp import web
 
+from aiohttp_tiny_mcp.access_log import install_token_filter
 from aiohttp_tiny_mcp.auth import Authentication, Principal, Unauthorized
 from aiohttp_tiny_mcp.protocol.adapter import Adapter
 from aiohttp_tiny_mcp.protocol.core import (
@@ -220,15 +221,24 @@ class Endpoint:
         )
 
     def setup(
-        self, app: web.Application, path: str = "/mcp", *, name: str | None = "mcp"
+        self,
+        app: web.Application,
+        path: str = "/mcp",
+        *,
+        name: str | None = "mcp",
+        mask_tokens_in_logs: bool = True,
     ) -> web.Application:
+        if mask_tokens_in_logs:
+            install_token_filter()
         log.debug("adding the MCP routes to %r", app)
         app[MCP_ENDPOINT] = self
         app.add_routes(self.routes(path, name=name))
         return app
 
-    def app(self, path: str = "/mcp", **kw: Any) -> web.Application:
-        return self.setup(web.Application(**kw), path)
+    def app(
+        self, path: str = "/mcp", *, mask_tokens_in_logs: bool = True, **kw: Any
+    ) -> web.Application:
+        return self.setup(web.Application(**kw), path, mask_tokens_in_logs=mask_tokens_in_logs)
 
     def check_origin(self, request: web.Request) -> None:
         origin = request.headers.get("Origin")
