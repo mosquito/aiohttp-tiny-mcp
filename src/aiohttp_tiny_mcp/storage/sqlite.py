@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from collections.abc import AsyncIterator, Mapping, Sequence
+from collections.abc import AsyncGenerator, AsyncIterator, Mapping, Sequence
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 from typing import Any
@@ -114,7 +114,7 @@ class SqliteStorage:
     @asynccontextmanager
     async def execute(
         self, sql: str, parameters: Sequence[Any] = ()
-    ) -> AsyncIterator[aiosqlite.Cursor]:
+    ) -> AsyncGenerator[aiosqlite.Cursor, None]:
         """Keep concurrent operations out until this statement's cursor is closed."""
         async with self.executing:
             connection = await self.open()

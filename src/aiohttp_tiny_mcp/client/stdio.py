@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from collections.abc import AsyncIterator, Callable, Mapping
+from collections.abc import AsyncGenerator, AsyncIterator, Callable, Mapping
 from contextlib import asynccontextmanager
 from typing import Any, Protocol, runtime_checkable
 
@@ -79,7 +79,7 @@ class StdioClient(BaseClient):
         client_info: Implementation | None = None,
         on_ask: Elicitor | None = None,
         limit: int = DEFAULT_STREAM_LIMIT,
-    ) -> AsyncIterator[StdioClient]:
+    ) -> AsyncGenerator[StdioClient, None]:
         """Launch cmd with protocol pipes and inherit stderr.
 
         `limit` bounds response lines in bytes and defaults to 1 MiB.

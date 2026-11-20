@@ -78,8 +78,14 @@ that yielded one extra message on `2026-07-28` and nothing equivalent elsewhere.
 
 ## Running it
 
+Tests are grouped by subsystem under `tests/`. Each group's `conftest.py`
+provides its fixtures. The root `conftest.py` contains fixtures shared across groups.
+Console browser tests run in `tests/browser/`, with one Chromium process per
+session and a separate browser context for each test.
+
 ```bash
 uv sync --all-groups --all-extras
+uv run playwright install chromium
 uv run pytest          # tests, documentation and README
 uv run ruff format --check .
 uv run ruff check .
@@ -108,15 +114,15 @@ That API does not implement Tasks lifecycle rules or MCP Apps rendering.
 
 ## Extension coverage
 
-`tests/test_extensions.py` checks method dispatch over HTTP and stdio,
+`tests/extensions/test_extensions.py` checks method dispatch over HTTP and stdio,
 dependency cleanup, metadata checks, registration conflicts, and resource
-fallback on all four older revisions. `tests/test_skills.py` checks file bytes
+fallback on all four older revisions. `tests/extensions/test_skills.py` checks file bytes
 against manifests, nested skills, pagination, startup validation, and snapshots.
 
 The optional directory-reading feature of Skills is not implemented or
 advertised. Skills use `skills/list`, `skills/get`, and `resources/read`.
 
-`tests/test_extension_wire.py` checks the legacy wire boundary on every older
+`tests/extensions/test_extension_wire.py` checks the legacy wire boundary on every older
 revision over stdio and HTTP. It verifies ordinary resource response shapes,
 rejection of native extension requests, and no extension capability declaration.
 Extension-specific result fields remain JSON text inside resource contents.

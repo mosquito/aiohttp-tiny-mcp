@@ -303,6 +303,7 @@ class StaticBasicAuth(BasicAuth):
         return found
 
 
+# OAuth configuration is immutable; custom authentication policies can be mutable.
 @dataclass(frozen=True)
 class Authorization(Authentication):
     """Configuration for an OAuth protected resource server."""
@@ -311,11 +312,11 @@ class Authorization(Authentication):
     resource: str
     authorization_servers: Sequence[str] = ()
     scopes_supported: Sequence[str] | None = None
-    required_scopes: Sequence[str] = ()
+    required_scopes: Sequence[str] = ()  # ty: ignore[incompatible-attribute-override]
     resource_name: str | None = None
     documentation: str | None = None
-    bind_sessions: bool = True
-    namespace_from_token: bool = True
+    bind_sessions: bool = True  # ty: ignore[incompatible-attribute-override]
+    namespace_from_token: bool = True  # ty: ignore[incompatible-attribute-override]
 
     @property
     def metadata_path(self) -> str:

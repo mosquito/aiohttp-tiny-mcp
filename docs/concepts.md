@@ -117,4 +117,4 @@ Starlette/ASGI is a fixed constraint. This library supports aiohttp middleware,
 [custom extensions and skill directories](guide/extensions.md), and extensible
 [authentication policies](guide/auth.md), including Basic and OAuth Bearer.
 Choose it for aiohttp and for legacy session-based MCP behind a load balancer.
-The distributed claims are exercised in `tests/test_cluster.py`.
+The distributed claims are exercised in `tests/storage/cluster/test_cluster.py`.
