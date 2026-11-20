@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import AsyncExitStack
@@ -9,7 +8,6 @@ from typing import Any
 import psycopg
 import pytest
 import redis
-from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 from pydantic import BaseModel, Field
 
@@ -26,6 +24,7 @@ from aiohttp_tiny_mcp import (  # noqa: E402
 from aiohttp_tiny_mcp.protocol.models import CompleteParams
 from aiohttp_tiny_mcp.protocol.selection import AdapterSet
 from aiohttp_tiny_mcp.testing import serving
+from tests.helpers import POSTGRES_URL, REDIS_URL, missing
 
 
 class Add(BaseModel):
@@ -281,55 +280,6 @@ async def real_server_url(registry: Registry) -> AsyncIterator[str]:
         yield url
 
 
-@pytest.fixture
-async def offered_over_sse(registry) -> AsyncIterator[str]:
-    """The fixture registry on the transport 2024-11-05 speaks over HTTP."""
-    from aiohttp_tiny_mcp import SseEndpoint
-
-    app = web.Application()
-    SseEndpoint(registry).setup(app)
-    runner = web.AppRunner(app)
-    await runner.setup()
-    site = web.TCPSite(runner, "127.0.0.1", 0)
-    await site.start()
-    host, port = runner.addresses[0]
-    try:
-        yield f"http://{host}:{port}"
-    finally:
-        await runner.cleanup()
-
-
-@pytest.fixture(params=[True, False], ids=["gzip", "plain"])
-def enable_gzip(request) -> bool:
-    """Run a stream test both compressed and not.
-
-    The framing is the same either way, so anything that depends on the
-    compressor is a defect rather than a mode.
-    """
-    return request.param
-
-
-REQUIRED = os.environ.get("MCP_REQUIRE_BACKENDS") == "1"
-
-
-def missing(what: str, url: str):
-    """Skip, or fail where the backend was promised."""
-    message = f"no {what} at {url}"
-    if REQUIRED:
-        pytest.fail(message)
-    pytest.skip(message)
-
-
-@pytest.fixture
-def unreachable():
-    """`missing`, for a test module that cannot import this one: at a full run
-    the name `conftest` resolves to whichever one came first."""
-    return missing
-
-
-REDIS_URL = os.environ.get("REDIS_URL", "redis://127.0.0.1:6379")
-
-
 @pytest.fixture(scope="session")
 def redis_url_or_none() -> str | None:
     """A reachable Redis, or None. For tests that only partly need one."""
@@ -340,20 +290,6 @@ def redis_url_or_none() -> str | None:
     return REDIS_URL
 
 
-@pytest.fixture
-def redis_url(redis_url_or_none) -> str:
-    """A reachable Redis, or a skipped test.
-
-    docker run -d -p 6379:6379 redis:7-alpine
-    """
-    if redis_url_or_none is None:
-        missing("redis", REDIS_URL)
-    return redis_url_or_none
-
-
-POSTGRES_URL = os.environ.get("POSTGRES_URL", "postgresql://mcp:mcp@127.0.0.1:5432/mcp")
-
-
 @pytest.fixture(scope="session")
 def postgres_url_or_none() -> str | None:
     """A reachable PostgreSQL, or None. For tests that only partly need one."""
@@ -362,15 +298,3 @@ def postgres_url_or_none() -> str | None:
     except psycopg.Error:
         return None
     return POSTGRES_URL
-
-
-@pytest.fixture
-def postgres_url(postgres_url_or_none) -> str:
-    """A reachable PostgreSQL, or a skipped test.
-
-        docker run -d -p 5432:5432 -e POSTGRES_USER=mcp -e POSTGRES_PASSWORD=mcp \
-            -e POSTGRES_DB=mcp postgres:17-alpine
-    """
-    if postgres_url_or_none is None:
-        missing("postgres", POSTGRES_URL)
-    return postgres_url_or_none

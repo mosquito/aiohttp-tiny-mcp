@@ -184,6 +184,11 @@ async function exchangeOAuthCode(config, clientId, redirectUri, verifier, state,
 class ConsoleCredentials {
   constructor() { this.clear(); }
 
+  static scope(endpoint) {
+    const url = new URL(endpoint);
+    return url.origin + url.pathname;
+  }
+
   clear() {
     this.endpoint = null;
     this.method = null;
@@ -192,6 +197,10 @@ class ConsoleCredentials {
   }
 
   storageKey(endpoint) {
+    return this.legacyStorageKey(ConsoleCredentials.scope(endpoint));
+  }
+
+  legacyStorageKey(endpoint) {
     if (typeof location === "undefined" || typeof location.pathname !== "string") return null;
     return `mcp-console-credentials:${JSON.stringify([location.pathname, endpoint])}`;
   }
@@ -227,6 +236,7 @@ class ConsoleCredentials {
     } else if (method !== "none" && method !== "query") {
       throw new Error("Choose an authentication method.");
     }
+    endpoint = ConsoleCredentials.scope(endpoint);
     this.endpoint = endpoint;
     this.method = method;
     this.headers = value === undefined ? {} : { [name]: value };
@@ -248,9 +258,19 @@ class ConsoleCredentials {
     try {
       const key = this.storageKey(endpoint);
       if (!key || typeof localStorage === "undefined") return false;
-      const record = JSON.parse(localStorage.getItem(key));
-      if (!record || record.version !== 1 || record.endpoint !== endpoint) return false;
+      const legacyKey = this.legacyStorageKey(endpoint);
+      const stored = localStorage.getItem(key);
+      const legacy = stored === null && legacyKey !== key;
+      const record = JSON.parse(legacy ? localStorage.getItem(legacyKey) : stored);
+      const expected = legacy ? endpoint : ConsoleCredentials.scope(endpoint);
+      if (!record || record.version !== 1 || record.endpoint !== expected) return false;
       this.apply(endpoint, record.method, record.username, record.secret, record.header);
+      if (legacy) {
+        try {
+          localStorage.setItem(key, JSON.stringify({version: 1, ...this.record}));
+          localStorage.removeItem(legacyKey);
+        } catch {}
+      }
       return true;
     } catch {
       return false;
@@ -260,13 +280,17 @@ class ConsoleCredentials {
   forget(endpoint) {
     try {
       const key = this.storageKey(endpoint);
-      if (key && typeof localStorage !== "undefined") localStorage.removeItem(key);
+      if (key && typeof localStorage !== "undefined") {
+        localStorage.removeItem(key);
+        const legacyKey = this.legacyStorageKey(endpoint);
+        if (legacyKey !== key) localStorage.removeItem(legacyKey);
+      }
     } catch {}
-    if (this.endpoint === endpoint) this.clear();
+    if (this.endpoint === ConsoleCredentials.scope(endpoint)) this.clear();
   }
 
   forEndpoint(endpoint) {
-    return endpoint === this.endpoint ? { ...this.headers } : {};
+    return ConsoleCredentials.scope(endpoint) === this.endpoint ? { ...this.headers } : {};
   }
 }
 
@@ -745,6 +769,9 @@ const page = {
   agentEndpoint: document.getElementById("agent-endpoint"),
   agentHeadersField: document.getElementById("agent-headers-field"),
   agentHeaders: document.getElementById("agent-headers"),
+  agentResources: document.getElementById("agent-resources"),
+  agentResourcesTool: document.getElementById("agent-resources-tool"),
+  agentResourcesNative: document.getElementById("agent-resources-native"),
   agentTarget: document.getElementById("agent-target"),
   agentInstructions: document.getElementById("agent-instructions"),
   agentLanguage: document.getElementById("agent-language"),
@@ -822,6 +849,25 @@ let oauthMetadata = null;
 let oauthGeneration = 0;
 let cancelOAuth = null;
 let agentConnection = null;
+const agentNames = new Map();
+
+function agentNameKey(url) {
+  return endpointDeclarations[matchingEndpoint(url)]?.path || ConsoleCredentials.scope(url.href);
+}
+
+function defaultAgentName(url) {
+  return endpointDeclarations[matchingEndpoint(url)]?.server_name ||
+    (page.serverTitle.textContent.trim().toLowerCase()
+      .replace(/[^a-z0-9_-]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 64)) || "mcp";
+}
+
+function resetAgentResources() {
+  if (!page.agentResources) return;
+  page.agentResources.hidden = document.documentElement.dataset.resourceTools === "false";
+  const modes = agentResourceDefaults(page.agentMethod.value);
+  page.agentResourcesTool.checked = modes.includes("tool");
+  page.agentResourcesNative.checked = modes.includes("native");
+}
 
 function agentLevelKey() {
   return `mcp-console-agent-level:${location.pathname}`;
@@ -850,6 +896,11 @@ function renderAgentSetup() {
       level: page.agentLevel.value,
       name: page.agentName.value,
       headers: page.agentHeaders.checked ? agentConnection.headers : {},
+      resourceTools: document.documentElement.dataset.resourceTools !== "false",
+      resourceModes: page.agentResources ? [
+        ...(page.agentResourcesTool.checked ? ["tool"] : []),
+        ...(page.agentResourcesNative.checked ? ["native"] : []),
+      ] : undefined,
     });
     const choice = page.agentMethod.value;
     page.agentMethod.textContent = "";
@@ -864,6 +915,7 @@ function renderAgentSetup() {
     page.agentInstructions.textContent = variant.instructions;
     page.agentLanguage.textContent = variant.language.toUpperCase();
     page.agentCode.value = variant.code;
+    page.agentCode.rows = Math.max(4, Math.min(14, variant.code.trimEnd().split("\n").length));
     page.agentVerify.textContent = variant.verify;
     page.agentDocs.href = variant.link;
     page.agentDocs.hidden = false;
@@ -876,12 +928,11 @@ function renderAgentSetup() {
 function openAgentSetup() {
   agentConnection = null;
   page.agentMethod.textContent = "";
+  resetAgentResources();
   page.agentLevel.value = rememberedAgentLevel();
   page.agentHeaders.checked = true;
   page.agentHeadersField.hidden = true;
   page.agentEndpoint.textContent = "";
-  page.agentName.value = (page.serverTitle.textContent.trim().toLowerCase()
-    .replace(/[^a-z0-9_-]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 64)) || "mcp";
   renderAgentSetup();
   try {
     const typed = page.endpoint.value.trim() || configuredEndpoint.href;
@@ -891,9 +942,10 @@ function openAgentSetup() {
     url.hash = "";
     const saved = new ConsoleCredentials();
     saved.restore(url.href);
-    const headers = credentials.endpoint === url.href
+    const headers = credentials.endpoint === ConsoleCredentials.scope(url.href)
       ? credentials.forEndpoint(url.href) : saved.forEndpoint(url.href);
     agentConnection = {url: url.href, headers};
+    page.agentName.value = agentNames.get(agentNameKey(url)) ?? defaultAgentName(url);
     page.agentEndpoint.textContent = url.href;
     page.agentHeadersField.hidden = !Object.keys(headers).length;
     renderAgentSetup();
@@ -906,12 +958,22 @@ function openAgentSetup() {
 function setupAgentDialog() {
   if (!page.addAgent || !page.agentSetup) return;
   page.addAgent.onclick = openAgentSetup;
-  page.agentMethod.onchange = renderAgentSetup;
+  page.agentMethod.onchange = () => {
+    resetAgentResources();
+    renderAgentSetup();
+  };
+  if (page.agentResources) {
+    page.agentResourcesTool.onchange = renderAgentSetup;
+    page.agentResourcesNative.onchange = renderAgentSetup;
+  }
   page.agentLevel.onchange = () => {
     try { localStorage.setItem(agentLevelKey(), page.agentLevel.value); } catch {}
     renderAgentSetup();
   };
-  page.agentName.oninput = renderAgentSetup;
+  page.agentName.oninput = () => {
+    if (agentConnection) agentNames.set(agentNameKey(new URL(agentConnection.url)), page.agentName.value);
+    renderAgentSetup();
+  };
   page.agentHeaders.onchange = renderAgentSetup;
   page.agentClose.onclick = () => page.agentSetup.close();
   page.agentForm.onsubmit = event => event.preventDefault();
@@ -1009,8 +1071,10 @@ async function signInOAuth() {
     });
     const token = await exchangeOAuthCode(config, clientId, redirectUri, verifier, state, response);
     if (cancelled) throw new Error("OAuth sign-in was cancelled.");
-    if (endpoint !== authenticationEndpoint().href) throw new Error("The MCP endpoint changed during sign-in.");
-    const url = new URL(endpoint);
+    const url = authenticationEndpoint();
+    if (ConsoleCredentials.scope(endpoint) !== ConsoleCredentials.scope(url.href)) {
+      throw new Error("The MCP endpoint changed during sign-in.");
+    }
     page.endpoint.value = url.pathname + url.search;
     credentials.set(endpoint, "bearer", "", token, "");
     page.authenticate.textContent = "Authentication: OAuth";
@@ -1046,8 +1110,9 @@ function authFields() {
   page.authError.textContent = "";
   let url;
   try { url = authenticationEndpoint(); } catch { return; }
-  const saved = new ConsoleCredentials();
-  saved.restore(url.href);
+  const saved = credentials.endpoint === ConsoleCredentials.scope(url.href)
+    ? credentials : new ConsoleCredentials();
+  if (saved !== credentials) saved.restore(url.href);
   if (saved.method === method && saved.record) {
     page.authUser.value = saved.record.username;
     page.authHeader.value = saved.record.header || "X-API-Key";
@@ -1062,8 +1127,9 @@ function updateAuthMethods(url) {
     custom: "Custom header", oauth: "OAuth"};
   const methods = declaration?.auth || ["none", "basic", "bearer", "query", "custom"];
   const previous = page.authMethod.value;
-  const saved = new ConsoleCredentials();
-  if (url) saved.restore(url.href);
+  const saved = url && credentials.endpoint === ConsoleCredentials.scope(url.href)
+    ? credentials : new ConsoleCredentials();
+  if (url && saved !== credentials) saved.restore(url.href);
   page.authMethod.textContent = "";
   for (const method of methods) {
     const option = element("option", null, labels[method]);
@@ -1081,10 +1147,10 @@ function openAuthentication(error) {
   let url;
   try { url = chosenEndpoint(); }
   catch (failure) { say(failure.message, "off"); return; }
-  if (authEndpoint !== url.href) {
+  if (authEndpoint !== ConsoleCredentials.scope(url.href)) {
     resetOAuth();
     authSchemes = [];
-    authEndpoint = url.href;
+    authEndpoint = ConsoleCredentials.scope(url.href);
   }
   if (error) authSchemes = error.schemes;
   endpointDialog(url);
@@ -1114,7 +1180,6 @@ function setupAuthentication() {
     let url;
     try { url = authenticationEndpoint(); } catch { url = chosenEndpoint(); }
     credentials.forget(url.href);
-    credentials.forget(chosenEndpoint().href);
     for (const name of [...url.searchParams.keys()]) {
       if (name.toLowerCase() === "token") url.searchParams.delete(name);
     }
@@ -1135,7 +1200,7 @@ function setupAuthentication() {
         return;
       }
       if (method === "oauth") {
-        if (credentials.endpoint !== url.href) credentials.restore(url.href);
+        if (credentials.endpoint !== ConsoleCredentials.scope(url.href)) credentials.restore(url.href);
         if (credentials.method !== "bearer") credentials.apply(url.href, "none", "", "", "");
       } else {
         credentials.set(url.href, method, page.authUser.value, page.authSecret.value, page.authHeader.value);
@@ -1153,18 +1218,33 @@ function setupAuthentication() {
 }
 
 function endpointChanged() {
-  clearCredentials();
-  resetOAuth();
-  authEndpoint = null;
-  authSchemes = [];
+  let url;
   try {
     const typed = page.endpoint.value.trim();
-    if (!typed) return;
-    const url = new URL(typed, location.origin);
-    if (url.origin === location.origin && !url.username && !url.password) {
-      localStorage.setItem(endpointKey(), url.pathname + url.search);
+    if (!typed) throw new Error("An endpoint is required.");
+    url = new URL(typed, location.origin);
+    if (url.origin !== location.origin || url.username || url.password) {
+      throw new Error("The endpoint must be on this server.");
     }
-  } catch {}
+  } catch {
+    clearCredentials();
+    resetOAuth();
+    authEndpoint = null;
+    authSchemes = [];
+    return;
+  }
+  const scope = ConsoleCredentials.scope(url.href);
+  if (credentials.endpoint !== scope) {
+    clearCredentials();
+    credentials.restore(url.href);
+    page.authenticate.textContent = credentials.method ? `Authentication: ${credentials.method}` : "Authentication";
+  }
+  if (authEndpoint !== scope) {
+    resetOAuth();
+    authEndpoint = scope;
+    authSchemes = [];
+  }
+  try { localStorage.setItem(endpointKey(), url.pathname + url.search); } catch {}
 }
 
 function selectedDeclaration() {
@@ -1184,35 +1264,43 @@ function setupEndpoints() {
     page.endpointSelect.append(option);
   });
   page.endpointSelect.onchange = () => {
-    resetOAuth();
     updateDeclaredEndpoint();
     if (page.authMethod) {
       let url;
       try { url = authenticationEndpoint(); } catch {}
+      const scope = url ? ConsoleCredentials.scope(url.href) : null;
+      if (authEndpoint !== scope) {
+        resetOAuth();
+        authEndpoint = scope;
+        authSchemes = [];
+      }
       updateAuthMethods(url);
     }
   };
   const changed = () => {
-    resetOAuth();
     let url;
     try {
       url = authenticationEndpoint();
       page.authEndpoint.textContent = url.pathname + url.search;
     } catch {}
-    if (page.authSecret && !page.authSecret.edited) authFields();
   };
   page.endpointParameters.addEventListener("input", changed);
   page.endpointParameters.addEventListener("change", changed);
 }
 
-function endpointDialog(url) {
+function matchingEndpoint(url) {
   const matches = endpointDeclarations.flatMap((item, index) => {
     const declared = new URL(item.path, location.origin);
     const fixed = [...declared.searchParams].filter(([name]) => !Object.hasOwn(item.query.properties || {}, name));
     return declared.pathname === url.pathname && fixed.every(([name, value]) => url.searchParams.getAll(name).includes(value))
       ? [{index, specificity: fixed.length}] : [];
   }).sort((first, second) => second.specificity - first.specificity);
-  page.endpointSelect.value = matches.length ? String(matches[0].index) : "";
+  return matches.length ? matches[0].index : null;
+}
+
+function endpointDialog(url) {
+  const matched = matchingEndpoint(url);
+  page.endpointSelect.value = matched === null ? "" : String(matched);
   updateDeclaredEndpoint(url);
   page.authEndpoint.textContent = url.pathname + url.search;
   updateAuthMethods(url);
@@ -2480,7 +2568,7 @@ async function connect() {
   page.outcome.textContent = "";
   try {
     endpointUrl = chosenEndpoint();
-    if (credentials.endpoint !== endpointUrl.href) credentials.restore(endpointUrl.href);
+    if (credentials.endpoint !== ConsoleCredentials.scope(endpointUrl.href)) credentials.restore(endpointUrl.href);
     page.authenticate.textContent = credentials.method ? `Authentication: ${credentials.method}` : "Authentication";
     client = new Client(endpointUrl.href, page.revision.value, {
       authHeaders: credentials.forEndpoint(endpointUrl.href),

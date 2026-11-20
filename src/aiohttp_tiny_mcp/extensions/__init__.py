@@ -64,7 +64,7 @@ class ExtensionSpec:
 class ExtensionResult(ResultModel):
     """Preserve result discriminators defined by an extension."""
 
-    result_type: str | None = None
+    result_type: str | None = None  # ty: ignore[incompatible-attribute-override]
 
 
 class Nothing(BaseModel):

@@ -152,7 +152,7 @@ its HTTP endpoint, but this does not redefine the historical transport. See
 
 ## Regression checks
 
-`tests/test_extension_wire.py` captures requests and responses over stdio and
+`tests/extensions/test_extension_wire.py` captures requests and responses over stdio and
 HTTP for all four older revisions. It checks unchanged method maps, resource-only
 capability advertisement, ordinary listing/read envelopes, and rejection of
 native extension calls. It also checks that extension-specific fields remain

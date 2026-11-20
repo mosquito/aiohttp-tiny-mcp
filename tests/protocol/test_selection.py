@@ -28,11 +28,6 @@ def preamble(
     return Preamble.of(body, headers, query)
 
 
-@pytest.fixture
-def adapters() -> AdapterSet:
-    return AdapterSet.default()
-
-
 def test_versions_newest_first(adapters):
     assert adapters.versions == (
         "2026-07-28",

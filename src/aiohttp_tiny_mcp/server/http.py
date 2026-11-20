@@ -50,6 +50,7 @@ from .dispatcher import Dispatcher
 from .exchange import Exchange, is_reply, relay_reply
 from .registry import Registry
 from .resource_auth import allowed_resource
+from .resource_tools import resource_capabilities, resource_modes
 from .subscriptions import relays, wanted
 from .tasks import stop
 
@@ -315,6 +316,7 @@ class Endpoint:
         return None
 
     async def handle(self, request: web.Request) -> web.StreamResponse:
+        resource_modes(self.registry, request)
         try:
             self.check_origin(request)
         except Rejected as e:
@@ -432,6 +434,7 @@ class Endpoint:
         """Serve legacy notifications, re-reading subscriptions to include changes from other
         nodes.
         """
+        resource_modes(self.registry, request)
         try:
             self.check_origin(request)
         except Rejected as e:
@@ -481,7 +484,9 @@ class Endpoint:
         principal: Principal | None = None,
     ) -> None:
         """Relay changes with their hub ids, re-reading subscriptions each pass."""
-        capabilities = adapter.capabilities(self.registry)
+        capabilities = resource_capabilities(
+            self.registry, adapter, resource_modes(self.registry, request)
+        )
         events = await self.resumed(request, topic(NOTIFICATIONS))
         while True:
             found = await events.poll()

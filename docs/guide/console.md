@@ -171,7 +171,9 @@ application.add_routes(
 Console(
     title="Operations",
     endpoints=[
-        ConsoleEndpoint("/team/mcp", "Tools for one team", TeamQuery, auth=("none",)),
+        ConsoleEndpoint(
+            "/team/mcp", "Tools for one team", TeamQuery, auth=("none",), server_name="team_tools"
+        ),
         ConsoleEndpoint("/shared/mcp", "Shared read-only tools", auth=("none",)),
     ],
 ).setup(application)
@@ -202,9 +204,11 @@ console, not the server's authentication policy.
 
 Authentication values are saved in browser `localStorage` when you connect.
 Saved values include usernames, passwords, tokens, and custom header names.
-Each record belongs to one console path and exact endpoint URL, including its
-query string. Reloading can restore that record; switching endpoints does not
-delete it. **Clear** removes the saved credentials for the current endpoint.
+Each record belongs to one console path and endpoint origin and path. Query
+parameters do not affect credential selection, so changing them preserves
+authentication. Different origins and paths use separate records. Reloading
+restores the saved record; switching endpoints does not delete it. **Clear**
+removes the saved credentials for the current endpoint path.
 Closing or cancelling the dialog does not save edits. If browser storage is
 unavailable, credentials remain usable for the current page only.
 
@@ -227,6 +231,16 @@ the result into the file shown in the dialog. **Project** applies to the current
 project; **User** applies across your projects. Merge the server entry with
 existing settings.
 
+Set `ConsoleEndpoint(server_name="team_tools", ...)` to supply the initial server
+name for that endpoint. Names accept 1–64 letters, numbers, underscores, or hyphens.
+Without a declared name, the console derives one from its title. Names entered
+manually remain available for that endpoint until the page reloads.
+
+Under **Resources**, choose **as tools**, **native**, or both. Changing the agent
+applies that agent's defaults. Changing the name, configuration level, or header
+selection preserves your resource choices. At least one resource interface must
+remain selected before you can copy the configuration.
+
 The default level is **User**. The console remembers your level choice in
 `localStorage` for each console path, including after reopening or reloading.
 Missing, invalid, or unavailable storage uses **User**. The file path depends
@@ -241,6 +255,7 @@ references on 2026-11-16:
 | [VS Code / Copilot](https://code.visualstudio.com/docs/agents/reference/mcp-configuration) | `.mcp.json` | `~/.copilot/mcp-config.json` | `mcpServers`, `type: "http"`, `url`, `tools` |
 | [Gemini CLI](https://geminicli.com/docs/tools/mcp-server/) | `.gemini/settings.json` | `~/.gemini/settings.json` | `mcpServers`, `httpUrl` |
 | [Pi](https://docs.pi.dev/latest/mcp) | `.pi/mcp.json` | `~/.pi/agent/mcp.json` | `mcpServers`, `url` |
+| [Antigravity](https://antigravity.google/docs/mcp) | `.agents/mcp_config.json` | `~/.gemini/config/mcp_config.json` | `mcpServers`, `serverUrl` |
 | [OpenCode V2](https://opencode.ai/docs/config/#locations) | `opencode.json` | `~/.config/opencode/opencode.json` | `mcp.servers`, `type: "remote"`, `url` |
 
 Paths use each agent's default configuration directory. If you override that
@@ -258,10 +273,32 @@ uses the portable `.mcp.json` format; its older `.vscode/mcp.json` format uses
 `servers` and is intended for Local harness compatibility.
 
 The generated URL includes the current query parameters. Saved authentication
-headers are included only when they belong to that exact endpoint URL. Clear
-**Include saved authentication headers** to generate a URL-only configuration
+headers are included only when their endpoint origin and path match. Clear
+**Use saved auth** to generate a URL-only configuration
 and use the agent's own sign-in flow where supported. Query tokens remain part
 of the URL. The console does not copy its OAuth client registration to agents.
+
+Pi, Antigravity, and Copilot configurations default to `resources=tool` for compatibility.
+Other agents default to native resources without a `resources` query parameter.
+Selecting both checkboxes generates
+`resources=tool&resources=native`. These choices replace existing `resources`
+values and preserve other query parameters. These presets do not imply that
+every version of an agent lacks native resource support.
+Selecting only native resources removes all existing `resources` parameters.
+The Antigravity format and paths were checked on 2026-11-21.
+
+When the registry disables resource tools, pass the same setting to the console:
+
+```python
+from aiohttp_tiny_mcp import Registry
+from aiohttp_tiny_mcp.console import Console
+
+registry = Registry("example", "1.0", resource_tools=False)
+console = Console(resource_tools=registry.resource_tools)
+```
+
+With `Console(resource_tools=False)`, the resource checkboxes are hidden. All generated
+configurations preserve the endpoint URL without adding or replacing `resources` values.
 
 **Copy configuration** copies the selected format. If clipboard access is
 unavailable, the dialog selects the text for keyboard copying. Each format

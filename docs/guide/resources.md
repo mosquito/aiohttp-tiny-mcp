@@ -74,6 +74,64 @@ assert {resource.uri for resource in listed} == {"config://app"}
 assert read.contents[0].text == "entry 42"
 ```
 
+## Access through tools
+
+HTTP clients can select a resource interface with the `resources` query parameter.
+The setting applies to each request, including discovery and notification streams.
+
+| Endpoint query | Resource interface |
+| --- | --- |
+| No `resources` parameter | Native MCP resources |
+| `?resources=native` | Native MCP resources |
+| `?resources=tool` | Resource tools |
+| `?resources=tool&resources=native` | Both interfaces |
+
+Repeated values are accepted. Empty or unknown values return HTTP 400.
+Other endpoint query parameters are preserved. On legacy HTTP+SSE, the advertised
+POST URL carries the selected modes. Stdio uses native resources.
+
+Tool mode exposes two names through `tools/list`:
+
+- `mcp_resources_list(kind="resources", cursor=None)` lists fixed resources.
+  Set `kind="templates"` to list URI templates. Pass `nextCursor` back as `cursor`.
+- `mcp_resources_read(uri)` reads a concrete URI, including an expanded template.
+
+Both tools return JSON in ordinary text content, so the client does not need to
+interpret resource content blocks. Read results retain URI, MIME type, and text
+or base64 blob data. The same resource handlers, dependency providers, scope checks,
+revision-specific URIs, and pagination rules apply. Tool failures return `isError`.
+
+<!-- name: async test_resources; fixtures: serve -->
+```python
+import json
+
+async with Client(url + "?resources=tool", AdapterSet.default().by_version["2026-07-28"]) as client:
+    await client.initialize()
+    result = await client.call_tool("mcp_resources_read", {"uri": "notebook://entries/42"})
+    contents = json.loads(result.content[0].text)["contents"]
+
+assert contents[0]["text"] == "entry 42"
+```
+
+In tool-only mode, the server omits the native `resources` capability and rejects
+native resource listing, reading, subscription, and completion requests. Resource
+notifications are disabled. Use both modes when the client needs subscriptions.
+
+`Registry` reserves exactly `mcp_resources_list` and `mcp_resources_read` by default.
+Registering either as an application tool raises `ValueError`. Disable the feature
+to release both names and stop interpreting the `resources` query parameter:
+
+<!-- name: test_resource_tools_opt_out -->
+```python
+from aiohttp_tiny_mcp import Registry
+
+registry = Registry("notebook", "1.0", resource_tools=False)
+```
+
+With this opt-out, resources always use native methods and no resource tools are
+installed. Pass the same setting to `Console(resource_tools=registry.resource_tools)`
+to disable the compatibility URLs in generated agent configurations.
+
 ## Required scopes
 
 Use `scopes` to restrict reads and subscriptions to verified callers with every

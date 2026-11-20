@@ -14,6 +14,7 @@ from aiohttp_tiny_mcp.storage.sessions import DEFAULT_TTL_SECONDS, MemorySession
 from .exchange import Exchange, Instance
 from .request_state import DEFAULT_TTL_SECONDS as STATE_TTL_SECONDS
 from .request_state import RequestStates
+from .resource_tools import RESOURCE_TOOL_NAMES, resource_tool_specs
 from .specs import Bound, PromptSpec, ResourceSpec, ToolSpec
 
 
@@ -44,6 +45,7 @@ class Registry:
         hub_poll_seconds: float = 30.0,
         ask_timeout_seconds: float = 120.0,
         page_size: int | None = None,
+        resource_tools: bool = True,
     ) -> None:
         self.info = Implementation(name=name, version=version)
         self.instructions = instructions
@@ -53,6 +55,8 @@ class Registry:
         self.session_ttl_seconds = session_ttl_seconds
         #: Most entries per listing page. `None`, the default, answers with all of them.
         self.page_size = page_size
+        self.resource_tools = resource_tools
+        self.resource_tool_specs = resource_tool_specs() if resource_tools else {}
         self.request_state = RequestStates(self.session_store, request_state_ttl_seconds)
         self.hub_poll_seconds = hub_poll_seconds
         self.ask_timeout_seconds = ask_timeout_seconds
@@ -248,6 +252,10 @@ class Registry:
     def tool(self, fn: Callable[..., Awaitable[Any]] | None = None, **kw: Any):
         def register(fn: Callable[..., Awaitable[Any]]):
             spec = ToolSpec.build(fn, **kw)
+            if self.resource_tools and spec.name in RESOURCE_TOOL_NAMES:
+                raise ValueError(
+                    f"Tool name {spec.name!r} is reserved for the resource tool interface."
+                )
             if spec.scopes and self.auth is None:
                 raise TypeError(
                     f"{spec.name}: scopes were declared, but this registry has no auth= -- "

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
+from collections.abc import AsyncGenerator, Awaitable, Callable, Mapping
 from contextlib import asynccontextmanager
 from typing import Any
 
@@ -63,7 +63,7 @@ async def connect(
     client_info: Implementation | None = None,
     initialize: bool = True,
     limit: int = DEFAULT_STREAM_LIMIT,
-) -> AsyncIterator[BaseClient]:
+) -> AsyncGenerator[BaseClient, None]:
     """A client talking to `registry` through memory.
 
     No port, no subprocess, and nothing to tear down. The protocol is the
@@ -109,7 +109,7 @@ async def serving(
     path: str = "/mcp",
     adapters: AdapterSet | None = None,
     middlewares: list[Any] | None = None,
-) -> AsyncIterator[str]:
+) -> AsyncGenerator[str, None]:
     """`registry` on a loopback port, for the examples that are about HTTP.
 
     Yields the URL. The port is whichever one was free, so nothing collides
@@ -137,7 +137,7 @@ async def over_http(
     on_ask: Elicitor | None = None,
     headers: Mapping[str, str] | None = None,
     initialize: bool = True,
-) -> AsyncIterator[Client]:
+) -> AsyncGenerator[Client, None]:
     """A real HTTP client against a real server, both started here.
 
     Use it where the transport is the subject: a session that has to survive

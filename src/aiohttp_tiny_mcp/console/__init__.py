@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from html import escape
@@ -60,6 +61,7 @@ class ConsoleEndpoint:
     description: str
     query: type[BaseModel] | None = None
     auth: Sequence[Literal["none", "basic", "bearer", "query", "custom", "oauth"]] | None = None
+    server_name: str | None = None
 
     def definition(self) -> dict[str, Any]:
         """Return validated, JSON-compatible endpoint metadata."""
@@ -77,6 +79,14 @@ class ConsoleEndpoint:
             raise ValueError("A console endpoint must be on the same origin.")
         if not isinstance(self.description, str) or not self.description.strip():
             raise ValueError("A console endpoint needs a nonempty description.")
+        if self.server_name is not None and (
+            not isinstance(self.server_name, str)
+            or re.fullmatch(r"[A-Za-z0-9_-]{1,64}", self.server_name) is None
+        ):
+            raise ValueError(
+                "A console endpoint server_name needs 1–64 letters, numbers, "
+                "underscores, or hyphens."
+            )
         auth = list(self.auth) if self.auth is not None else None
         if auth is not None:
             supported = {"none", "basic", "bearer", "query", "custom", "oauth"}
@@ -100,7 +110,13 @@ class ConsoleEndpoint:
                 raise ValueError("A console endpoint query must describe named fields.")
             for name, property_schema in schema["properties"].items():
                 check_query_property(property_schema, name)
-        return {"path": self.path, "description": self.description, "query": schema, "auth": auth}
+        return {
+            "path": self.path,
+            "description": self.description,
+            "query": schema,
+            "auth": auth,
+            "server_name": self.server_name,
+        }
 
 
 class Console:
@@ -116,6 +132,7 @@ class Console:
         variables: Mapping[str, str] | None = None,
         oauth_client_id: str | None = None,
         endpoints: Sequence[ConsoleEndpoint] | None = None,
+        resource_tools: bool = True,
     ) -> None:
         self.endpoints = tuple(endpoints or ())
         self.endpoint_definitions = [endpoint.definition() for endpoint in self.endpoints]
@@ -132,6 +149,7 @@ class Console:
         self.template = Path(template) if template else HERE / "index.html"
         self.variables = dict(variables or {})
         self.oauth_client_id = oauth_client_id
+        self.resource_tools = resource_tools
 
     def substitutions(self, base: str) -> dict[str, str]:
         return {
@@ -141,6 +159,7 @@ class Console:
             "TITLE": self.title,
             "DESCRIPTION": self.description,
             "OAUTH_CLIENT_ID": self.oauth_client_id or "",
+            "RESOURCE_TOOLS": json.dumps(self.resource_tools),
             **self.variables,
         }
 

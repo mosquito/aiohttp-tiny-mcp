@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
-from collections.abc import AsyncIterator, Callable, Mapping
+from collections.abc import AsyncGenerator, AsyncIterator, Callable, Mapping
 from contextlib import asynccontextmanager
 from typing import Any
 
@@ -82,7 +82,7 @@ class Client(BaseClient):
     @asynccontextmanager
     async def http_request(
         self, method: str, *, headers: dict[str, str], **kwargs: Any
-    ) -> AsyncIterator[aiohttp.ClientResponse]:
+    ) -> AsyncGenerator[aiohttp.ClientResponse, None]:
         assert self.session is not None, "use 'async with Client(...) as client:'"
         if self.auth is None:
             async with self.session.request(

@@ -58,9 +58,10 @@ dev = [
     "furo>=2025.12.19",
     "jsonschema>=4.26",
     "markdown-pytest>=0.6.6",
-    "mcp[cli]==2.0.0",
+    "mcp[cli]==2.2.0",
     "myst-parser>=4.0.1",
     "psycopg[binary,pool]>=3",
+    "playwright>=1.50",
     "pytest",
     "pytest-asyncio",
     "pytest-cov>=7.1.0",
@@ -90,6 +91,7 @@ show_missing = true
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
 # The guard against a hung test, not a measure of how fast the machine is. A
 # loaded runner is an order of magnitude slower than a laptop, so a budget
 # tight enough to catch a wait fails on a slow disk instead. A test that must

@@ -16,6 +16,7 @@ from aiohttp_tiny_mcp.storage import hub as hubs
 from aiohttp_tiny_mcp.storage.sessions import SUBSCRIPTIONS_KEY, Session
 
 from .resource_auth import allowed_resource
+from .resource_tools import resource_capabilities, resource_modes
 
 if TYPE_CHECKING:
     from .exchange import Exchange
@@ -111,7 +112,7 @@ def merged(
 async def listen(ex: Exchange) -> EmptyResult:
     assert isinstance(ex.call.params, ListenParams)
     wanted = ex.call.params.notifications
-    caps = ex.adapter.capabilities(ex.registry)
+    caps = resource_capabilities(ex.registry, ex.adapter, resource_modes(ex.registry, ex.request))
     accepted: dict[str, Any] = {}
     requested = wanted.wire()
     for field, capability in LIST_CHANGES.values():

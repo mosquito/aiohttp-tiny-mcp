@@ -10,6 +10,7 @@ from dataclasses import replace
 from typing import Any
 
 from aiohttp import web
+from yarl import URL
 
 from aiohttp_tiny_mcp.access_log import install_token_filter
 from aiohttp_tiny_mcp.auth import Principal, Unauthorized
@@ -45,6 +46,7 @@ from .exchange import Exchange
 from .http import Endpoint
 from .registry import Registry
 from .resource_auth import allowed_resource
+from .resource_tools import NATIVE, resource_capabilities, resource_modes
 from .subscriptions import relays, wanted
 from .tasks import stop
 
@@ -107,6 +109,7 @@ class SseEndpoint:
 
     async def listen(self, request: web.Request) -> web.StreamResponse:
         """Open a stream and send its POST address."""
+        modes = resource_modes(self.registry, request)
         try:
             self.origins.check_origin(request)
             principal = await self.origins.verified(request)
@@ -126,13 +129,16 @@ class SseEndpoint:
         response = SSEResponse(compress=self.compress)
         await response.prepare(request)
         posting = self.mounted(request) + self.message_path
-        await self.write(response, "endpoint", f"{posting}?session_id={session_id}")
+        query = [("session_id", session_id)]
+        if self.registry.resource_tools:
+            query.extend(("resources", mode) for mode in request.query.getall("resources", []))
+        await self.write(response, "endpoint", str(URL(posting).with_query(query)))
 
         try:
             await self.relay_until_disconnect(
                 request,
                 self.relay(response, events),
-                self.relay_shared(response, shared, session_id, principal=principal),
+                self.relay_shared(response, shared, session_id, principal=principal, modes=modes),
             )
         finally:
             await hub.delete(where)
@@ -175,6 +181,7 @@ class SseEndpoint:
         session_id: str,
         *,
         principal: Principal | None = None,
+        modes: frozenset[str] = NATIVE,
     ) -> None:
         """Write the list changes, resource updates and broadcasts this session wants.
 
@@ -192,7 +199,9 @@ class SseEndpoint:
             adapter = self.adapters.resolve_version(stored_version(record) or VERSION)
             session = Session(store, session_id, record, self.registry.session_ttl_seconds)
             accepted = wanted(
-                adapter.capabilities(self.registry), session, self.registry.broadcasts
+                resource_capabilities(self.registry, adapter, modes),
+                session,
+                self.registry.broadcasts,
             )
             if "resourceSubscriptions" in accepted:
                 accepted["resourceSubscriptions"] = [
@@ -211,6 +220,7 @@ class SseEndpoint:
 
     async def receive(self, request: web.Request) -> web.StreamResponse:
         """Take one message and answer 202. The reply goes to the stream."""
+        resource_modes(self.registry, request)
         try:
             self.origins.check_origin(request)
             principal = await self.origins.verified(request)

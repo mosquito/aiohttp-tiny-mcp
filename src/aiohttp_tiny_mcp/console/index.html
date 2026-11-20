@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en" data-endpoint="{{ENDPOINT}}" data-endpoints="{{ENDPOINTS}}" data-console="{{BASE}}" data-oauth-client-id="{{OAUTH_CLIENT_ID}}">
+<html lang="en" data-endpoint="{{ENDPOINT}}" data-endpoints="{{ENDPOINTS}}" data-console="{{BASE}}" data-oauth-client-id="{{OAUTH_CLIENT_ID}}" data-resource-tools="{{RESOURCE_TOOLS}}">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -160,14 +160,21 @@
         <input id="agent-name" type="text" spellcheck="false" maxlength="64" required>
       </label>
     </div>
-    <label id="agent-headers-field" class="toggle" hidden>
-      <input id="agent-headers" type="checkbox" checked>
-      <span>Include saved authentication headers</span>
-    </label>
+    <div class="agent-connection-options">
+      <label id="agent-headers-field" class="toggle" hidden>
+        <input id="agent-headers" type="checkbox" checked>
+        <span>Use saved auth</span>
+      </label>
+      <div id="agent-resources" class="agent-resources" role="group" aria-labelledby="agent-resources-label">
+        <span id="agent-resources-label">Resources:</span>
+        <label class="toggle"><input id="agent-resources-tool" type="checkbox">as tools</label>
+        <label class="toggle"><input id="agent-resources-native" type="checkbox" checked>native</label>
+      </div>
+    </div>
     <p id="agent-target" class="agent-target"></p>
     <p id="agent-instructions"></p>
     <label class="auth-field"><span id="agent-language">Configuration</span>
-      <textarea id="agent-code" rows="12" readonly spellcheck="false" wrap="off"></textarea>
+      <textarea id="agent-code" rows="6" readonly spellcheck="false" wrap="off"></textarea>
     </label>
     <p id="agent-verify" class="auth-help"></p>
     <p id="agent-error" class="auth-error" role="alert"></p>
