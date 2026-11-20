@@ -36,6 +36,16 @@ async def test_the_page_is_told_where_the_endpoint_is(served):
     body = await (await served.get("/console")).text()
     assert 'data-endpoint="/mcp"' in body
     assert "{{ENDPOINT}}" not in body
+    assert 'data-resource-tools="true"' in body
+
+
+async def test_resource_tools_can_be_disabled_in_agent_configuration(registry):
+    app = Endpoint(registry).app("/mcp")
+    Console("/mcp", resource_tools=False).setup(app)
+    async with TestClient(TestServer(app)) as client:
+        body = await (await client.get("/console")).text()
+    assert 'data-resource-tools="false"' in body
+    assert "{{RESOURCE_TOOLS}}" not in body
 
 
 async def test_the_assets_are_addressed_absolutely(served):

@@ -44,6 +44,7 @@ const page = {
   endpoint: element('input'), endpointSelect: element('select'),
   endpointDescription: element('p'), endpointParameters: element('fieldset'),
   endpointManual: element('label'), endpointDeclared: element('section'),
+  authenticate: element('button'),
 };
 page.endpointDeclared.hidden = true;
 const document = {documentElement: {dataset: {endpoints: '[]'}}};
@@ -57,8 +58,9 @@ const localStorage = {
 let configuredEndpoint = new URL('/mcp', location.origin);
 let endpointDeclarations = [], endpointFields = [];
 let client = null;
+const credentials = new ConsoleCredentials();
 let cleared = 0, oauthResets = 0, authEndpoint = 'previous', authSchemes = ['bearer'];
-function clearCredentials() { cleared++; }
+function clearCredentials() { cleared++; credentials.clear(); }
 function resetOAuth() { oauthResets++; }
 function field(name) { return endpointFields.find(input => input.dataset.name === name); }
 function declare(endpoints) {
@@ -78,7 +80,15 @@ def run(body: str) -> None:
         source.index("function endpointChanged(") : source.index("function element(")
     ]
     fields = source[source.index("function buildFields(") : source.index("function show(")]
-    driver = 'const assert = require("node:assert/strict");\n' + DOM + endpoints + fields + body
+    credentials = source[source.index("class ConsoleCredentials") : source.index("class Client")]
+    driver = (
+        'const assert = require("node:assert/strict");\n'
+        + credentials
+        + DOM
+        + endpoints
+        + fields
+        + body
+    )
     result = subprocess.run([NODE, "-e", driver], capture_output=True, text=True, timeout=10)
     assert result.returncode == 0, result.stderr
 
@@ -214,6 +224,39 @@ def test_manual_endpoint_changes_clear_authentication_but_dialog_controls_stay_e
       assert.equal(page.endpointSelect.disabled, false);
       assert.equal(page.endpointParameters.disabled, false);
     }
+    """)
+
+
+def test_query_edits_keep_runtime_credentials_and_oauth_state() -> None:
+    run(r"""
+    declare([{path: '/mcp', description: 'Tools', query: {
+      type: 'object', properties: {team: {type: 'string'}},
+    }}]);
+    credentials.set('http://localhost/mcp?team=one', 'bearer', '', 'access-token', '');
+    authEndpoint = 'http://localhost/mcp';
+    authSchemes = ['bearer'];
+    page.endpoint.value = '/mcp?team=two&resources=tool&token=query-token';
+    endpointChanged();
+    assert.equal(cleared, 0);
+    assert.equal(oauthResets, 0);
+    assert.deepEqual(authSchemes, ['bearer']);
+    assert.equal(credentials.forEndpoint(chosenEndpoint().href).Authorization,
+      'Bearer access-token');
+    assert.ok(stored.get(endpointKey()).includes('token=query-token'));
+    field('team').value = 'three';
+    page.endpointParameters.listeners.input();
+    assert.equal(oauthResets, 0);
+    assert.equal(credentials.forEndpoint(authenticationEndpoint().href).Authorization,
+      'Bearer access-token');
+    page.endpoint.value = '/other?team=two';
+    endpointChanged();
+    assert.equal(cleared, 1);
+    assert.equal(oauthResets, 1);
+    assert.deepEqual(credentials.forEndpoint('http://localhost/other'), {});
+    page.endpoint.value = '/mcp?team=four';
+    endpointChanged();
+    assert.equal(credentials.forEndpoint(chosenEndpoint().href).Authorization,
+      'Bearer access-token');
     """)
 
 

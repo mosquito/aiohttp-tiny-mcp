@@ -50,6 +50,7 @@ from .exchange import Exchange
 from .registry import Registry
 from .request_state import RequestStates, protect_request_state, restore_request_state
 from .resource_auth import resource_refusal, visible_resource
+from .resource_tools import resource_capabilities, resource_modes
 from .specs import ToolSpec
 from .subscriptions import listen, subscribe, unsubscribe
 
@@ -162,6 +163,22 @@ class Dispatcher:
 
     async def dispatch(self, operation: Operation, ex: Exchange) -> Outcome:
         """Dispatch explicitly so type checking catches missing or renamed handlers."""
+        if "native" not in resource_modes(self.registry, ex.request) and (
+            operation
+            in {
+                Operation.LIST_RESOURCES,
+                Operation.LIST_RESOURCE_TEMPLATES,
+                Operation.READ_RESOURCE,
+                Operation.SUBSCRIBE,
+                Operation.UNSUBSCRIBE,
+            }
+            or (
+                operation is Operation.COMPLETE
+                and isinstance(ex.call.params, CompleteParams)
+                and ex.call.params.ref.type == "ref/resource"
+            )
+        ):
+            return Failure(FailureKind.UNKNOWN_METHOD, "native resources are disabled for this URL")
         match operation:
             case Operation.DESCRIBE:
                 return await self.describe(ex)
@@ -255,7 +272,11 @@ class Dispatcher:
         return Value(result=EmptyResult())
 
     async def describe(self, ex: Exchange) -> Outcome:
-        return Value(result=ex.adapter.describe_server(self.registry, ex.call))
+        result = ex.adapter.describe_server(self.registry, ex.call)
+        caps = resource_capabilities(
+            self.registry, ex.adapter, resource_modes(self.registry, ex.request)
+        )
+        return Value(result=result.model_copy(update={"capabilities": caps}))
 
     async def handshake_complete(self, ex: Exchange) -> Outcome:
         return Value(result=EmptyResult())
@@ -264,14 +285,19 @@ class Dispatcher:
         return Value(result=EmptyResult())
 
     def paged(
-        self, ex: Exchange, entries: list[Entry], key: Callable[[Entry], str]
+        self,
+        ex: Exchange,
+        entries: list[Entry],
+        key: Callable[[Entry], str],
+        params: ListParams | None = None,
     ) -> tuple[list[Entry], str | None] | Failure:
         """One page of `entries`, sorted by `key`, and the cursor for the next.
 
         The cursor is the key of the last entry shown. One that names no entry is
         -32602: a silent first page would send a paging client round in a circle.
         """
-        cursor = ex.call.params.cursor if isinstance(ex.call.params, ListParams) else None
+        listing = params if params is not None else ex.call.params
+        cursor = listing.cursor if isinstance(listing, ListParams) else None
         if cursor is not None:
             if all(key(entry) != cursor for entry in entries):
                 return Failure(FailureKind.INVALID_PARAMS, f"unknown cursor: {cursor}")
@@ -283,10 +309,11 @@ class Dispatcher:
         return shown, key(shown[-1])
 
     async def list_tools(self, ex: Exchange) -> Outcome:
+        specs = dict(self.registry.tools)
+        if "tool" in resource_modes(self.registry, ex.request):
+            specs.update(self.registry.resource_tool_specs)
         tools: list[ToolDef] = [
-            d
-            for spec in self.registry.tools.values()
-            if (d := ex.adapter.describe_tool(spec)) is not None
+            d for spec in specs.values() if (d := ex.adapter.describe_tool(spec)) is not None
         ]
         tools.sort(key=lambda item: item.name)
         found = self.paged(ex, tools, lambda item: item.name)
@@ -297,6 +324,8 @@ class Dispatcher:
 
     async def call_tool(self, ex: Exchange) -> Outcome:
         spec = self.registry.tools.get(ex.call.target or "")
+        if spec is None and "tool" in resource_modes(self.registry, ex.request):
+            spec = self.registry.resource_tool_specs.get(ex.call.target or "")
         if spec is None or ex.adapter.describe_tool(spec) is None:
             return Failure(FailureKind.UNKNOWN_TARGET, f"unknown tool: {ex.call.target}")
         if (refused := refusal(spec, ex.principal)) is not None:
@@ -311,27 +340,29 @@ class Dispatcher:
             return Value(result=CallToolResult.failure(f"{type(e).__name__}: {e}"))
         return Value(result=CallToolResult.of(value))
 
-    async def list_resources(self, ex: Exchange) -> Outcome:
+    async def list_resources(self, ex: Exchange, *, params: ListParams | None = None) -> Outcome:
         defs: list[ResourceDef] = [
             d
             for spec in self.registry.resources_fixed.values()
             if isinstance(d := ex.adapter.describe_resource(spec), ResourceDef)
         ]
         defs.sort(key=lambda item: item.uri)
-        found = self.paged(ex, defs, lambda item: item.uri)
+        found = self.paged(ex, defs, lambda item: item.uri, params)
         if isinstance(found, Failure):
             return found
         shown, next_cursor = found
         return Value(result=ListResourcesResult(resources=shown, next_cursor=next_cursor))
 
-    async def list_resource_templates(self, ex: Exchange) -> Outcome:
+    async def list_resource_templates(
+        self, ex: Exchange, *, params: ListParams | None = None
+    ) -> Outcome:
         defs: list[ResourceTemplateDef] = [
             d
             for spec in self.registry.resources_templated
             if isinstance(d := ex.adapter.describe_resource(spec), ResourceTemplateDef)
         ]
         defs.sort(key=lambda item: item.uri_template)
-        found = self.paged(ex, defs, lambda item: item.uri_template)
+        found = self.paged(ex, defs, lambda item: item.uri_template, params)
         if isinstance(found, Failure):
             return found
         shown, next_cursor = found
@@ -339,8 +370,8 @@ class Dispatcher:
             result=ListResourceTemplatesResult(resource_templates=shown, next_cursor=next_cursor)
         )
 
-    async def read_resource(self, ex: Exchange) -> Outcome:
-        uri = ex.call.target or ""
+    async def read_resource(self, ex: Exchange, *, uri: str | None = None) -> Outcome:
+        uri = uri if uri is not None else ex.call.target or ""
         found = self.registry.match_resource(uri)
         if found is None:
             return Failure(FailureKind.RESOURCE_NOT_FOUND, f"resource not found: {uri}")

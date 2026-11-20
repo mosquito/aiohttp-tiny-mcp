@@ -574,11 +574,18 @@ dialog.question .argument { margin-bottom: 10px; }
 
 dialog.agent-setup { max-width: 680px; width: calc(100vw - 32px); max-height: calc(100vh - 32px); overflow: auto; }
 dialog.agent-setup menu { align-items: center; flex-wrap: wrap; }
+dialog.agent-setup p { margin: 6px 0; }
+dialog.agent-setup .auth-field { margin: 10px 0; }
+#agent-error:empty, #agent-copy-status:empty { display: none; }
 #agent-docs { margin-right: auto; }
 .agent-options { display: grid; grid-template-columns: minmax(0, 1.5fr) repeat(2, minmax(0, 1fr)); gap: 12px; }
 #agent-headers-field[hidden] { display: none; }
+.agent-connection-options { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 16px; margin: 2px 0 10px; }
+.agent-resources { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-left: auto; }
+.agent-resources[hidden] { display: none; }
+#agent-resources-label { color: var(--ink-soft); font-size: 12px; }
 .agent-target { font-family: var(--mono); font-weight: 600; overflow-wrap: anywhere; }
-#agent-code { width: 100%; font-family: var(--mono); font-size: 12px; resize: vertical; }
+#agent-code { width: 100%; min-height: 0; max-height: min(38vh, 320px); font-family: var(--mono); font-size: 12px; line-height: 1.5; resize: vertical; }
 @media (max-width: 540px) {
   .agent-options { grid-template-columns: 1fr; gap: 0; }
 }

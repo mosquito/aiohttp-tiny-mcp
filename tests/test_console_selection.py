@@ -65,7 +65,8 @@ def test_server_instructions_do_not_disable_restored_tool(restore):
     ]
     invoke = source[source.index("async function invoke()") : source.index("function disconnect()")]
     driver = (
-        connect
+        source[source.index("class ConsoleCredentials") : source.index("class Client")]
+        + connect
         + invoke
         + f"""
 const page = Object.fromEntries([

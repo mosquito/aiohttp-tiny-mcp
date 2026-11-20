@@ -1,6 +1,11 @@
 "use strict";
 
-function agentConfigurations({endpoint, name = 'mcp', headers = {}, level = 'user'} = {}) {
+function agentResourceDefaults(agent) {
+  return ['pi', 'antigravity', 'copilot'].includes(agent) ? ['tool'] : ['native'];
+}
+
+function agentConfigurations({endpoint, name = 'mcp', headers = {}, level = 'user',
+  resourceTools = true, resourceModes} = {}) {
   if (!['project', 'user'].includes(level)) {
     throw new Error('Choose Project or User configuration level.');
   }
@@ -33,7 +38,25 @@ function agentConfigurations({endpoint, name = 'mcp', headers = {}, level = 'use
     }
   }
   const credentials = entries.length ? {headers: Object.fromEntries(entries)} : {};
-  const server = {url: endpoint, ...credentials};
+  const withResources = modes => {
+    if (!Array.isArray(modes) || !modes.length || modes.some(mode => !['tool', 'native'].includes(mode))) {
+      throw new Error('Select at least one resource interface.');
+    }
+    const queryStart = endpoint.indexOf('?');
+    const base = queryStart === -1 ? endpoint : endpoint.slice(0, queryStart);
+    const parameters = queryStart === -1 ? [] : endpoint.slice(queryStart + 1).split('&')
+      .filter(parameter => parameter && !new URLSearchParams(parameter).has('resources'));
+    const selected = [...new Set(modes)];
+    if (selected.includes('tool')) {
+      parameters.push('resources=tool');
+      if (selected.includes('native')) parameters.push('resources=native');
+    }
+    return parameters.length ? `${base}?${parameters.join('&')}` : base;
+  };
+  const selectedEndpoint = resourceTools && resourceModes !== undefined ? withResources(resourceModes) : null;
+  const endpointFor = agent => !resourceTools ? endpoint : selectedEndpoint ??
+    withResources(agentResourceDefaults(agent));
+  const server = agent => ({url: endpointFor(agent), ...credentials});
   const json = value => JSON.stringify(value, null, 2);
   const named = value => ({mcpServers: {[name]: value}});
   const merge = 'Create the file if it does not exist. Merge this server entry with existing settings.';
@@ -48,13 +71,13 @@ function agentConfigurations({endpoint, name = 'mcp', headers = {}, level = 'use
   const tomlHeaders = entries.length
     ? '\nhttp_headers = { ' + entries.map(([key, value]) =>
       `${JSON.stringify(key)} = ${JSON.stringify(value)}`).join(', ') + ' }' : '';
-  const remote = {type: 'remote', ...server};
+  const remote = {type: 'remote', ...server('opencode')};
   if (entries.length || url.searchParams.has('token')) remote.oauth = false;
   return [
     {
       id: 'mcp-json', label: 'Claude Code',
       ...file('.mcp.json', '~/.claude.json'),
-      code: json(named({type: 'http', ...server})), language: 'json',
+      code: json(named({type: 'http', ...server('mcp-json')})), language: 'json',
       verify: (userLevel ? 'Start Claude Code and open /mcp.'
         : 'Start Claude Code in this project, approve the server, and open /mcp.') + signIn,
       link: `https://code.claude.com/docs/en/mcp#${level}-scope`,
@@ -62,7 +85,7 @@ function agentConfigurations({endpoint, name = 'mcp', headers = {}, level = 'use
     {
       id: 'codex', label: 'Codex',
       ...file('.codex/config.toml', '~/.codex/config.toml'),
-      code: `[mcp_servers.${JSON.stringify(name)}]\nurl = ${JSON.stringify(endpoint)}${tomlHeaders}\n`,
+      code: `[mcp_servers.${JSON.stringify(name)}]\nurl = ${JSON.stringify(endpointFor('codex'))}${tomlHeaders}\n`,
       language: 'toml',
       verify: (userLevel ? '' : 'Trust this project in Codex first. ')
         + 'Run codex mcp list to check the server.'
@@ -72,21 +95,21 @@ function agentConfigurations({endpoint, name = 'mcp', headers = {}, level = 'use
     {
       id: 'cursor', label: 'Cursor',
       ...file('.cursor/mcp.json', '~/.cursor/mcp.json'),
-      code: json(named(server)), language: 'json',
+      code: json(named(server('cursor'))), language: 'json',
       verify: 'Open Cursor Settings → Tools & MCP and check the server.' + signIn,
       link: 'https://cursor.com/docs/mcp',
     },
     {
       id: 'copilot', label: 'GitHub Copilot',
       ...file('.mcp.json', '~/.copilot/mcp-config.json'),
-      code: json(named({type: 'http', ...server, tools: ['*']})), language: 'json',
+      code: json(named({type: 'http', ...server('copilot'), tools: ['*']})), language: 'json',
       verify: 'In VS Code, run MCP: List Servers and start the server.' + signIn,
       link: 'https://code.visualstudio.com/docs/agents/reference/mcp-configuration',
     },
     {
       id: 'gemini', label: 'Gemini CLI',
       ...file('.gemini/settings.json', '~/.gemini/settings.json'),
-      code: json(named({httpUrl: endpoint, ...credentials})), language: 'json',
+      code: json(named({httpUrl: endpointFor('gemini'), ...credentials})), language: 'json',
       verify: (userLevel ? 'Start Gemini CLI and open /mcp.'
         : 'Start Gemini CLI in this project and open /mcp.') + signIn,
       link: 'https://geminicli.com/docs/tools/mcp-server/',
@@ -94,10 +117,17 @@ function agentConfigurations({endpoint, name = 'mcp', headers = {}, level = 'use
     {
       id: 'pi', label: 'Pi',
       ...file('.pi/mcp.json', '~/.pi/agent/mcp.json'),
-      code: json(named(server)), language: 'json',
+      code: json(named(server('pi'))), language: 'json',
       verify: (userLevel ? 'Start Pi and open /mcp.'
         : 'Trust this project in Pi, then open /mcp.') + signIn,
       link: 'https://docs.pi.dev/latest/mcp',
+    },
+    {
+      id: 'antigravity', label: 'Antigravity',
+      ...file('.agents/mcp_config.json', '~/.gemini/config/mcp_config.json'),
+      code: json(named({serverUrl: endpointFor('antigravity'), ...credentials})), language: 'json',
+      verify: 'Open MCP Servers in Antigravity, or run /mcp in Antigravity CLI.' + signIn,
+      link: 'https://antigravity.google/docs/mcp',
     },
     {
       id: 'opencode', label: 'OpenCode V2',

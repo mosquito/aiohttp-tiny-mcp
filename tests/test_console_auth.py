@@ -114,7 +114,9 @@ def test_challenges_and_scoped_credentials():
     credentials.set(url, "basic", "алиса", "päss:word", "");
     assert.equal(credentials.forEndpoint(url).Authorization,
       "Basic " + Buffer.from("алиса:päss:word").toString("base64"));
-    const others = ["http://localhost/other", "https://elsewhere/mcp", "http://localhost/mcp"];
+    assert.equal(credentials.forEndpoint("http://localhost/mcp?resources=tool").Authorization,
+      credentials.forEndpoint(url).Authorization);
+    const others = ["http://localhost/other", "https://elsewhere/mcp", "https://localhost/mcp"];
     for (const other of others) {
       assert.deepEqual(credentials.forEndpoint(other), {});
     }
@@ -166,7 +168,9 @@ def test_credentials_restore_raw_fields_and_headers_without_storage_writes():
       assert.equal(restored.restore(url), true);
       assert.equal(writes, count);
       assert.deepEqual(restored.forEndpoint(url), headers);
-      assert.deepEqual(restored.record, {endpoint: url, method, username, secret, header});
+      assert.deepEqual(restored.record, {
+        endpoint: 'http://localhost/mcp', method, username, secret, header,
+      });
       if (["none", "query"].includes(method)) assert.deepEqual(headers, {});
     }
     """)
@@ -184,7 +188,7 @@ def test_saved_credentials_are_scoped_and_forgotten_independently():
     };
     const credentials = new ConsoleCredentials();
     const first = "http://localhost/mcp?team=one";
-    const second = "http://localhost/mcp?team=two";
+    const second = "http://localhost/other?team=two";
     credentials.set(first, "bearer", "", "first-token", "");
     credentials.set(second, "custom", "", "second-secret", "X-API-Key");
     credentials.clear();
@@ -209,6 +213,104 @@ def test_saved_credentials_are_scoped_and_forgotten_independently():
 
 
 @pytest.mark.skipif(NODE is None, reason="node is not installed")
+def test_query_changes_share_saved_credentials_and_clear_them():
+    run_js("""
+    globalThis.location = {pathname: '/console'};
+    const saved = new Map();
+    globalThis.localStorage = {
+      getItem: key => saved.get(key) ?? null,
+      setItem: (key, value) => saved.set(key, value),
+      removeItem: key => saved.delete(key),
+    };
+    const original = 'https://example.com/mcp?team=one&token=query-token';
+    const changed = 'https://example.com/mcp?team=two&resources=tool&mode=other';
+    const credentials = new ConsoleCredentials();
+    credentials.set(original, 'bearer', '', 'access-token', '');
+    assert.equal(credentials.forEndpoint(changed).Authorization, 'Bearer access-token');
+    const reloaded = new ConsoleCredentials();
+    assert.equal(reloaded.restore(changed), true);
+    assert.equal(reloaded.forEndpoint(original).Authorization, 'Bearer access-token');
+    assert.equal(saved.size, 1);
+    assert.ok(!JSON.stringify([...saved]).includes('query-token'));
+    for (const other of ['https://other.example/mcp', 'http://example.com/mcp',
+      'https://example.com/other', 'https://example.com/mcp/']) {
+      assert.deepEqual(reloaded.forEndpoint(other), {});
+    }
+    reloaded.forget(changed);
+    assert.equal(reloaded.restore(original), false);
+    assert.equal(saved.size, 0);
+    """)
+
+
+@pytest.mark.skipif(NODE is None, reason="node is not installed")
+def test_exact_legacy_credentials_migrate_without_scanning_other_records():
+    run_js("""
+    globalThis.location = {pathname: '/console'};
+    const saved = new Map();
+    globalThis.localStorage = {
+      getItem: key => saved.get(key) ?? null,
+      setItem: (key, value) => saved.set(key, value),
+      removeItem: key => saved.delete(key),
+    };
+    const endpoint = 'https://example.com/mcp?team=one';
+    const credentials = new ConsoleCredentials();
+    const legacyKey = credentials.legacyStorageKey(endpoint);
+    saved.set(legacyKey, JSON.stringify({version: 1, endpoint,
+      method: 'bearer', username: '', secret: 'token', header: ''}));
+    assert.equal(credentials.restore(endpoint + '&other=1'), false);
+    assert.equal(credentials.restore(endpoint), true);
+    assert.equal(saved.has(legacyKey), false);
+    assert.equal(saved.size, 1);
+    const changed = 'https://example.com/mcp?resources=tool';
+    assert.equal(credentials.restore(changed), true);
+    assert.equal(credentials.forEndpoint(changed).Authorization, 'Bearer token');
+    credentials.forget(changed);
+    assert.equal(credentials.restore(endpoint), false);
+    assert.equal(saved.size, 0);
+    """)
+
+
+@pytest.mark.skipif(NODE is None, reason="node is not installed")
+def test_dialog_clear_only_removes_selected_endpoint_credentials():
+    source = SCRIPT.read_text()
+    setup = source[
+        source.index("function setupAuthentication()") : source.index("function endpointChanged()")
+    ]
+    run_js(
+        setup
+        + """
+    globalThis.location = {pathname: '/console'};
+    const saved = new Map();
+    globalThis.localStorage = {
+      getItem: key => saved.get(key) ?? null,
+      setItem: (key, value) => saved.set(key, value),
+      removeItem: key => saved.delete(key),
+    };
+    const page = new Proxy({}, {get(target, key) {
+      return target[key] ||= {value: '', addEventListener() {}, close() {}};
+    }});
+    const credentials = new ConsoleCredentials();
+    credentials.set('http://localhost/current', 'bearer', '', 'current-token', '');
+    credentials.set('http://localhost/selected?old=1', 'bearer', '', 'selected-token', '');
+    function chosenEndpoint() { return new URL('http://localhost/current'); }
+    function authenticationEndpoint() { return new URL('http://localhost/selected?token=query'); }
+    function endpointKey() { return 'last-endpoint'; }
+    function clearCredentials() { credentials.clear(); }
+    function disconnect() {}
+    function resetOAuth() {}
+    function signInOAuth() {}
+    function authFields() {}
+    function endpointChanged() {}
+    setupAuthentication();
+    page.authClear.onclick();
+    assert.equal(credentials.restore('http://localhost/selected?different=1'), false);
+    assert.equal(credentials.restore('http://localhost/current'), true);
+    assert.equal(page.endpoint.value, '/selected');
+    """
+    )
+
+
+@pytest.mark.skipif(NODE is None, reason="node is not installed")
 def test_restored_credentials_reject_invalid_or_mismatched_records():
     run_js(r"""
     globalThis.location = {pathname: "/console"};
@@ -220,7 +322,7 @@ def test_restored_credentials_reject_invalid_or_mismatched_records():
     globalThis.localStorage = {getItem() { return stored; }};
     const credentials = new ConsoleCredentials();
     const invalid = [
-      null, [], {}, {...valid, version: 2}, {...valid, endpoint: url + "?different=1"},
+      null, [], {}, {...valid, version: 2}, {...valid, endpoint: url + "/different"},
       {...valid, method: "unknown"}, {...valid, secret: "bad\r\nvalue"},
       {...valid, secret: 42}, {...valid, username: null}, {...valid, header: false},
       {...valid, method: "custom", header: "Cookie"},

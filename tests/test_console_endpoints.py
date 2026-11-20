@@ -69,6 +69,23 @@ def test_no_declarations_preserves_manual_endpoint(endpoints: Any) -> None:
     assert json.loads(configured.substitutions("/console")["ENDPOINTS"]) == []
 
 
+def test_declared_server_names_are_preserved() -> None:
+    configured = Console(
+        endpoints=[
+            ConsoleEndpoint("/mcp", "Workspace tools", server_name="workspace-tools_1"),
+            ConsoleEndpoint("/other", "Other tools"),
+        ]
+    )
+    metadata = json.loads(configured.substitutions("/console")["ENDPOINTS"])
+    assert [item["server_name"] for item in metadata] == ["workspace-tools_1", None]
+
+
+@pytest.mark.parametrize("name", ["", "a b", "a.b", "a/b", "a" * 65, "имя", 1])
+def test_invalid_declared_server_names_are_rejected(name: Any) -> None:
+    with pytest.raises(ValueError, match="server_name"):
+        Console(endpoints=[ConsoleEndpoint("/mcp", "Tools", server_name=name)])
+
+
 async def test_declared_metadata_is_escaped_and_does_not_register_routes(tmp_path: Path) -> None:
     template = tmp_path / "console.html"
     template.write_text(
