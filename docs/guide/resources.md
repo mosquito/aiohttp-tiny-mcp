@@ -6,6 +6,12 @@ and it takes no arguments beyond what the URI itself carries. See
 what to put in front of the model, so a resource is context rather than an
 action.
 
+Not every agent harness supports native MCP resources. A harness can connect
+and call tools without making resources available to the model. Support can
+also differ between versions, plugins, and resource features such as URI templates.
+If your agent cannot discover or read resources, use
+[resource tools](#access-through-tools) to expose them through ordinary MCP tool calls.
+
 <!-- name: test_resources -->
 ```python
 from pydantic import BaseModel
@@ -75,6 +81,22 @@ assert read.contents[0].text == "entry 42"
 ```
 
 ## Access through tools
+
+Use this mode when your agent harness supports MCP tools but cannot use native
+resources. The agent can list and read the same resources through two tools;
+both tools use the existing resource handlers and permission checks.
+
+Add `resources=tool` to the MCP endpoint URL in the agent's configuration:
+
+```text
+https://mcp.example.com/mcp?resources=tool
+```
+
+If the URL already has other query parameters, append `&resources=tool`.
+Replace existing `resources` values when switching modes. In the
+[Add agent dialog](console.md#add-an-agent), select **Resources: as tools**.
+Select **native** as well if you also need the native interface. Native resources
+remain the default when no mode is specified.
 
 HTTP clients can select a resource interface with the `resources` query parameter.
 The setting applies to each request, including discovery and notification streams.
