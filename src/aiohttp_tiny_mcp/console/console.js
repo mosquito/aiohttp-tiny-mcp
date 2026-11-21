@@ -549,7 +549,9 @@ class Client {
     if (!this.notifications || this.abort.signal.aborted) return;
     this.notificationStarted = true;
     const selected = this.notificationSelection();
-    const key = JSON.stringify(selected);
+    const listening = Object.keys(selected).length > 0 ||
+      (!this.rules.meta && Object.hasOwn(this.serverCapabilities, "logging"));
+    const key = JSON.stringify({ selected, listening });
     if (this.notificationFilter === key) return;
     this.notificationAbort?.abort();
     this.notificationFilter = key;
@@ -557,8 +559,7 @@ class Client {
     this.notificationAbort = controller;
     const previous = this.notificationTask;
     this.notificationTask = previous.then(async () => {
-      if (controller.signal.aborted) return;
-      if (this.rules.meta && !Object.keys(selected).length) return;
+      if (controller.signal.aborted || !listening) return;
       await this.listenNotifications(selected, controller.signal);
     });
   }
@@ -657,12 +658,19 @@ class Client {
   }
 
   async listTools() {
-    const tools = await this.pages("tools/list", "tools");
+    const tools = Object.hasOwn(this.serverCapabilities, "tools")
+      ? await this.pages("tools/list", "tools") : [];
     this.tools = new Map(tools.map((tool) => [tool.name, tool]));
     return tools;
   }
 
   async listResources() {
+    if (!Object.hasOwn(this.serverCapabilities, "resources")) {
+      this.resourceUris.clear();
+      this.readUris.clear();
+      if (this.notificationStarted) this.startNotifications();
+      return { resources: [], templates: [] };
+    }
     const resources = await this.pages("resources/list", "resources");
     let templates = [];
     try {
@@ -677,7 +685,8 @@ class Client {
   }
 
   async listPrompts() {
-    return this.pages("prompts/list", "prompts");
+    return Object.hasOwn(this.serverCapabilities, "prompts")
+      ? this.pages("prompts/list", "prompts") : [];
   }
 
   async listSkills() {
@@ -697,6 +706,9 @@ class Client {
   }
 
   async readResource(uri) {
+    if (!Object.hasOwn(this.serverCapabilities, "resources")) {
+      throw new Error("This server has not declared native resources for this connection.");
+    }
     const result = await this.request("resources/read", { uri }, uri);
     this.readUris.add(uri);
     if (this.notificationStarted) this.startNotifications();
@@ -704,10 +716,16 @@ class Client {
   }
 
   async getPrompt(name, argumentValues) {
+    if (!Object.hasOwn(this.serverCapabilities, "prompts")) {
+      throw new Error("This server has not declared prompts for this connection.");
+    }
     return this.request("prompts/get", { name, arguments: argumentValues }, name);
   }
 
   async callTool(name, argumentValues) {
+    if (!Object.hasOwn(this.serverCapabilities, "tools")) {
+      throw new Error("This server has not declared tools for this connection.");
+    }
     let answers = {};
     let state = null;
     for (let round = 0; round < 8; round += 1) {
@@ -2350,7 +2368,7 @@ function reportContents(result) {
       resourceUris(held, links);
     }
   });
-  if (links.size) {
+  if (links.size && Object.hasOwn(client.serverCapabilities, "resources")) {
     const group = element("div", "group");
     group.append(element("h4", null, "Read a resource"));
     links.forEach((uri) => {
@@ -2392,6 +2410,10 @@ function reportSkill(skill) {
   if (!dynamic && !Array.isArray(skill.resources)) throw new Error("The skill has no file manifest.");
   if (dynamic) report("Files", "Read the current instructions below. This dynamic manifest provides no file digests.");
   else reportValue("File manifest", skill.resources);
+  if (!Object.hasOwn(client.serverCapabilities, "resources")) {
+    report("Files", "Native resource access is unavailable for this connection.");
+    return;
+  }
   const files = element("div", "group");
   files.append(element("h4", null, "Read a file"));
   const selected = chosen;

@@ -20,6 +20,14 @@ class TokenQuery(BaseModel):
     token: str | None = None
 
 
+class ResourceArguments(BaseModel):
+    pass
+
+
+class ResourceEntry(BaseModel):
+    name: str
+
+
 @pytest.fixture
 def console_app() -> Callable[..., web.Application]:
     def create_app(token: str | None = None) -> web.Application:
@@ -79,6 +87,27 @@ async def server(
     console_app: Callable[..., web.Application], context: BrowserContext
 ) -> AsyncIterator[BaseTestServer]:
     async with TestServer(console_app()) as running:
+        try:
+            yield running
+        finally:
+            await context.close()
+
+
+@pytest_asyncio.fixture(loop_scope="session")
+async def resource_server(context: BrowserContext) -> AsyncIterator[BaseTestServer]:
+    registry = Registry("resource-console", "1")
+
+    @registry.resource("file://alpha", mime_type="text/plain")
+    async def alpha(args: ResourceArguments) -> str:
+        return "alpha content"
+
+    @registry.resource("file://entries/{name}")
+    async def entry(args: ResourceEntry) -> str:
+        return f"entry {args.name}"
+
+    app = Endpoint(registry).app()
+    Console().setup(app)
+    async with TestServer(app) as running:
         try:
             yield running
         finally:
