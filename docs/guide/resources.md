@@ -116,15 +116,17 @@ Tool mode exposes two names through `tools/list`:
 
 - `mcp_resources_list(templates=None, query=None, cursor=None)` lists fixed resources and URI templates.
   The `templates` filter selects the entries: omit it or pass `null` for both, `true` for
-  templates only, or `false` for fixed resources only. The result contains
-  `resources`, `resourceTemplates`, or both keys, according to the filter.
+  templates only, or `false` for fixed resources only. The result contains one
+  `items` array. Fixed resources have `uri`; templates have `uriTemplate`.
+  Items omit `name` and `title` but retain other metadata, including `description`
+  and `mimeType` when available. Native MCP listings retain their original fields.
   The `query` filter matches a literal, case-insensitive substring of `uri` or
   `uriTemplate` before pagination. Omit it, pass `null`, or use an empty string
   to include all entries selected by `templates`.
   Pass `nextCursor` back as `cursor` with the same `templates` and `query` filters
   to get the next page.
-  `Registry.page_size` limits the total entries across both lists on each page;
-  either list can be empty on a page. Stop when the response has no `nextCursor`.
+  `Registry.page_size` limits the total entries in `items` on each page.
+  No matches returns `{"items": []}`. Stop when the response has no `nextCursor`.
 - `mcp_resources_read(uri)` reads a concrete URI, including an expanded template.
 
 Both tools return JSON in ordinary text content, so the client does not need to
@@ -140,16 +142,17 @@ async with Client(url + "?resources=tool", AdapterSet.default().by_version["2026
     await client.initialize()
     listed = await client.call_tool("mcp_resources_list", {})
     catalogue = json.loads(listed.content[0].text)
-    assert catalogue["resources"][0]["uri"] == "config://app"
-    assert catalogue["resourceTemplates"][0]["uriTemplate"] == "notebook://entries/{id}"
+    assert catalogue["items"][0]["uri"] == "config://app"
+    assert catalogue["items"][1]["uriTemplate"] == "notebook://entries/{id}"
+    assert all("name" not in item and "title" not in item for item in catalogue["items"])
 
     templates = await client.call_tool("mcp_resources_list", {"templates": True})
-    assert set(json.loads(templates.content[0].text)) == {"resourceTemplates"}
+    assert all("uriTemplate" in item for item in json.loads(templates.content[0].text)["items"])
 
     filtered = await client.call_tool("mcp_resources_list", {"query": "entries"})
     catalogue = json.loads(filtered.content[0].text)
-    assert catalogue["resources"] == []
-    assert catalogue["resourceTemplates"][0]["uriTemplate"] == "notebook://entries/{id}"
+    assert len(catalogue["items"]) == 1
+    assert catalogue["items"][0]["uriTemplate"] == "notebook://entries/{id}"
 
     result = await client.call_tool("mcp_resources_read", {"uri": "notebook://entries/42"})
     contents = json.loads(result.content[0].text)["contents"]

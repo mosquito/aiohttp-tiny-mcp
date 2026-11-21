@@ -82,14 +82,12 @@ def resource_result(outcome: Outcome) -> CallToolResult:
 
 
 async def mcp_resources_list(args: ResourceListArguments, ex: Exchange) -> CallToolResult:
-    """List resources and URI templates. Keep filters when passing nextCursor as cursor."""
+    """List resources and URI templates in items. Keep filters when using nextCursor as cursor."""
     from .dispatcher import Dispatcher
 
     entries: list[tuple[str, ResourceDef | ResourceTemplateDef]] = []
-    result: dict[str, Any] = {}
     query = (args.query or "").casefold()
     if args.templates is not True:
-        result["resources"] = []
         entries.extend(
             (f"resource:{definition.uri}", definition)
             for spec in ex.registry.resources_fixed.values()
@@ -97,7 +95,6 @@ async def mcp_resources_list(args: ResourceListArguments, ex: Exchange) -> CallT
             and query in definition.uri.casefold()
         )
     if args.templates is not False:
-        result["resourceTemplates"] = []
         entries.extend(
             (f"template:{definition.uri_template}", definition)
             for spec in ex.registry.resources_templated
@@ -111,10 +108,14 @@ async def mcp_resources_list(args: ResourceListArguments, ex: Exchange) -> CallT
     if isinstance(page, Failure):
         return CallToolResult.failure(page.message)
     shown, next_cursor = page
-    for entry in shown:
-        definition = entry[1]
-        target = "resources" if isinstance(definition, ResourceDef) else "resourceTemplates"
-        result[target].append(definition.model_dump(mode="json", by_alias=True, exclude_none=True))
+    result: dict[str, Any] = {
+        "items": [
+            definition.model_dump(
+                mode="json", by_alias=True, exclude_none=True, exclude={"name", "title"}
+            )
+            for key, definition in shown
+        ]
+    }
     if next_cursor is not None:
         result["nextCursor"] = next_cursor
     return CallToolResult.of(result)

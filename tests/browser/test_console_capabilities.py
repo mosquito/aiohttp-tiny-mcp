@@ -31,6 +31,10 @@ async def call_resource_tools(page: Page) -> None:
     await page.locator("#invoke").click()
     await expect(page.locator("#outcome")).to_contain_text("file://alpha")
     await expect(page.locator("#outcome")).to_contain_text("file://entries/{name}")
+    await expect(page.locator("#outcome")).to_contain_text('"items"')
+    await expect(page.locator("#outcome")).not_to_contain_text('"resourceTemplates"')
+    await expect(page.locator("#outcome")).not_to_contain_text('"name":')
+    await expect(page.locator("#outcome")).not_to_contain_text('"title":')
     await (
         page.locator("#arguments .argument")
         .filter(has=page.locator('[data-name="templates"]'))
