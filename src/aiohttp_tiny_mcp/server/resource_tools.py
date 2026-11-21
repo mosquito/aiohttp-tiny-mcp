@@ -2,13 +2,19 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any
 
 from aiohttp import web
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from aiohttp_tiny_mcp.protocol.core import Failure, Outcome, Value
-from aiohttp_tiny_mcp.protocol.models import CallToolResult, Hint, ListParams
+from aiohttp_tiny_mcp.protocol.models import (
+    CallToolResult,
+    Hint,
+    ListParams,
+    ResourceDef,
+    ResourceTemplateDef,
+)
 
 from .exchange import Exchange
 from .specs import ToolSpec
@@ -46,7 +52,10 @@ def resource_capabilities(
 class ResourceListArguments(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    kind: Literal["resources", "templates"] = "resources"
+    templates: bool | None = Field(
+        default=None,
+        description="Omit or use null for both; true lists templates, false lists fixed resources.",
+    )
     cursor: str | None = None
 
 
@@ -66,14 +75,39 @@ def resource_result(outcome: Outcome) -> CallToolResult:
 
 
 async def mcp_resources_list(args: ResourceListArguments, ex: Exchange) -> CallToolResult:
-    """List resources or URI templates. Pass nextCursor as cursor to get the next page."""
+    """List resources and URI templates. Pass nextCursor as cursor for the next page."""
     from .dispatcher import Dispatcher
 
-    dispatcher = Dispatcher(ex.registry)
-    params = ListParams(cursor=args.cursor)
-    if args.kind == "templates":
-        return resource_result(await dispatcher.list_resource_templates(ex, params=params))
-    return resource_result(await dispatcher.list_resources(ex, params=params))
+    entries: list[tuple[str, ResourceDef | ResourceTemplateDef]] = []
+    result: dict[str, Any] = {}
+    if args.templates is not True:
+        result["resources"] = []
+        entries.extend(
+            (f"resource:{definition.uri}", definition)
+            for spec in ex.registry.resources_fixed.values()
+            if isinstance(definition := ex.adapter.describe_resource(spec), ResourceDef)
+        )
+    if args.templates is not False:
+        result["resourceTemplates"] = []
+        entries.extend(
+            (f"template:{definition.uri_template}", definition)
+            for spec in ex.registry.resources_templated
+            if isinstance(definition := ex.adapter.describe_resource(spec), ResourceTemplateDef)
+        )
+    entries.sort(key=lambda entry: entry[0])
+    page = Dispatcher(ex.registry).paged(
+        ex, entries, lambda entry: entry[0], ListParams(cursor=args.cursor)
+    )
+    if isinstance(page, Failure):
+        return CallToolResult.failure(page.message)
+    shown, next_cursor = page
+    for entry in shown:
+        definition = entry[1]
+        target = "resources" if isinstance(definition, ResourceDef) else "resourceTemplates"
+        result[target].append(definition.model_dump(mode="json", by_alias=True, exclude_none=True))
+    if next_cursor is not None:
+        result["nextCursor"] = next_cursor
+    return CallToolResult.of(result)
 
 
 async def mcp_resources_read(args: ResourceReadArguments, ex: Exchange) -> CallToolResult:
