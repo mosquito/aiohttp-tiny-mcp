@@ -93,7 +93,7 @@ def resource_result(outcome: Outcome) -> CallToolResult:
 
 
 async def mcp_resources_list(args: ResourceListArguments, ex: Exchange) -> CallToolResult:
-    """Find available files and data. Use mcp_resources_read to retrieve an item's contents."""
+    """Call this tool to inspect available URL-addressed data and find addresses to read."""
     from .dispatcher import Dispatcher
 
     entries: list[tuple[str, ResourceDef | ResourceTemplateDef]] = []
@@ -133,7 +133,7 @@ async def mcp_resources_list(args: ResourceListArguments, ex: Exchange) -> CallT
 
 
 async def mcp_resources_read(args: ResourceReadArguments, ex: Exchange) -> CallToolResult:
-    """Retrieve text or binary data from a listed address. Binary content is returned as base64."""
+    """Read URL-addressed data as text or base64-encoded binary content."""
     from .dispatcher import Dispatcher
 
     return resource_result(await Dispatcher(ex.registry).read_resource(ex, uri=args.uri))
