@@ -236,9 +236,23 @@ name for that endpoint. Names accept 1–64 letters, numbers, underscores, or hy
 Without a declared name, the console derives one from its title. Names entered
 manually remain available for that endpoint until the page reloads.
 
-Under **Resources**, choose **as tools**, **native**, or both. Changing the agent
-applies that agent's defaults. Changing the name, configuration level, or header
-selection preserves your resource choices. At least one resource interface must
+Not every agent harness can discover or read native MCP resources, even when
+it can connect and call tools. Resource support can depend on the agent version
+or installed plugins. Under **Resources**, select the interface your agent can use:
+
+- **as tools** exposes resource listing and reading through ordinary MCP tools.
+  Use it when the agent cannot access native resources.
+- **native** uses the MCP resource interface. Choose it when the agent supports
+  the resource features you need.
+- Select both to expose both interfaces, for example when you need tool access
+  and native resource subscriptions. Tool mode alone does not provide subscriptions.
+
+See [Access through tools](resources.md#access-through-tools) for URL examples
+and the available resource tools.
+
+Changing the agent applies that agent's defaults. Changing the name,
+configuration level, or header selection preserves your resource choices.
+At least one resource interface must
 remain selected before you can copy the configuration.
 
 The default level is **User**. The console remembers your level choice in
