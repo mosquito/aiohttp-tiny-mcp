@@ -54,15 +54,33 @@ class ResourceListArguments(BaseModel):
 
     templates: bool | None = Field(
         default=None,
-        description="Omit or use null for both; true lists templates, false lists fixed resources.",
+        description=(
+            "Omit or use null for all entries; true lists address templates, "
+            "false lists ready-to-use addresses."
+        ),
     )
-    cursor: str | None = None
+    query: str | None = Field(
+        default=None,
+        description=(
+            "Text to find in an address, ignoring case. "
+            "Omit, use null or an empty string to list all entries."
+        ),
+    )
+    cursor: str | None = Field(
+        default=None,
+        description="Pass nextCursor to get the next page; keep templates and query unchanged.",
+    )
 
 
 class ResourceReadArguments(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    uri: str
+    uri: str = Field(
+        description=(
+            "An address from mcp_resources_list. "
+            "Replace any {placeholders} with concrete values first."
+        )
+    )
 
 
 def resource_result(outcome: Outcome) -> CallToolResult:
@@ -75,24 +93,24 @@ def resource_result(outcome: Outcome) -> CallToolResult:
 
 
 async def mcp_resources_list(args: ResourceListArguments, ex: Exchange) -> CallToolResult:
-    """List resources and URI templates. Pass nextCursor as cursor for the next page."""
+    """Call this tool to inspect available URL-addressed data and find addresses to read."""
     from .dispatcher import Dispatcher
 
     entries: list[tuple[str, ResourceDef | ResourceTemplateDef]] = []
-    result: dict[str, Any] = {}
+    query = (args.query or "").casefold()
     if args.templates is not True:
-        result["resources"] = []
         entries.extend(
             (f"resource:{definition.uri}", definition)
             for spec in ex.registry.resources_fixed.values()
             if isinstance(definition := ex.adapter.describe_resource(spec), ResourceDef)
+            and query in definition.uri.casefold()
         )
     if args.templates is not False:
-        result["resourceTemplates"] = []
         entries.extend(
             (f"template:{definition.uri_template}", definition)
             for spec in ex.registry.resources_templated
             if isinstance(definition := ex.adapter.describe_resource(spec), ResourceTemplateDef)
+            and query in definition.uri_template.casefold()
         )
     entries.sort(key=lambda entry: entry[0])
     page = Dispatcher(ex.registry).paged(
@@ -101,17 +119,21 @@ async def mcp_resources_list(args: ResourceListArguments, ex: Exchange) -> CallT
     if isinstance(page, Failure):
         return CallToolResult.failure(page.message)
     shown, next_cursor = page
-    for entry in shown:
-        definition = entry[1]
-        target = "resources" if isinstance(definition, ResourceDef) else "resourceTemplates"
-        result[target].append(definition.model_dump(mode="json", by_alias=True, exclude_none=True))
+    result: dict[str, Any] = {
+        "items": [
+            definition.model_dump(
+                mode="json", by_alias=True, exclude_none=True, exclude={"name", "title"}
+            )
+            for key, definition in shown
+        ]
+    }
     if next_cursor is not None:
         result["nextCursor"] = next_cursor
     return CallToolResult.of(result)
 
 
 async def mcp_resources_read(args: ResourceReadArguments, ex: Exchange) -> CallToolResult:
-    """Read a concrete resource URI. Return contents as JSON text, including base64 for blobs."""
+    """Read URL-addressed data as text or base64-encoded binary content."""
     from .dispatcher import Dispatcher
 
     return resource_result(await Dispatcher(ex.registry).read_resource(ex, uri=args.uri))
