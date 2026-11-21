@@ -54,22 +54,33 @@ class ResourceListArguments(BaseModel):
 
     templates: bool | None = Field(
         default=None,
-        description="Omit or use null for both; true lists templates, false lists fixed resources.",
+        description=(
+            "Omit or use null for all entries; true lists address templates, "
+            "false lists ready-to-use addresses."
+        ),
     )
     query: str | None = Field(
         default=None,
         description=(
-            "Literal, case-insensitive substring of a URI or URI template. "
-            "Omit, use null or an empty string for all entries."
+            "Text to find in an address, ignoring case. "
+            "Omit, use null or an empty string to list all entries."
         ),
     )
-    cursor: str | None = None
+    cursor: str | None = Field(
+        default=None,
+        description="Pass nextCursor to get the next page; keep templates and query unchanged.",
+    )
 
 
 class ResourceReadArguments(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    uri: str
+    uri: str = Field(
+        description=(
+            "An address from mcp_resources_list. "
+            "Replace any {placeholders} with concrete values first."
+        )
+    )
 
 
 def resource_result(outcome: Outcome) -> CallToolResult:
@@ -82,7 +93,7 @@ def resource_result(outcome: Outcome) -> CallToolResult:
 
 
 async def mcp_resources_list(args: ResourceListArguments, ex: Exchange) -> CallToolResult:
-    """List resources and URI templates in items. Keep filters when using nextCursor as cursor."""
+    """Find available files and data. Use mcp_resources_read to retrieve an item's contents."""
     from .dispatcher import Dispatcher
 
     entries: list[tuple[str, ResourceDef | ResourceTemplateDef]] = []
@@ -122,7 +133,7 @@ async def mcp_resources_list(args: ResourceListArguments, ex: Exchange) -> CallT
 
 
 async def mcp_resources_read(args: ResourceReadArguments, ex: Exchange) -> CallToolResult:
-    """Read a concrete resource URI. Return contents as JSON text, including base64 for blobs."""
+    """Retrieve text or binary data from a listed address. Binary content is returned as base64."""
     from .dispatcher import Dispatcher
 
     return resource_result(await Dispatcher(ex.registry).read_resource(ex, uri=args.uri))
