@@ -338,6 +338,163 @@ def test_delayed_authentication_refusal_after_disconnect_does_not_reopen_ui(vers
     )
 
 
+@pytest.mark.parametrize("version", ["2026-07-28", *LEGACY])
+@pytest.mark.parametrize("capabilities", [{}, {"tools": {}, "prompts": {}, "resources": {}}])
+def test_no_notification_capabilities_send_no_subscription_requests(
+    version: str, capabilities: dict
+) -> None:
+    run(
+        f"const state = setup({json.dumps(version)});\n"
+        f"const capabilities = {json.dumps(capabilities)};\n"
+        + """
+    await state.prepare();
+    state.client.serverCapabilities = capabilities;
+    const requests = state.requests.length;
+    state.client.startNotifications();
+    await state.client.notificationTask;
+    assert.equal(state.requests.length, requests);
+    assert.equal(state.streams.length, 0);
+    assert.deepEqual(state.errors, []);
+    state.client.abort.abort();
+    """
+    )
+
+
+@pytest.mark.parametrize("version", ["2026-07-28", *LEGACY])
+def test_logging_only_uses_legacy_stream_and_stops_when_capability_is_removed(
+    version: str,
+) -> None:
+    run(
+        f"const state = setup({json.dumps(version)});\n"
+        + """
+    await state.prepare();
+    state.client.serverCapabilities = {logging: {}};
+    const requests = state.requests.length;
+    state.client.startNotifications();
+    if (state.client.rules.meta) {
+      await state.client.notificationTask;
+      assert.equal(state.requests.length, requests);
+      assert.equal(state.streams.length, 0);
+    } else {
+      await until(() => state.streams.length === 1);
+      assert.equal(state.requests.length, requests + 1);
+      assert.equal(state.streams[0].options.method, 'GET');
+      const event = {jsonrpc: '2.0', method: 'notifications/message',
+        params: {level: 'info', data: 'background log'}};
+      state.streams[0].send(event);
+      await until(() => state.received.length === 1);
+      assert.deepEqual(state.received[0], event);
+      state.client.serverCapabilities = {};
+      state.client.startNotifications();
+      await state.client.notificationTask;
+      assert.equal(state.active, 0);
+      assert.equal(state.requests.length, requests + 1);
+      state.client.serverCapabilities = {logging: {}};
+      state.client.startNotifications();
+      await until(() => state.streams.length === 2);
+      assert.equal(state.streams[1].options.method, 'GET');
+      assert.equal(state.active, 1);
+    }
+    state.client.abort.abort();
+    await state.client.notificationTask;
+    assert.deepEqual(state.errors, []);
+    """
+    )
+
+
+@pytest.mark.parametrize("version", ["2026-07-28", "2025-11-25"])
+@pytest.mark.parametrize(
+    ("capabilities", "selected"),
+    [
+        (
+            {"tools": {"listChanged": True}, "prompts": {"listChanged": False}},
+            {"toolsListChanged": True},
+        ),
+        (
+            {"tools": {"listChanged": False}, "prompts": {"listChanged": True}},
+            {"promptsListChanged": True},
+        ),
+        (
+            {"resources": {"listChanged": True, "subscribe": False}},
+            {"resourcesListChanged": True},
+        ),
+        (
+            {"resources": {"listChanged": False, "subscribe": True}},
+            {"resourceSubscriptions": ["config://app"]},
+        ),
+    ],
+)
+def test_list_changes_and_resource_subscription_flags_are_independent(
+    version: str, capabilities: dict, selected: dict
+) -> None:
+    run(
+        f"const state = setup({json.dumps(version)});\n"
+        f"const capabilities = {json.dumps(capabilities)};\n"
+        f"const selected = {json.dumps(selected)};\n"
+        + """
+    await state.prepare();
+    state.client.serverCapabilities = capabilities;
+    const requests = state.requests.length;
+    state.client.startNotifications();
+    await until(() => state.streams.length === 1);
+    const sent = state.requests.slice(requests);
+    if (state.client.rules.meta) {
+      assert.equal(sent.length, 1);
+      assert.deepEqual(state.streams[0].body.params.notifications, selected);
+    } else {
+      const subscriptions = sent.filter(item => item.body?.method === 'resources/subscribe');
+      assert.deepEqual(subscriptions.map(item => item.body.params.uri),
+        selected.resourceSubscriptions || []);
+      assert.equal(sent.length, subscriptions.length + 1);
+      assert.equal(sent.at(-1).options.method, 'GET');
+    }
+    state.client.abort.abort();
+    await state.client.notificationTask;
+    assert.deepEqual(state.errors, []);
+    """
+    )
+
+
+@pytest.mark.parametrize("version", ["2026-07-28", "2025-11-25"])
+def test_capability_refresh_replaces_notification_stream_without_native_resources(
+    version: str,
+) -> None:
+    run(
+        f"const state = setup({json.dumps(version)});\n"
+        + """
+    await state.start();
+    state.client.serverCapabilities = {};
+    const requests = state.requests.length;
+    assert.deepEqual(await state.client.listResources(), {resources: [], templates: []});
+    await state.client.notificationTask;
+    assert.equal(state.active, 0);
+    assert.equal(state.requests.length, requests);
+    for (const kind of ['tools', 'prompts']) {
+      state.client.serverCapabilities = {[kind]: {listChanged: true}};
+      const streams = state.streams.length;
+      await state.client.listResources();
+      await until(() => state.streams.length === streams + 1);
+      assert.equal(state.active, 1);
+      assert.ok(state.streams.slice(0, -1).every(stream => stream.closed));
+      if (state.client.rules.meta) {
+        assert.deepEqual(state.streams.at(-1).body.params.notifications,
+          {[kind + 'ListChanged']: true});
+      } else {
+        assert.equal(state.streams.at(-1).options.method, 'GET');
+      }
+    }
+    assert.ok(!state.requests.slice(requests).some(item =>
+      item.body?.method === 'resources/subscribe' || item.body?.method === 'resources/list'));
+    state.client.serverCapabilities = {};
+    await state.client.listResources();
+    await state.client.notificationTask;
+    assert.equal(state.active, 0);
+    assert.deepEqual(state.errors, []);
+    state.client.abort.abort();
+    """
+    )
+
+
 def test_connection_controls_apply_notifications_and_reset_after_disconnect() -> None:
     source = (CONSOLE / "console.js").read_text()
     controls = source[source.index("function disconnect()") : source.index("const NARROW =")]

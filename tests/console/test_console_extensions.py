@@ -119,6 +119,7 @@ def test_legacy_resources_keep_their_names_without_extension_discovery():
     const manifest = {uri: prefix + "manifest.json"};
     for (const version of Object.keys(REVISIONS).filter(v => v !== "2026-07-28")) {
       const client = new Client("http://localhost/mcp", version, {});
+      client.serverCapabilities = {resources: {}};
       const sent = [];
       client.request = async (method, params) => {
         sent.push(method);
@@ -142,3 +143,23 @@ def test_legacy_resources_keep_their_names_without_extension_discovery():
       {uri: 42}, {uri: "not a URI"}, {description: "https://unrelated.example"},
     ]})], ["other://file", prefix + "file"]);
     """)
+
+
+def test_skill_manifest_without_native_resources_has_no_read_buttons():
+    source = CONSOLE.read_text()
+    renderer = source[source.index("function reportSkill") : source.index("async function invoke")]
+    run(
+        renderer
+        + """
+    const client = {serverCapabilities: {extensions: {[SKILLS_EXTENSION]: {}}}};
+    const reports = [];
+    function report(title, text) { reports.push({title, text}); }
+    function reportValue() {}
+    function element() { throw new Error('Native resource controls must not be offered'); }
+    for (const resources of ['dynamic', [{uri: 'skill://deploy/file', size: 10}]]) {
+      reportSkill({uri: 'skill://deploy/SKILL.md', frontmatter: {name: 'deploy'}, resources});
+      assert.equal(reports.at(-1).text,
+        'Native resource access is unavailable for this connection.');
+    }
+    """
+    )

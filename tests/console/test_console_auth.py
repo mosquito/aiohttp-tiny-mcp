@@ -428,5 +428,6 @@ def test_http_authentication_failures_are_not_retried_or_parsed_as_rpc(run_js):
       if (method === "resources/list") return [];
       throw new HttpError(new Response(null, {status: 401}));
     };
+    client.serverCapabilities = {resources: {}};
     await assert.rejects(client.listResources(), /Authentication required/);
     """)
