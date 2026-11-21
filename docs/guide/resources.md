@@ -114,14 +114,19 @@ POST URL carries the selected modes. Stdio uses native resources.
 
 Tool mode exposes two names through `tools/list`:
 
-- `mcp_resources_list(kind="resources", cursor=None)` lists fixed resources.
-  Set `kind="templates"` to list URI templates. Pass `nextCursor` back as `cursor`.
+- `mcp_resources_list(templates=None, cursor=None)` lists fixed resources and URI templates.
+  The `templates` filter selects the entries: omit it or pass `null` for both, `true` for
+  templates only, or `false` for fixed resources only. The result contains
+  `resources`, `resourceTemplates`, or both keys, according to the filter.
+  Pass `nextCursor` back as `cursor` with the same filter to get the next page.
+  `Registry.page_size` limits the total entries across both lists on each page;
+  either list can be empty on a page. Stop when the response has no `nextCursor`.
 - `mcp_resources_read(uri)` reads a concrete URI, including an expanded template.
 
 Both tools return JSON in ordinary text content, so the client does not need to
 interpret resource content blocks. Read results retain URI, MIME type, and text
 or base64 blob data. The same resource handlers, dependency providers, scope checks,
-revision-specific URIs, and pagination rules apply. Tool failures return `isError`.
+and revision-specific URIs apply. Tool failures return `isError`.
 
 <!-- name: async test_resources; fixtures: serve -->
 ```python
@@ -129,6 +134,14 @@ import json
 
 async with Client(url + "?resources=tool", AdapterSet.default().by_version["2026-07-28"]) as client:
     await client.initialize()
+    listed = await client.call_tool("mcp_resources_list", {})
+    catalogue = json.loads(listed.content[0].text)
+    assert catalogue["resources"][0]["uri"] == "config://app"
+    assert catalogue["resourceTemplates"][0]["uriTemplate"] == "notebook://entries/{id}"
+
+    templates = await client.call_tool("mcp_resources_list", {"templates": True})
+    assert set(json.loads(templates.content[0].text)) == {"resourceTemplates"}
+
     result = await client.call_tool("mcp_resources_read", {"uri": "notebook://entries/42"})
     contents = json.loads(result.content[0].text)["contents"]
 
