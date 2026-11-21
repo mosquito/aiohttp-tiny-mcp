@@ -206,18 +206,111 @@ async def test_resource_list_filter_preserves_empty_selected_catalogues(argument
 
 
 @pytest.mark.parametrize("version", VERSIONS)
-async def test_resource_list_schema_exposes_nullable_templates_and_cursor(version: str):
+@pytest.mark.parametrize("templates", [None, True, False])
+@pytest.mark.parametrize(
+    "query,resources,resource_templates",
+    [
+        (None, ["file://alpha", "file://binary"], ["file://entries/{name}"]),
+        ("", ["file://alpha", "file://binary"], ["file://entries/{name}"]),
+        ("pha", ["file://alpha"], []),
+        ("entries/{n", [], ["file://entries/{name}"]),
+        ("FILE://", ["file://alpha", "file://binary"], ["file://entries/{name}"]),
+        ("AlPhA", ["file://alpha"], []),
+        ("ENTRIES", [], ["file://entries/{name}"]),
+        ("file://.*", [], []),
+        ("missing://", [], []),
+    ],
+)
+async def test_resource_list_query_matches_literal_uri_substring(
+    version: str,
+    templates: bool | None,
+    query: str | None,
+    resources: list[str],
+    resource_templates: list[str],
+):
+    async with resource_client(resource_registry(), version=version) as (client, discovery):
+        listed = tool_data(
+            await client.call_tool("mcp_resources_list", {"templates": templates, "query": query})
+        )
+        expected_keys = set()
+        if templates is not True:
+            expected_keys.add("resources")
+            assert [item["uri"] for item in listed["resources"]] == resources
+        if templates is not False:
+            expected_keys.add("resourceTemplates")
+            assert [
+                item["uriTemplate"] for item in listed["resourceTemplates"]
+            ] == resource_templates
+        assert set(listed) == expected_keys
+
+
+@pytest.mark.parametrize("version", VERSIONS)
+async def test_resource_list_query_casefold_preserves_original_uris(version: str):
+    registry = resource_registry()
+
+    @registry.resource("file://Straße")
+    async def street(args: Nothing) -> str:
+        return "street"
+
+    @registry.resource("file://Straße/{name}")
+    async def address(args: Entry) -> str:
+        return args.name
+
+    async with resource_client(registry, version=version) as (client, discovery):
+        listed = tool_data(await client.call_tool("mcp_resources_list", {"query": "STRASSE"}))
+        assert [item["uri"] for item in listed["resources"]] == ["file://Straße"]
+        assert [item["uriTemplate"] for item in listed["resourceTemplates"]] == [
+            "file://Straße/{name}"
+        ]
+
+
+@pytest.mark.parametrize("version", VERSIONS)
+async def test_resource_list_query_filters_before_pagination(version: str):
+    registry = resource_registry(page_size=1)
+
+    @registry.resource("file://entries/index")
+    async def index(args: Nothing) -> str:
+        raise AssertionError("listing must not read resources")
+
+    async with resource_client(registry, version=version) as (client, discovery):
+        arguments = {"query": "EnTrIeS"}
+        first = tool_data(await client.call_tool("mcp_resources_list", arguments))
+        assert [item["uri"] for item in first["resources"]] == ["file://entries/index"]
+        assert first["resourceTemplates"] == []
+        second = tool_data(
+            await client.call_tool(
+                "mcp_resources_list", {**arguments, "cursor": first["nextCursor"]}
+            )
+        )
+        assert second["resources"] == []
+        assert [item["uriTemplate"] for item in second["resourceTemplates"]] == [
+            "file://entries/{name}"
+        ]
+        assert "nextCursor" not in second
+        rejected = await client.call_tool(
+            "mcp_resources_list", {"query": "file://alpha", "cursor": first["nextCursor"]}
+        )
+        assert isinstance(rejected, CallToolResult)
+        assert rejected.is_error
+
+
+@pytest.mark.parametrize("version", VERSIONS)
+async def test_resource_list_schema_exposes_nullable_filters_and_cursor(version: str):
     async with resource_client(resource_registry(), version=version) as (client, discovery):
         tools = {tool.name: tool for tool in await client.list_tools()}
         schema = tools["mcp_resources_list"].input_schema
         reserved = {"mcpAnswers", "mcpState"} if version in {"2024-11-05", "2025-03-26"} else set()
-        assert set(schema["properties"]) == {"templates", "cursor"} | reserved
+        assert set(schema["properties"]) == {"templates", "query", "cursor"} | reserved
         assert schema["additionalProperties"] is False
         assert not schema.get("required")
         templates = schema["properties"]["templates"]
         assert templates["default"] is None
         types = templates.get("type") or [item["type"] for item in templates["anyOf"]]
         assert set(types) == {"boolean", "null"}
+        query = schema["properties"]["query"]
+        assert query["default"] is None
+        types = query.get("type") or [item["type"] for item in query["anyOf"]]
+        assert set(types) == {"string", "null"}
 
 
 @pytest.mark.parametrize("version", VERSIONS)
@@ -271,6 +364,7 @@ async def test_resource_list_cursor_cannot_skip_into_a_different_kind(templates:
         ("mcp_resources_list", {"templates": "unknown"}),
         ("mcp_resources_list", {"templates": []}),
         ("mcp_resources_list", {"kind": "resources"}),
+        ("mcp_resources_list", {"query": 123}),
         ("mcp_resources_list", {"cursor": "missing"}),
     ],
 )

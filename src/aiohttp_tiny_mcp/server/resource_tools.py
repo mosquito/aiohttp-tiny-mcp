@@ -56,6 +56,13 @@ class ResourceListArguments(BaseModel):
         default=None,
         description="Omit or use null for both; true lists templates, false lists fixed resources.",
     )
+    query: str | None = Field(
+        default=None,
+        description=(
+            "Literal, case-insensitive substring of a URI or URI template. "
+            "Omit, use null or an empty string for all entries."
+        ),
+    )
     cursor: str | None = None
 
 
@@ -75,17 +82,19 @@ def resource_result(outcome: Outcome) -> CallToolResult:
 
 
 async def mcp_resources_list(args: ResourceListArguments, ex: Exchange) -> CallToolResult:
-    """List resources and URI templates. Pass nextCursor as cursor for the next page."""
+    """List resources and URI templates. Keep filters when passing nextCursor as cursor."""
     from .dispatcher import Dispatcher
 
     entries: list[tuple[str, ResourceDef | ResourceTemplateDef]] = []
     result: dict[str, Any] = {}
+    query = (args.query or "").casefold()
     if args.templates is not True:
         result["resources"] = []
         entries.extend(
             (f"resource:{definition.uri}", definition)
             for spec in ex.registry.resources_fixed.values()
             if isinstance(definition := ex.adapter.describe_resource(spec), ResourceDef)
+            and query in definition.uri.casefold()
         )
     if args.templates is not False:
         result["resourceTemplates"] = []
@@ -93,6 +102,7 @@ async def mcp_resources_list(args: ResourceListArguments, ex: Exchange) -> CallT
             (f"template:{definition.uri_template}", definition)
             for spec in ex.registry.resources_templated
             if isinstance(definition := ex.adapter.describe_resource(spec), ResourceTemplateDef)
+            and query in definition.uri_template.casefold()
         )
     entries.sort(key=lambda entry: entry[0])
     page = Dispatcher(ex.registry).paged(

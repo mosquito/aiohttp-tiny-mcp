@@ -114,11 +114,15 @@ POST URL carries the selected modes. Stdio uses native resources.
 
 Tool mode exposes two names through `tools/list`:
 
-- `mcp_resources_list(templates=None, cursor=None)` lists fixed resources and URI templates.
+- `mcp_resources_list(templates=None, query=None, cursor=None)` lists fixed resources and URI templates.
   The `templates` filter selects the entries: omit it or pass `null` for both, `true` for
   templates only, or `false` for fixed resources only. The result contains
   `resources`, `resourceTemplates`, or both keys, according to the filter.
-  Pass `nextCursor` back as `cursor` with the same filter to get the next page.
+  The `query` filter matches a literal, case-insensitive substring of `uri` or
+  `uriTemplate` before pagination. Omit it, pass `null`, or use an empty string
+  to include all entries selected by `templates`.
+  Pass `nextCursor` back as `cursor` with the same `templates` and `query` filters
+  to get the next page.
   `Registry.page_size` limits the total entries across both lists on each page;
   either list can be empty on a page. Stop when the response has no `nextCursor`.
 - `mcp_resources_read(uri)` reads a concrete URI, including an expanded template.
@@ -141,6 +145,11 @@ async with Client(url + "?resources=tool", AdapterSet.default().by_version["2026
 
     templates = await client.call_tool("mcp_resources_list", {"templates": True})
     assert set(json.loads(templates.content[0].text)) == {"resourceTemplates"}
+
+    filtered = await client.call_tool("mcp_resources_list", {"query": "entries"})
+    catalogue = json.loads(filtered.content[0].text)
+    assert catalogue["resources"] == []
+    assert catalogue["resourceTemplates"][0]["uriTemplate"] == "notebook://entries/{id}"
 
     result = await client.call_tool("mcp_resources_read", {"uri": "notebook://entries/42"})
     contents = json.loads(result.content[0].text)["contents"]
