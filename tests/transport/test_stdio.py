@@ -4,13 +4,16 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
+import sys
+import warnings
 from collections.abc import Mapping
 from typing import Any
 
 import pytest
 
 from aiohttp_tiny_mcp.protocol.selection import AdapterSet
-from aiohttp_tiny_mcp.server.stdio import serve_stdio
+from aiohttp_tiny_mcp.server.stdio import serve_stdio, stdin_reader
 
 pytestmark = [pytest.mark.asyncio, pytest.mark.timeout(10)]
 
@@ -206,3 +209,31 @@ async def test_a_listing_pages_over_stdio_too(registry):
     second = outputs[1]["result"]
     assert len(second["tools"]) == 1
     assert second["tools"][0]["name"] > first["tools"][0]["name"], "the page after, in order"
+
+
+async def test_stdin_reader_reads_the_process_stdin(monkeypatch):
+    """Read one line through `stdin_reader`, from a thread of its own.
+
+    The thread runs `asyncio.run`, so it has no thread-default loop. That is
+    the condition under which a loop lookup can pick the wrong loop, and the
+    run must stay free of deprecation warnings.
+    """
+    read_fd, write_fd = os.pipe()
+    os.write(write_fd, b"hello\n")
+    os.close(write_fd)
+    seen: list[bytes] = []
+
+    def in_its_own_thread() -> None:
+        async def attach() -> bytes:
+            with warnings.catch_warnings():
+                warnings.simplefilter("error", DeprecationWarning)
+                reader = await stdin_reader()
+            return await reader.readline()
+
+        seen.append(asyncio.run(attach()))
+
+    with open(read_fd, "rb", buffering=0) as pipe:
+        monkeypatch.setattr(sys, "stdin", pipe)
+        await asyncio.to_thread(in_its_own_thread)
+
+    assert seen == [b"hello\n"]
