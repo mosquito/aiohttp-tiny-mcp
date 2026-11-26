@@ -166,7 +166,14 @@ async def serve_stdio(
 
 
 async def stdin_reader() -> asyncio.StreamReader:
-    loop = asyncio.get_event_loop()
+    """Attach stdin to the loop this coroutine runs on.
+
+    Ask for the running loop, which is what this coroutine needs and the one
+    lookup that cannot pick a different loop. `get_event_loop` returns the
+    same loop while a loop runs, but it falls back to a thread-default loop,
+    or fails, if this function ever runs outside one.
+    """
+    loop = asyncio.get_running_loop()
     reader = asyncio.StreamReader()
     protocol = asyncio.StreamReaderProtocol(reader)
     await loop.connect_read_pipe(lambda: protocol, sys.stdin)
