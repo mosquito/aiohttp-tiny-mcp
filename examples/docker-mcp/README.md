@@ -175,8 +175,8 @@ https://docker.example.com/mcp?token=<token>
 
 The header wins where both are present. The URL is then a credential: it
 reaches browser history, the client's saved settings and every log that keeps
-the query, so the option is off by default. With it on, the server installs
-the library's access-log filter, which writes `token=[REDACTED]`.
+the query, so the option is off by default. The endpoint already masks the
+argument in the aiohttp access log, which writes `token=[REDACTED]`.
 
 A token expires, and the server rejects one without `exp`. Revocation is
 collective: replace the key and restart the server. This is a credential on
