@@ -68,6 +68,13 @@ async def test_another_issuer_is_refused():
     assert await auth.verifier.verify(jwt.encode({"sub": "x"}, KEY, algorithm="HS256")) is None
 
 
+async def test_the_query_argument_is_refused_unless_it_is_enabled():
+    auth = authentication(
+        settings("--jwt-psk", KEY, "--jwt-audience", AUDIENCE, "--jwt-issuer", ISSUER)
+    )
+    assert auth is not None and auth.query is False
+
+
 async def test_what_the_settings_must_say():
     with pytest.raises(SystemExit, match="--jwt-audience"):
         authentication(settings("--jwt-psk", KEY))
@@ -75,9 +82,8 @@ async def test_what_the_settings_must_say():
         authentication(settings("--jwt-psk", "too-short", "--jwt-audience", AUDIENCE))
 
 
-@pytest.fixture
-async def protected(storage: SqliteStorage, client: Docker):
-    """The endpoint of the example, behind the pre-shared key."""
+async def serve(storage: SqliteStorage, client: Docker, *arguments: str):
+    """Start the endpoint of the example behind the pre-shared key."""
     registry = build(
         Registry(
             "docker",
@@ -85,7 +91,9 @@ async def protected(storage: SqliteStorage, client: Docker):
             hub=SqliteHub(storage, look_again=0.01),
             session_store=SqliteSessionStore(storage),
             auth=authentication(
-                settings("--jwt-psk", KEY, "--jwt-audience", AUDIENCE, "--jwt-issuer", ISSUER)
+                settings(
+                    "--jwt-psk", KEY, "--jwt-audience", AUDIENCE, "--jwt-issuer", ISSUER, *arguments
+                )
             ),
         ),
         client,
@@ -95,8 +103,23 @@ async def protected(storage: SqliteStorage, client: Docker):
     site = web.TCPSite(runner, "127.0.0.1", 0)
     await site.start()
     host, port = runner.addresses[0]
+    return runner, f"http://{host}:{port}/mcp"
+
+
+@pytest.fixture
+async def protected(storage: SqliteStorage, client: Docker):
+    runner, url = await serve(storage, client)
     try:
-        yield f"http://{host}:{port}/mcp"
+        yield url
+    finally:
+        await runner.cleanup()
+
+
+@pytest.fixture
+async def with_query_token(storage: SqliteStorage, client: Docker):
+    runner, url = await serve(storage, client, "--jwt-query-token")
+    try:
+        yield url
     finally:
         await runner.cleanup()
 
@@ -113,3 +136,24 @@ async def test_a_token_opens_the_tools(protected: str):
         async with Client(protected, MODERN, session=http) as remote:
             await remote.initialize()
             assert "containers" in {tool.name for tool in await remote.list_tools()}
+
+
+async def test_the_query_argument_carries_the_token(with_query_token: str):
+    async with ClientSession() as http:
+        async with http.post(f"{with_query_token}?token={token()}", json={}) as response:
+            assert response.status != 401
+        async with http.post(f"{with_query_token}?token=not-a-token", json={}) as response:
+            assert response.status == 401
+
+
+async def test_the_header_wins_over_the_query_argument(with_query_token: str):
+    headers = {"Authorization": "Bearer not-a-token"}
+    async with ClientSession(headers=headers) as http:
+        async with http.post(f"{with_query_token}?token={token()}", json={}) as response:
+            assert response.status == 401
+
+
+async def test_the_query_argument_is_ignored_by_default(protected: str):
+    async with ClientSession() as http:
+        async with http.post(f"{protected}?token={token()}", json={}) as response:
+            assert response.status == 401
