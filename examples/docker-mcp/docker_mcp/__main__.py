@@ -11,7 +11,6 @@ import argclass
 from aiodocker import Docker
 from aiohttp import web
 from aiohttp_tiny_mcp import Endpoint, Principal, Registry, run_stdio
-from aiohttp_tiny_mcp.access_log import install_token_filter
 from aiohttp_tiny_mcp.auth import Authorization
 from aiohttp_tiny_mcp.auth.jwt import HMACJWTVerifier
 from aiohttp_tiny_mcp.console import Console
@@ -160,9 +159,6 @@ def authentication(parser: Parser) -> Authorization | None:
     if not parser.jwt.audience:
         raise SystemExit("--jwt-audience is required with a pre-shared key")
     verifier = HMACJWTVerifier(key, issuer=parser.jwt.issuer, audience=parser.jwt.audience)
-    if parser.jwt.query_token:
-        # The library's filter keeps the token out of the aiohttp access log.
-        install_token_filter()
     return QueryToken(verifier, resource=parser.jwt.audience, query=parser.jwt.query_token)
 
 
