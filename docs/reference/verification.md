@@ -20,6 +20,13 @@ requests; each adapter supplies its expectations.
   irrelevant header noise.
 - **Listings and cache hints.** Listings reflect current declarations. Cacheable
   results carry revision-specific freshness fields.
+- **Against the published types.** Each adapter's method map is compared, per
+  revision, with the client-to-server methods of the `mcp-types` distribution,
+  and the advertised capability names and sub-fields are validated against that
+  revision's capability model. A method this package does not decode is listed
+  with its reason, and the comparison uses set equality, so a reason that stops
+  applying also fails. A revision the source adds fails the suite until the
+  adapters follow. `mcp-types` is a test dependency; nothing in `src` imports it.
 
 Cross-adapter, the same registry called through every revision produces
 semantically equivalent results, and batch input is accepted by exactly the
@@ -111,6 +118,13 @@ Skills loader are available; see [Extensions and skills](../guide/extensions.md)
 That API does not implement Tasks lifecycle rules or MCP Apps rendering.
 
 **Sampling and roots APIs.** These do not have built-in server handler APIs.
+
+**Inbound progress and roots notifications.** The server emits
+`notifications/progress` and never consumes one. `notifications/roots/list_changed`
+has nothing to invalidate while there is no roots API. Both are declared
+differences in the comparison against the published types.
+`notifications/cancelled` is consumed, but by the transport before the adapter,
+so it is declared there too.
 
 ## Extension coverage
 
