@@ -7,7 +7,7 @@ dependencies = [
     "aiodocker>=0.24",
     # The sessions and events live in one SQLite file; the package brings the
     # backends for it.
-    "aiohttp-tiny-mcp[sqlite]",
+    "aiohttp-tiny-mcp[sqlite,jwt]",
     "argclass>=1.0",
 ]
 
