@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from dataclasses import dataclass
 from pathlib import Path
 
 import argclass
 from aiodocker import Docker
 from aiohttp import web
-from aiohttp_tiny_mcp import Endpoint, Registry, run_stdio
+from aiohttp_tiny_mcp import Endpoint, Principal, Registry, run_stdio
 from aiohttp_tiny_mcp.auth import Authorization
 from aiohttp_tiny_mcp.auth.jwt import HMACJWTVerifier
 from aiohttp_tiny_mcp.console import Console
@@ -20,6 +21,26 @@ from .events import watch
 from .server import build
 
 log = logging.getLogger("docker_mcp")
+
+
+@dataclass(frozen=True)
+class QueryToken(Authorization):
+    """Bearer authentication that also reads the `token` query argument.
+
+    A client that cannot send a header sends the token in the URL instead. The
+    URL is then a credential: it reaches browser history, the client's saved
+    settings and every log that keeps the query. The header wins where both
+    are present.
+    """
+
+    query: bool = False
+
+    async def authenticate(self, request: web.Request) -> Principal:
+        if self.query and "Authorization" not in request.headers:
+            supplied = request.query.get("token", "")
+            if supplied:
+                return await self.principal(f"Bearer {supplied}")
+        return await super().authenticate(request)
 
 
 class JWT(argclass.Group):
@@ -42,6 +63,15 @@ class JWT(argclass.Group):
     issuer: str = argclass.Argument(
         default="",
         help="Required 'iss' claim. Empty accepts a token from any issuer.",
+    )
+    query_token: bool = argclass.Argument(
+        default=False,
+        action=argclass.Actions.STORE_TRUE,
+        help=(
+            "Also accept the token as the 'token' query argument, for a client "
+            "that sends no header. The access log masks that argument; the URL "
+            "still reaches browser history and client settings."
+        ),
     )
 
 
@@ -129,7 +159,7 @@ def authentication(parser: Parser) -> Authorization | None:
     if not parser.jwt.audience:
         raise SystemExit("--jwt-audience is required with a pre-shared key")
     verifier = HMACJWTVerifier(key, issuer=parser.jwt.issuer, audience=parser.jwt.audience)
-    return Authorization(verifier, resource=parser.jwt.audience)
+    return QueryToken(verifier, resource=parser.jwt.audience, query=parser.jwt.query_token)
 
 
 def assemble(parser: Parser) -> tuple[Registry, SqliteStorage, Docker]:

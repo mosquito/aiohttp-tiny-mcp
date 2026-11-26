@@ -166,6 +166,18 @@ token = jwt.encode(
 assert (await auth.principal(f"Bearer {token}")).subject == "laptop"
 ```
 
+`--jwt-query-token` also accepts the token as the `token` query argument, for
+a client that sends no header:
+
+```
+https://docker.example.com/mcp?token=<token>
+```
+
+The header wins where both are present. The URL is then a credential: it
+reaches browser history, the client's saved settings and every log that keeps
+the query, so the option is off by default. The endpoint already masks the
+argument in the aiohttp access log, which writes `token=[REDACTED]`.
+
 A token expires, and the server rejects one without `exp`. Revocation is
 collective: replace the key and restart the server. This is a credential on
 the wire, so terminate TLS in front of the server. The policy protects the MCP
