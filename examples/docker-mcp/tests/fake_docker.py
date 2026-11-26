@@ -152,7 +152,12 @@ class FakeDocker:
         }
         self.images = list(IMAGES)
         self.networks = list(NETWORKS)
-        self.volumes = list(VOLUMES)
+        self.volumes = [dict(volume) for volume in VOLUMES]
+        self.inspect_overrides: dict[str, dict[str, Any]] = {}
+        self.created_volumes: list[dict[str, Any]] = []
+        self.volume_files: dict[str, dict[str, bytes]] = {}
+        self.archive_reads: list[tuple[str, str]] = []
+        self.restarted: list[str] = []
         self.removed: list[str] = []
         self.removed_images: list[str] = []
         self.pruned: list[str] = []
@@ -229,8 +234,11 @@ class FakeDocker:
         app.router.add_delete("/{api:v[0-9.]+}/images/{name:.+}", self.remove_image)
         app.router.add_get("/{api:v[0-9.]+}/networks", self.list_networks)
         app.router.add_post("/{api:v[0-9.]+}/networks/prune", self.prune_networks)
+        app.router.add_get("/{api:v[0-9.]+}/networks/{name}", self.inspect_network)
         app.router.add_get("/{api:v[0-9.]+}/volumes", self.list_volumes)
         app.router.add_post("/{api:v[0-9.]+}/volumes/prune", self.prune_volumes)
+        app.router.add_post("/{api:v[0-9.]+}/volumes/create", self.create_volume)
+        app.router.add_get("/{api:v[0-9.]+}/volumes/{name}", self.inspect_volume)
         app.router.add_get("/{api:v[0-9.]+}/events", self.event_stream)
         return app
 
@@ -253,7 +261,9 @@ class FakeDocker:
 
     async def inspect(self, request: web.Request) -> web.Response:
         identity = self.resolve(request)
-        return web.json_response(inspected(self.containers[identity]))
+        return web.json_response(
+            inspected(self.containers[identity], **self.inspect_overrides.get(identity, {}))
+        )
 
     async def container_logs(self, request: web.Request) -> web.StreamResponse:
         """Filter one log stream by stdout/stderr, since, and tail, as Docker does."""
@@ -316,7 +326,11 @@ class FakeDocker:
     async def get_archive(self, request: web.Request) -> web.Response:
         identity = self.resolve(request)
         path = request.query.get("path", "")
-        held = self.files.get(identity, {})
+        self.archive_reads.append((identity, path))
+        held = dict(self.files.get(identity, {}))
+        for mount in self.inspect_overrides.get(identity, {}).get("Mounts", []):
+            for name, content in self.volume_files.get(mount.get("Name"), {}).items():
+                held[mount["Destination"].rstrip("/") + name] = content
         if path not in held and any(name.startswith(path.rstrip("/") + "/") for name in held):
             return web.Response(
                 body=self.directory_archive(held, path), content_type="application/x-tar"
@@ -360,7 +374,15 @@ class FakeDocker:
                 handle = archive.extractfile(entry)
                 content = handle.read() if handle is not None else b""
                 path = f"{directory}/{entry.name}"
-                self.files.setdefault(identity, {})[path] = content
+                for mount in self.inspect_overrides.get(identity, {}).get("Mounts", []):
+                    target = mount["Destination"].rstrip("/")
+                    if mount.get("Name") and path.startswith(target + "/"):
+                        self.volume_files.setdefault(mount["Name"], {})[path[len(target) :]] = (
+                            content
+                        )
+                        break
+                else:
+                    self.files.setdefault(identity, {})[path] = content
                 self.written.append((identity, path, content))
         return web.Response(status=200)
 
@@ -373,6 +395,20 @@ class FakeDocker:
             identity, name, image=str(config.get("Image", "")), state="created"
         )
         self.files[identity] = {}
+        host = config.get("HostConfig", {})
+        self.inspect_overrides[identity] = {
+            "HostConfig": host,
+            "Mounts": [
+                {
+                    "Type": mount["Type"],
+                    "Name": mount.get("Source", ""),
+                    "Source": f"/var/lib/docker/volumes/{mount.get('Source', '')}/_data",
+                    "Destination": mount["Target"],
+                }
+                for mount in host.get("Mounts", [])
+            ],
+            "NetworkSettings": {"Networks": {host.get("NetworkMode", "bridge"): {}}},
+        }
         return web.json_response({"Id": identity, "Warnings": []})
 
     async def start(self, request: web.Request) -> web.Response:
@@ -389,6 +425,7 @@ class FakeDocker:
 
     async def restart(self, request: web.Request) -> web.Response:
         identity = self.resolve(request)
+        self.restarted.append(identity)
         self.containers[identity]["State"] = "running"
         return web.Response(status=204)
 
@@ -471,6 +508,32 @@ class FakeDocker:
 
     async def list_volumes(self, request: web.Request) -> web.Response:
         return web.json_response({"Volumes": self.volumes})
+
+    async def inspect_volume(self, request: web.Request) -> web.Response:
+        for volume in self.volumes:
+            if volume["Name"] == request.match_info["name"]:
+                return web.json_response(volume)
+        raise web.HTTPNotFound(
+            text='{"message": "No such volume"}', content_type="application/json"
+        )
+
+    async def create_volume(self, request: web.Request) -> web.Response:
+        config = await request.json()
+        self.created_volumes.append(config)
+        for volume in self.volumes:
+            if volume["Name"] == config["Name"]:
+                return web.json_response(volume)
+        volume = {"Name": config["Name"], "Driver": config.get("Driver", "local"), "Options": {}}
+        self.volumes.append(volume)
+        return web.json_response(volume)
+
+    async def inspect_network(self, request: web.Request) -> web.Response:
+        for network in self.networks:
+            if request.match_info["name"] in (network["Name"], network["Id"]):
+                return web.json_response(network)
+        raise web.HTTPNotFound(
+            text='{"message": "No such network"}', content_type="application/json"
+        )
 
     def pruned_reply(self, what: str, key: str, names: list[str]) -> web.Response:
         self.pruned.append(what)

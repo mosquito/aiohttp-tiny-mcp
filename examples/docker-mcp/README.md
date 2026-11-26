@@ -27,6 +27,60 @@ DOCKER_MCP_PORT=9000 DOCKER_MCP_STATE=/tmp/state.sqlite3 uv run docker-mcp
 `--help` lists everything, including which environment variable each setting
 reads.
 
+## Unprivileged mode
+
+Enable runtime checks for host access with `--unprivileged`:
+
+```bash
+uv run docker-mcp --unprivileged
+uv run docker-mcp --unprivileged --network sandbox
+```
+
+The `create` tool hides and rejects `network`. Its `volumes` argument accepts
+only named volumes, such as `data:/data`, `data:/data:rw` or `data:/data:ro`.
+Host paths, Docker socket mounts, extra mount flags and unknown creation
+arguments are rejected. Missing named volumes are created with the `local`
+driver. Existing volumes must use `local` without driver options, because
+[volume options can mount host paths](https://docs.docker.com/engine/storage/volumes/).
+Named volumes persist after their containers are removed.
+
+For example, call `create` with:
+
+```json
+{"image": "redis:7-alpine", "name": "cache", "volumes": ["cache-data:/data"]}
+```
+
+Before `read`, `write`, `exec`, `start` or `restart`, the server inspects the
+target container. It rejects host mounts, extra capabilities or devices,
+shared host namespaces, custom runtimes and relaxed security settings.
+New containers use `no-new-privileges` and the default bridge network unless
+the operator selects another local bridge network or `none`.
+Published ports remain available.
+
+Equivalent settings are `DOCKER_MCP_UNPRIVILEGED=true` or `unprivileged=true`
+in the config file. Python callers can use `build(registry, client, unprivileged=True)`.
+
+This mode restricts Docker configuration exposed through MCP. It does not
+filter container network traffic, provide per-user volume isolation or
+protect against Docker/kernel vulnerabilities and concurrent changes by
+another Docker administrator. Use a dedicated daemon for untrusted workloads.
+
+## Fixed network
+
+`--network NAME` works independently of `--unprivileged`:
+
+```bash
+uv run docker-mcp --network sandbox
+```
+
+The network must already exist. The server uses it for new containers,
+hides and rejects `create.network`, omits the `networks` tool and removes
+`networks` from `prune.what`. This option does not enable unprivileged mode.
+
+Equivalent settings are `DOCKER_MCP_NETWORK=sandbox` or `network=sandbox`
+in the config file. Python callers can use `build(registry, client, network="sandbox")`.
+Add `--unprivileged` separately when both restrictions are needed.
+
 ## What it offers
 
 Enough on its own. An agent given this server and nothing else can find a
@@ -103,8 +157,8 @@ container reads its own log -- which a wrapper hid.
 to, a template cannot be listed at all, and a client only discovers that
 difference by failing.
 
-`server.py` only registers them, which makes it an inventory rather than a
-place where behaviour hides:
+`server.py` registers handlers and selects deployment restrictions.
+`safety.py` checks Docker configuration at runtime in unprivileged mode:
 
 <!-- name: async test_readme_inventory -->
 ```python
@@ -166,8 +220,8 @@ be forgotten before the next call, which is worse than never offering it.
 `2025-11-25` and `2025-06-18`, and the tool call itself on `2025-03-26`. The
 handler says one line and knows none of that.
 
-**Failures are said in words, not status numbers.** `errors.py` is the only
-place that sees a `DockerError`. A command sent to a stopped container came
+**Failures are said in words, not status numbers.** `errors.py` translates
+Docker failures. A command sent to a stopped container came
 back as `DockerError: [409] container 3156cbe0b5f6... is not running`, which
 names an id nobody typed and does not say what to do:
 

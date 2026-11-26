@@ -11,7 +11,7 @@ teaches people to stop reading questions.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from typing import Any
 
 from aiodocker import Docker
@@ -21,7 +21,14 @@ from docker_mcp import daemon
 from docker_mcp.consent import Policy, confirm, refusal
 from docker_mcp.errors import Conflict, clear
 from docker_mcp.events import publish
-from docker_mcp.models import Created, CreateRequest, PullRequest
+from docker_mcp.models import (
+    Created,
+    CreateRequest,
+    FixedNetworkCreateRequest,
+    PullRequest,
+    UnprivilegedCreateRequest,
+)
+from docker_mcp.safety import check_container, configure_unprivileged
 
 from .pull import pull
 from .results import settled
@@ -113,30 +120,44 @@ async def create(args: CreateRequest, client: Docker, ex: Exchange, policy: Poli
     Asks first only where the policy says to: creating something is undone
     by removing it, so the default does not interrupt for this.
     """
+    return await create_container(args, client, ex, policy)
+
+
+async def create_container(
+    args: CreateRequest, client: Docker, ex: Exchange, policy: Policy, *, unprivileged: bool = False
+) -> Created:
+    """Create a container after checking deployment restrictions."""
     if not await confirm(ex, policy, "create", args.image, creation(args)):
         raise Conflict(f"not created: {refusal(ex)}")
+
+    config = configuration(
+        image=args.image,
+        command=args.command,
+        environment=args.environment,
+        ports=args.ports,
+        volumes=args.volumes,
+        network=args.network,
+        restart=args.restart,
+        workdir=args.workdir,
+        user=args.user,
+    )
+    if unprivileged:
+        await configure_unprivileged(client, args, config)
 
     held = {tag for raw in await daemon.images(client) for tag in raw.get("RepoTags") or []}
     if args.pull == "always" or (args.pull == "missing" and args.image not in held):
         await pull(PullRequest(image=args.image), client, ex)
 
     async with clear("creating the container", subject=args.name or ""):
-        made = await client.containers.create(
-            dict(
-                configuration(
-                    image=args.image,
-                    command=args.command,
-                    environment=args.environment,
-                    ports=args.ports,
-                    volumes=args.volumes,
-                    network=args.network,
-                    restart=args.restart,
-                    workdir=args.workdir,
-                    user=args.user,
-                ),
-            ),
-            name=args.name,
-        )
+        made = await client.containers.create(config, name=args.name)
+    if unprivileged:
+        try:
+            await check_container(client, made)
+        except Exception as error:
+            raise Conflict(
+                f"container {made.id} was created but refused by unprivileged mode; "
+                f"it was not started: {error}"
+            ) from error
     note = None
     if args.start:
         await made.start()
@@ -157,3 +178,33 @@ async def create(args: CreateRequest, client: Docker, ex: Exchange, policy: Poli
         warnings=[str(item) for item in raw.get("Warnings") or []],
         note=note,
     )
+
+
+def fixed_network_create(network: str) -> Callable[..., Awaitable[Created]]:
+    """Bind operator settings without exposing them as tool arguments."""
+
+    async def create_fixed_network(
+        args: FixedNetworkCreateRequest, client: Docker, ex: Exchange, policy: Policy
+    ) -> Created:
+        """Create a container on the server's fixed network; callers cannot change the network."""
+        request = CreateRequest(**args.model_dump(), network=network)
+        return await create_container(request, client, ex, policy)
+
+    return create_fixed_network
+
+
+def unprivileged_create(network: str | None) -> Callable[..., Awaitable[Created]]:
+    """Bind the operator's network for unprivileged container creation."""
+
+    async def create_unprivileged(
+        args: UnprivilegedCreateRequest, client: Docker, ex: Exchange, policy: Policy
+    ) -> Created:
+        """Create an isolated container with optional persistent named volumes.
+
+        Volumes use name:/path[:ro|rw]. Host paths and network overrides are forbidden.
+        Missing volumes use the local driver without mount options.
+        """
+        request = CreateRequest(**args.model_dump(), network=network)
+        return await create_container(request, client, ex, policy, unprivileged=True)
+
+    return create_unprivileged
