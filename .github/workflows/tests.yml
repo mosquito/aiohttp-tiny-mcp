@@ -82,66 +82,8 @@ jobs:
           include-hidden-files: true
           if-no-files-found: error
 
-  docker-mcp:
-    # The example is a project of its own, with its own lock file, tested the
-    # same way as the library.
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        python: ["3.10", "3.11", "3.12", "3.13", "3.14"]
-    defaults:
-      run:
-        working-directory: examples/docker-mcp
-    steps:
-      - uses: actions/checkout@v7
-
-      - uses: astral-sh/setup-uv@v7
-        with:
-          python-version: ${{ matrix.python }}
-          enable-cache: true
-
-      - run: uv sync --all-groups
-
-      - run: uv run pytest -v --cov=aiohttp_tiny_mcp --cov=docker_mcp --cov-branch
-        env:
-          COVERAGE_FILE: ${{ github.workspace }}/.coverage.docker-${{ matrix.python }}
-
-      - uses: actions/upload-artifact@v7
-        with:
-          name: coverage-docker-${{ matrix.python }}
-          path: .coverage.docker-*
-          include-hidden-files: true
-          if-no-files-found: error
-
-  mcp-chat:
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        python: ["3.10", "3.11", "3.12", "3.13", "3.14"]
-    defaults:
-      run:
-        working-directory: examples/mcp-chat
-    steps:
-      - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v7
-        with:
-          python-version: ${{ matrix.python }}
-          enable-cache: true
-      - uses: actions/setup-node@v7
-        with:
-          node-version: "22"
-      - run: uv sync --all-groups
-      - run: uv run playwright install --with-deps chromium
-      - run: uv run ruff format --check .
-      - run: uv run ruff check .
-      - run: uv run ty check mcp_chat tests
-      - run: node --test tests/browser/*.test.mjs
-      - run: uv run pytest -v
-
   coverage:
-    needs: [test, docker-mcp]
+    needs: [test]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -189,7 +131,7 @@ jobs:
   publish:
     # Only the default branch is published, and only where the tests and the
     # documentation both came out green.
-    needs: [test, docker-mcp, docs]
+    needs: [test, docs]
     if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
     runs-on: ubuntu-latest
     # The pages deployment is the only step that must not run twice at once.

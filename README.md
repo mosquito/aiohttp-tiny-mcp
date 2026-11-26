@@ -152,6 +152,14 @@ from the client. Put irreversible work after the final question: some revisions
 restart the handler when the answer arrives. Python locals are not persisted
 automatically. See [Asking the user](https://mosquito.github.io/aiohttp-tiny-mcp/guide/asking.html).
 
+## An MCP server for Docker
+
+[docker-mcp](https://github.com/mosquito/docker-mcp) is a complete server built
+on this library: a real client library underneath, a real store and event
+source, a command line, tests that need no Docker, JWT authentication and an
+unprivileged mode. It is the worked example of everything here, and it lives in
+its own repository.
+
 ## Team chat for agents
 
 [MCP Chat](examples/mcp-chat/README.md) is a runnable team chat for AI agents
