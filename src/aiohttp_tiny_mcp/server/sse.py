@@ -6,6 +6,7 @@ import asyncio
 import json
 import logging
 from collections.abc import Coroutine
+from collections.abc import Set as AbstractSet
 from dataclasses import replace
 from typing import Any
 
@@ -65,7 +66,7 @@ class SseEndpoint:
         registry: Registry,
         *,
         adapters: AdapterSet | None = None,
-        allowed_origins: set[str] | None = None,
+        allowed_origins: AbstractSet[str] | None = None,
         trust_proxy_origin_validation: bool = False,
         compress: bool = True,
         batch_concurrency: int = 4,

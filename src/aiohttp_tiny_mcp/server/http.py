@@ -6,6 +6,7 @@ import asyncio
 import logging
 import re
 from collections.abc import Mapping
+from collections.abc import Set as AbstractSet
 from dataclasses import replace
 from functools import cached_property, partial
 from hashlib import sha256
@@ -101,7 +102,7 @@ class Endpoint:
         registry: Registry,
         *,
         adapters: AdapterSet | None = None,
-        allowed_origins: set[str] | None = None,
+        allowed_origins: AbstractSet[str] | None = None,
         trust_proxy_origin_validation: bool = False,
         compress: bool = True,
         batch_concurrency: int = 4,

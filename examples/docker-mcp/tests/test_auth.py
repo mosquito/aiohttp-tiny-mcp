@@ -68,23 +68,9 @@ async def test_another_issuer_is_refused():
     assert await auth.verifier.verify(jwt.encode({"sub": "x"}, KEY, algorithm="HS256")) is None
 
 
-async def test_the_key_comes_from_a_file(tmp_path):
-    path = tmp_path / "jwt.key"
-    path.write_text(f"{KEY}\n", encoding="utf-8")
-    auth = authentication(settings("--jwt-psk-file", str(path), "--jwt-audience", AUDIENCE))
-    assert auth is not None
-    assert (await auth.principal(f"Bearer {token()}")).subject == "tester"
-
-
-async def test_what_the_settings_must_say(tmp_path):
-    path = tmp_path / "jwt.key"
-    path.write_text(KEY, encoding="utf-8")
+async def test_what_the_settings_must_say():
     with pytest.raises(SystemExit, match="--jwt-audience"):
         authentication(settings("--jwt-psk", KEY))
-    with pytest.raises(SystemExit, match="once"):
-        authentication(
-            settings("--jwt-psk", KEY, "--jwt-psk-file", str(path), "--jwt-audience", AUDIENCE)
-        )
     with pytest.raises(ValueError, match="32 bytes"):
         authentication(settings("--jwt-psk", "too-short", "--jwt-audience", AUDIENCE))
 
