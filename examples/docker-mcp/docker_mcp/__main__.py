@@ -10,6 +10,8 @@ import argclass
 from aiodocker import Docker
 from aiohttp import web
 from aiohttp_tiny_mcp import Endpoint, Registry, run_stdio
+from aiohttp_tiny_mcp.auth import Authorization
+from aiohttp_tiny_mcp.auth.jwt import HMACJWTVerifier
 from aiohttp_tiny_mcp.console import Console
 from aiohttp_tiny_mcp.storage.sqlite import SqliteHub, SqliteSessionStore, SqliteStorage
 
@@ -18,6 +20,33 @@ from .events import watch
 from .server import build
 
 log = logging.getLogger("docker_mcp")
+
+
+class JWT(argclass.Group):
+    """HS256 JWT authentication with a pre-shared key."""
+
+    psk: str = argclass.Secret(
+        default="",
+        help=(
+            "Pre-shared key, at least 32 bytes. Prefer the environment variable "
+            "or --jwt-psk-file: another user on this machine can read a command line."
+        ),
+    )
+    psk_file: Path | None = argclass.Argument(
+        default=None,
+        help="File holding the pre-shared key alone. Surrounding blank space is ignored.",
+    )
+    audience: str = argclass.Argument(
+        default="",
+        help=(
+            "Public URL of this endpoint. A token must name it in 'aud', and it is "
+            "published as the protected resource. Required with a pre-shared key."
+        ),
+    )
+    issuer: str = argclass.Argument(
+        default="",
+        help="Required 'iss' claim. Empty accepts a token from any issuer.",
+    )
 
 
 class Parser(argclass.Parser):
@@ -42,6 +71,10 @@ class Parser(argclass.Parser):
     stdio: bool = argclass.Argument(
         default=False,
         help="Talk over standard input and output instead of listening on a port.",
+    )
+    jwt = JWT(
+        title="JWT authentication",
+        description="Verify an HS256 JWT on every HTTP request. Without a key, nothing is asked.",
     )
     host: str = argclass.Argument(default="127.0.0.1", help="Address to listen on.")
     port: int = argclass.Argument(default=8080, help="Port to listen on.")
@@ -73,6 +106,25 @@ class Parser(argclass.Parser):
     )
 
 
+def authentication(parser: Parser) -> Authorization | None:
+    """Build the Bearer policy from the pre-shared key, or nothing without a key.
+
+    The audience is the endpoint's public URL. It is what a token must name, and
+    what the endpoint publishes as its protected resource.
+    """
+    key = str(parser.jwt.psk)
+    if parser.jwt.psk_file is not None:
+        if key:
+            raise SystemExit("pass the pre-shared key once: --jwt-psk or --jwt-psk-file")
+        key = parser.jwt.psk_file.expanduser().read_text(encoding="utf-8").strip()
+    if not key:
+        return None
+    if not parser.jwt.audience:
+        raise SystemExit("--jwt-audience is required with a pre-shared key")
+    verifier = HMACJWTVerifier(key, issuer=parser.jwt.issuer, audience=parser.jwt.audience)
+    return Authorization(verifier, resource=parser.jwt.audience)
+
+
 def assemble(parser: Parser) -> tuple[Registry, SqliteStorage, Docker]:
     """Build the server from settings, independently of command-line parsing."""
     storage = SqliteStorage(parser.state)
@@ -83,6 +135,7 @@ def assemble(parser: Parser) -> tuple[Registry, SqliteStorage, Docker]:
         hub=SqliteHub(storage),
         session_store=SqliteSessionStore(storage),
         session_ttl_seconds=parser.session_ttl,
+        auth=authentication(parser),
     )
     return (
         build(
@@ -148,6 +201,9 @@ async def serve(parser: Parser) -> None:
 
 async def stdio(parser: Parser) -> None:
     registry, storage, client = assemble(parser)
+    if registry.auth is not None:
+        # One process, one caller, no HTTP request to carry a token.
+        log.warning("the pre-shared key authenticates HTTP requests only; stdio ignores it")
     tasks = await background(registry, storage, client)
     try:
         await run_stdio(registry)

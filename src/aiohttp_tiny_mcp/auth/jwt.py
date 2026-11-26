@@ -41,11 +41,11 @@ class JWTVerifier:
     audience: str = ""
     principal: Callable[[Mapping[str, Any]], Principal] = principal_from_claims
 
-    async def verify(self, credentials: str) -> Principal | None:
+    async def verify(self, token: str) -> Principal | None:
         """Check the signature, required expiry, and configured issuer and audience."""
         try:
             claims = jwt.decode(
-                credentials,
+                token,
                 self.key,
                 algorithms=self.algorithms,
                 issuer=self.issuer or None,

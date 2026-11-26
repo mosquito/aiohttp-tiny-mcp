@@ -81,6 +81,80 @@ Equivalent settings are `DOCKER_MCP_NETWORK=sandbox` or `network=sandbox`
 in the config file. Python callers can use `build(registry, client, network="sandbox")`.
 Add `--unprivileged` separately when both restrictions are needed.
 
+## Authentication
+
+`--jwt-psk` verifies an HS256 JWT on every HTTP request. The audience is this
+endpoint's public URL: a token must name it, and the endpoint publishes it as
+its protected resource.
+
+```bash
+uv run docker-mcp --jwt-psk-file /etc/docker-mcp/jwt.key \
+    --jwt-audience https://docker.example.com/mcp \
+    --jwt-issuer https://docker.example.com
+```
+
+The key needs at least 32 bytes. `DOCKER_MCP_JWT_PSK` or `--jwt-psk-file`
+keep it out of the command line, which another user on the machine can read.
+The key is a secret argument: its `repr` is `******`, so a log of the settings
+does not hold it. `--jwt-issuer` is optional; an empty issuer accepts a token
+from any issuer.
+
+These four settings are one group, and the config file holds them in one section:
+
+```ini
+[jwt]
+psk_file = /etc/docker-mcp/jwt.key
+audience = https://docker.example.com/mcp
+issuer = https://docker.example.com
+```
+
+Mint a token with the same key, and send it as `Authorization: Bearer <token>`:
+
+<!-- name: async test_readme_jwt -->
+```python
+import time
+
+import jwt
+
+from docker_mcp.__main__ import Parser, authentication
+
+key = "replace-this-example-key-with-32-random-bytes"
+parser = Parser()
+parser.parse_args(
+    [
+        "--jwt-psk",
+        key,
+        "--jwt-audience",
+        "https://docker.example.com/mcp",
+        "--jwt-issuer",
+        "https://docker.example.com",
+    ]
+)
+auth = authentication(parser)
+
+token = jwt.encode(
+    {
+        "sub": "laptop",
+        "iss": "https://docker.example.com",
+        "aud": "https://docker.example.com/mcp",
+        "exp": time.time() + 86400,
+    },
+    key,
+    algorithm="HS256",
+)
+assert (await auth.principal(f"Bearer {token}")).subject == "laptop"
+```
+
+A token expires, and the server rejects one without `exp`. Revocation is
+collective: replace the key and restart the server. This is a credential on
+the wire, so terminate TLS in front of the server. The policy protects the MCP
+route; the console page itself stays public and asks for the token in its
+dialog. `--stdio` ignores the key, because one process serves one caller.
+
+Other deployments need other identity: `Registry(auth=...)` also takes Basic
+authentication, an OAuth protected resource, or a policy of your own. See
+[authentication](https://mosquito.github.io/aiohttp-tiny-mcp/guide/auth.html).
+
 ## What it offers
 
 Enough on its own. An agent given this server and nothing else can find a
