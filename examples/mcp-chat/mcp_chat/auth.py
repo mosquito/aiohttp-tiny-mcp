@@ -150,9 +150,15 @@ def web_principal(claims: Mapping[str, Any]) -> Principal:
     return principal
 
 
-async def require_admin(request: web.Request, secret: str | None) -> None:
+async def require_admin(request: web.Request, secret: str | None) -> Principal | None:
+    """Accept the admin cookie, and return the principal it carries.
+
+    The result is `None` when the server runs without a secret, because then
+    no cookie is read and no expiry applies. A caller that holds a request
+    open uses `Principal.expires_at` to stop at the exact second.
+    """
     if secret is None:
-        return
+        return None
     verifier = HMACJWTVerifier(
         secret, issuer=ISSUER, audience=WEB_AUDIENCE, principal=web_principal
     )
@@ -160,6 +166,7 @@ async def require_admin(request: web.Request, secret: str | None) -> None:
     principal = await verifier.verify(cookie) if cookie else None
     if principal is None or principal.expired:
         raise web.HTTPUnauthorized(text="Sign in with the server secret.", headers=NO_STORE)
+    return principal
 
 
 async def auth_arguments(request: web.Request, fields: frozenset[str]) -> dict[str, Any]:

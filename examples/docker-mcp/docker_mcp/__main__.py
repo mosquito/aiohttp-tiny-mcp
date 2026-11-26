@@ -31,6 +31,14 @@ class Parser(argclass.Parser):
         default="",
         help="Where the daemon is. Empty means the usual socket for this machine.",
     )
+    unprivileged: bool = argclass.Argument(
+        default=False,
+        help="Forbid host mounts and privileged container access; allow named local volumes.",
+    )
+    network: str = argclass.Argument(
+        default="",
+        help="Fix the container network and disable network management tools.",
+    )
     stdio: bool = argclass.Argument(
         default=False,
         help="Talk over standard input and output instead of listening on a port.",
@@ -76,7 +84,17 @@ def assemble(parser: Parser) -> tuple[Registry, SqliteStorage, Docker]:
         session_store=SqliteSessionStore(storage),
         session_ttl_seconds=parser.session_ttl,
     )
-    return build(registry, client, Policy(parser.confirm)), storage, client
+    return (
+        build(
+            registry,
+            client,
+            Policy(parser.confirm),
+            unprivileged=parser.unprivileged,
+            network=parser.network,
+        ),
+        storage,
+        client,
+    )
 
 
 async def background(registry: Registry, storage: SqliteStorage, client: Docker):

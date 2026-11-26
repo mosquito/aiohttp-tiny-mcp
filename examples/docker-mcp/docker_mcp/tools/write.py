@@ -20,6 +20,7 @@ from docker_mcp import daemon
 from docker_mcp.consent import Policy, confirm, refusal
 from docker_mcp.errors import Conflict, clear
 from docker_mcp.models import WriteRequest, Written
+from docker_mcp.safety import checked_container
 
 
 async def write_file(container: DockerContainer, path: str, content: bytes, mode: int) -> None:
@@ -65,3 +66,11 @@ async def write(args: WriteRequest, client: Docker, ex: Exchange, policy: Policy
     if str(state.get("Status")) == "running":
         note = "the container is running: restart it if it reads this file only at startup"
     return Written(container=args.container, path=args.path, size_bytes=len(content), note=note)
+
+
+async def write_unprivileged(
+    args: WriteRequest, client: Docker, ex: Exchange, policy: Policy
+) -> Written:
+    """Write a file after checking that the container has no host access."""
+    identity = await checked_container(client, args.container)
+    return await write(args.model_copy(update={"container": identity}), client, ex, policy)

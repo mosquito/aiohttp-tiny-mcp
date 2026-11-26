@@ -13,6 +13,7 @@ from aiodocker.containers import DockerContainer
 from docker_mcp import daemon
 from docker_mcp.errors import Conflict, clear
 from docker_mcp.models import FileContent, ReadRequest
+from docker_mcp.safety import checked_container
 
 MAX_FILE_BYTES = 256_000
 
@@ -60,3 +61,9 @@ async def read(args: ReadRequest, client: Docker) -> FileContent:
         text=text,
         truncated=cut,
     )
+
+
+async def read_unprivileged(args: ReadRequest, client: Docker) -> FileContent:
+    """Read a file after checking that the container has no host access."""
+    identity = await checked_container(client, args.container)
+    return await read(args.model_copy(update={"container": identity}), client)

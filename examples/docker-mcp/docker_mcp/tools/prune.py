@@ -13,7 +13,7 @@ from aiohttp_tiny_mcp import Exchange
 from docker_mcp.consent import Policy, confirm, refusal
 from docker_mcp.errors import Conflict, clear
 from docker_mcp.events import publish
-from docker_mcp.models import Pruned, PruneRequest
+from docker_mcp.models import FixedNetworkPruneRequest, Pruned, PruneRequest
 
 
 async def prune(args: PruneRequest, client: Docker, ex: Exchange, policy: Policy) -> Pruned:
@@ -51,3 +51,10 @@ async def prune(args: PruneRequest, client: Docker, ex: Exchange, policy: Policy
         removed=[item for item in removed if item],
         reclaimed_mb=round(float(reply.get("SpaceReclaimed", 0) or 0) / 1_000_000, 1),
     )
+
+
+async def prune_fixed_network(
+    args: FixedNetworkPruneRequest, client: Docker, ex: Exchange, policy: Policy
+) -> Pruned:
+    """Remove unused containers, images or volumes. The server's fixed network is preserved."""
+    return await prune(args, client, ex, policy)

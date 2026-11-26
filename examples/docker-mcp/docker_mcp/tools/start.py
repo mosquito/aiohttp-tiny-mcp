@@ -13,6 +13,7 @@ from aiohttp_tiny_mcp import Exchange
 from docker_mcp import daemon
 from docker_mcp.events import publish
 from docker_mcp.models import ContainerRef, Done
+from docker_mcp.safety import checked_container
 
 from .results import outcome, settled
 
@@ -27,3 +28,9 @@ async def start(args: ContainerRef, client: Docker, ex: Exchange) -> Done:
     await found.start()
     await publish(ex.registry, "docker://containers")
     return outcome(args.container, "start", await settled(found), "running")
+
+
+async def start_unprivileged(args: ContainerRef, client: Docker, ex: Exchange) -> Done:
+    """Start a container after checking that it has no host access."""
+    identity = await checked_container(client, args.container)
+    return await start(args.model_copy(update={"container": identity}), client, ex)

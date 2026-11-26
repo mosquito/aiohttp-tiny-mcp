@@ -18,6 +18,7 @@ from docker_mcp import daemon
 from docker_mcp.consent import Policy, confirm, only_reads, refusal
 from docker_mcp.errors import Conflict
 from docker_mcp.models import ExecRequest, Executed
+from docker_mcp.safety import checked_container
 
 MAX_OUTPUT = 60_000
 
@@ -86,3 +87,11 @@ async def exec(args: ExecRequest, client: Docker, ex: Exchange, policy: Policy) 
         truncated=len(stdout) > MAX_OUTPUT or len(stderr) > MAX_OUTPUT,
         timed_out=timed_out,
     )
+
+
+async def exec_unprivileged(
+    args: ExecRequest, client: Docker, ex: Exchange, policy: Policy
+) -> Executed:
+    """Run a command after checking that the container has no host access."""
+    identity = await checked_container(client, args.container)
+    return await exec(args.model_copy(update={"container": identity}), client, ex, policy)

@@ -6,9 +6,11 @@ DOCKER_MCP_DOCKER_URL=unix:///var/run/docker.sock pytest -k real
 from __future__ import annotations
 
 import os
+from uuid import uuid4
 
 import pytest
 from aiodocker import Docker
+from aiodocker.exceptions import DockerError
 from aiohttp_tiny_mcp import (
     Client,
     Endpoint,
@@ -160,4 +162,87 @@ async def test_a_real_container_can_be_lived_with_end_to_end(real_daemon):
             gone = await client.call_tool("remove", {"container": name})
             assert gone.content[0].text == f"removed {name}"
     finally:
+        await runner.cleanup()
+
+
+async def test_real_unprivileged_volume_survives_container_replacement(real_daemon):
+    from aiohttp import web
+
+    from docker_mcp.consent import Policy
+
+    name = f"docker-mcp-restricted-{uuid4().hex}"
+    volume_name = f"{name}-data"
+    network = await real_daemon.networks.create({"Name": name, "Driver": "bridge"})
+    registry = build(
+        Registry("docker", "0.1.0"),
+        real_daemon,
+        Policy("never"),
+        unprivileged=True,
+        network=name,
+    )
+    runner = web.AppRunner(Endpoint(registry).app("/mcp"))
+    created = []
+    try:
+        await runner.setup()
+        site = web.TCPSite(runner, "127.0.0.1", 0)
+        await site.start()
+        host, port = runner.addresses[0]
+        async with Client(f"http://{host}:{port}/mcp", MODERN) as client:
+            await client.initialize()
+            offered = {tool.name for tool in await client.list_tools()}
+            assert "networks" not in offered
+            for index in range(2):
+                container_name = f"{name}-{index}"
+                made = await client.call_tool(
+                    "create",
+                    {
+                        "image": "alpine:3.20",
+                        "name": container_name,
+                        "command": ["sleep", "60"],
+                        "volumes": [f"{volume_name}:/data"],
+                    },
+                )
+                created.append(container_name)
+                assert not made.is_error, made.content
+                if index == 0:
+                    written = await client.call_tool(
+                        "write",
+                        {"container": container_name, "path": "/data/note", "content": "persisted"},
+                    )
+                    assert not written.is_error, written.content
+                read = await client.call_tool(
+                    "read", {"container": container_name, "path": "/data/note"}
+                )
+                assert not read.is_error, read.content
+                assert read.structured_content["text"] == "persisted"
+                executed = await client.call_tool(
+                    "exec", {"container": container_name, "command": ["cat", "/data/note"]}
+                )
+                assert not executed.is_error, executed.content
+                assert executed.structured_content["stdout"] == "persisted"
+                for action in ("stop", "start", "restart"):
+                    arguments: dict[str, str | int] = {"container": container_name}
+                    if action != "start":
+                        arguments["seconds"] = 0
+                    result = await client.call_tool(action, arguments)
+                    assert not result.is_error, result.content
+                removed = await client.call_tool(
+                    "remove", {"container": container_name, "force": True, "volumes": True}
+                )
+                assert not removed.is_error, removed.content
+                created.remove(container_name)
+    finally:
+        for container_name in created:
+            try:
+                container = await real_daemon.containers.get(container_name)
+            except DockerError as error:
+                if error.status == 404:
+                    continue
+                raise
+            await container.delete(force=True, v=True)
+        volumes = await real_daemon.volumes.list()
+        if any(volume["Name"] == volume_name for volume in volumes.get("Volumes") or []):
+            volume = await real_daemon.volumes.get(volume_name)
+            await volume.delete()
+        await network.delete()
         await runner.cleanup()

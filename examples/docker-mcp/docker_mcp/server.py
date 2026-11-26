@@ -8,6 +8,8 @@ from aiohttp_tiny_mcp import Hint, Registry
 from . import prompts, resources, tools
 from .consent import Policy
 from .resources import templates
+from .tools.create import fixed_network_create, unprivileged_create
+from .tools.prune import prune_fixed_network
 
 INSTRUCTIONS = (
     "Inspect and control Docker. Start with `containers` to find what to act "
@@ -29,17 +31,33 @@ READS = Hint.READ_ONLY | Hint.IDEMPOTENT
 WATCHES = Hint.READ_ONLY
 
 
-def build(registry: Registry, client: Docker, policy: Policy | None = None) -> Registry:
+def build(
+    registry: Registry,
+    client: Docker,
+    policy: Policy | None = None,
+    *,
+    unprivileged: bool = False,
+    network: str | None = None,
+) -> Registry:
     """Register handlers and inject the Docker client and deployment confirmation policy."""
     registry.instructions = INSTRUCTIONS
     registry.provide_instance(client)
     registry.provide_instance(policy or Policy())
+    if unprivileged:
+        registry.instructions += (
+            "\n\nUnprivileged mode: host mounts and privileged containers are forbidden. "
+            "Use named local volumes for persistent data. The server selects the network."
+        )
+    if network:
+        registry.instructions += (
+            "\n\nThe network is fixed by the server; network management is disabled."
+        )
 
     registry.tool(tools.containers, annotations=READS)
     registry.tool(tools.container, annotations=READS)
-    registry.tool(tools.read, annotations=READS)
     registry.tool(tools.images, annotations=READS)
-    registry.tool(tools.networks, annotations=READS)
+    if not network:
+        registry.tool(tools.networks, annotations=READS)
     registry.tool(tools.volumes, annotations=READS)
     registry.tool(tools.info, annotations=READS)
     registry.tool(tools.logs, annotations=WATCHES)
@@ -47,15 +65,33 @@ def build(registry: Registry, client: Docker, policy: Policy | None = None) -> R
     registry.tool(tools.events, annotations=WATCHES)
     registry.tool(tools.wait, annotations=WATCHES)
 
-    registry.tool(tools.create, annotations=Hint.OPEN_WORLD)
-    registry.tool(tools.start, annotations=Hint.IDEMPOTENT)
+    if unprivileged:
+        registry.tool(unprivileged_create(network), name="create", annotations=Hint.OPEN_WORLD)
+        registry.tool(tools.read_unprivileged, name="read", annotations=READS)
+        registry.tool(tools.start_unprivileged, name="start", annotations=Hint.IDEMPOTENT)
+        registry.tool(tools.restart_unprivileged, name="restart")
+        registry.tool(tools.write_unprivileged, name="write", annotations=Hint.DESTRUCTIVE)
+        registry.tool(
+            tools.exec_unprivileged, name="exec", annotations=Hint.DESTRUCTIVE | Hint.OPEN_WORLD
+        )
+    else:
+        if network:
+            registry.tool(fixed_network_create(network), name="create", annotations=Hint.OPEN_WORLD)
+        else:
+            registry.tool(tools.create, annotations=Hint.OPEN_WORLD)
+        registry.tool(tools.read, annotations=READS)
+        registry.tool(tools.start, annotations=Hint.IDEMPOTENT)
+        registry.tool(tools.restart)
+        registry.tool(tools.write, annotations=Hint.DESTRUCTIVE)
+        registry.tool(tools.exec, annotations=Hint.DESTRUCTIVE | Hint.OPEN_WORLD)
+
     registry.tool(tools.stop, annotations=Hint.IDEMPOTENT)
-    registry.tool(tools.restart)
-    registry.tool(tools.write, annotations=Hint.DESTRUCTIVE)
-    registry.tool(tools.exec, annotations=Hint.DESTRUCTIVE | Hint.OPEN_WORLD)
     registry.tool(tools.remove, annotations=Hint.DESTRUCTIVE)
     registry.tool(tools.remove_image, annotations=Hint.DESTRUCTIVE)
-    registry.tool(tools.prune, annotations=Hint.DESTRUCTIVE)
+    if network:
+        registry.tool(prune_fixed_network, name="prune", annotations=Hint.DESTRUCTIVE)
+    else:
+        registry.tool(tools.prune, annotations=Hint.DESTRUCTIVE)
     registry.tool(tools.pull, streaming=True, annotations=Hint.OPEN_WORLD)
 
     registry.resource("docker://info", resources.info, mime_type="application/json")

@@ -6,11 +6,14 @@ import time
 from pathlib import Path
 from typing import Any
 
+import aiohttp
 import jwt
 import pytest
+from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 from aiohttp_tiny_mcp import AdapterSet, CallToolResult, Client, ClientError
 
+from mcp_chat import observe
 from mcp_chat.auth import WEB_AUDIENCE, WEB_COOKIE, issue_token
 from mcp_chat.server import create_app
 from mcp_chat.store import Store
@@ -18,6 +21,21 @@ from mcp_chat.store import Store
 SECRET = "test-only-observe-signing-key-longer-than-thirty-two-bytes"
 MODERN = AdapterSet.default().by_version["2026-07-28"]
 LEGACY = AdapterSet.default().by_version["2025-11-25"]
+
+
+def admin_cookie(expires_at: float) -> str:
+    """Sign an admin cookie that expires at `expires_at`."""
+    return jwt.encode(
+        {
+            "sub": "web-operator",
+            "iss": "mcp-chat",
+            "aud": WEB_AUDIENCE,
+            "iat": int(time.time()),
+            "exp": expires_at,
+        },
+        SECRET,
+        algorithm="HS256",
+    )
 
 
 @pytest.mark.parametrize("adapter", [MODERN, LEGACY], ids=["modern", "legacy"])
@@ -193,18 +211,38 @@ async def test_observe_stream_filters_and_detects_other_connections(tmp_path: Pa
             response.close()
 
 
-async def test_observe_stream_closes_when_admin_cookie_expires(tmp_path: Path) -> None:
-    cookie = jwt.encode(
-        {
-            "sub": "web-operator",
-            "iss": "mcp-chat",
-            "aud": WEB_AUDIENCE,
-            "iat": int(time.time()),
-            "exp": time.time() + 2,
-        },
-        SECRET,
-        algorithm="HS256",
-    )
+@pytest.mark.parametrize(
+    ("deadline", "expected"),
+    [(None, observe.POLL), (90.0, 0.0), (100.0, 0.0), (100.5, 0.5), (200.0, observe.POLL)],
+)
+def test_the_stream_never_waits_past_the_admin_cookie(deadline: float | None, expected: float):
+    """A wait of zero tells the stream to close instead of waiting again."""
+    assert observe.next_wait(deadline, 100.0) == expected
+
+
+async def test_observe_refuses_an_expired_admin_cookie(tmp_path: Path) -> None:
+    """An expired cookie opens no stream at all."""
+    cookie = admin_cookie(time.time() - 1)
+    async with TestClient(
+        TestServer(create_app(tmp_path / "chat.sqlite3", jwt_secret=SECRET))
+    ) as client:
+        response = await client.get(
+            "/admin/observe?stream=true", headers={"Cookie": f"{WEB_COOKIE}={cookie}"}
+        )
+        assert response.status == 401
+
+
+async def test_observe_stream_wakes_up_at_the_cookie_deadline(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Close the stream at the deadline, and not at the next poll.
+
+    `POLL` becomes longer than the test tolerates, so only the deadline can
+    end the wait. The cookie still has to outlive one local request, which
+    takes milliseconds.
+    """
+    monkeypatch.setattr(observe, "POLL", 30.0)
+    cookie = admin_cookie(time.time() + 1.5)
     async with TestClient(
         TestServer(create_app(tmp_path / "chat.sqlite3", jwt_secret=SECRET))
     ) as client:
@@ -213,7 +251,39 @@ async def test_observe_stream_closes_when_admin_cookie_expires(tmp_path: Path) -
         )
         assert response.status == 200
         assert await response.content.readuntil(b"\n\n") == b"event: ready\ndata: {}\n\n"
-        assert await asyncio.wait_for(response.content.read(), 4) == b""
+        assert await asyncio.wait_for(response.content.read(), 20) == b""
+        response.close()
+
+
+async def test_observe_stream_closes_when_the_admin_check_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Close the stream on the next event after the admin check stops passing.
+
+    The cookie lives an hour, so no clock decides the result. A real tool
+    call wakes the stream, and the refused check closes it.
+    """
+    cookie = admin_cookie(time.time() + 3600)
+    token = issue_token(SECRET, "example.com", "alice")
+    async with TestClient(
+        TestServer(create_app(tmp_path / "chat.sqlite3", jwt_secret=SECRET))
+    ) as client:
+        response = await client.get(
+            "/admin/observe?stream=true", headers={"Cookie": f"{WEB_COOKIE}={cookie}"}
+        )
+        assert response.status == 200
+        assert await response.content.readuntil(b"\n\n") == b"event: ready\ndata: {}\n\n"
+
+        async def refused(request: web.Request, secret: str | None) -> None:
+            raise web.HTTPUnauthorized(text="Sign in with the server secret.")
+
+        monkeypatch.setattr(observe, "require_admin", refused)
+        url = str(client.make_url("/mcp?org=example.com"))
+        async with aiohttp.ClientSession(headers={"Authorization": f"Bearer {token}"}) as session:
+            async with Client(url, MODERN, session=session) as alice:
+                await alice.call_tool("identity", {})
+        assert await asyncio.wait_for(response.content.read(), 5) == b""
+        response.close()
 
 
 async def test_observe_resolves_dm_recipient_for_each_recorded_actor(tmp_path: Path) -> None:

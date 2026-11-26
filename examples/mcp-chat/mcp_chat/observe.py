@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import re
+import time
 from typing import Any
 
 from aiohttp import web
@@ -17,6 +18,12 @@ from .auth import NO_STORE, require_admin, validated_org, validated_user
 from .store import Store
 
 SENSITIVE_KEYS = {"secret", "jwt_secret", "token", "access_token", "refresh_token", "authorization"}
+
+#: Longest wait between two checks of the admin cookie and the store.
+POLL = 1.0
+
+#: Period after the heartbeat comment, in seconds.
+HEARTBEAT = 15
 
 
 class AuditFeed:
@@ -111,13 +118,26 @@ class ObservedDispatcher(Dispatcher):
         return outcome
 
 
+def next_wait(deadline: float | None, now: float) -> float:
+    """Seconds to wait for the next event, at most `POLL`.
+
+    `deadline` is when the admin cookie expires, or `None` if no cookie
+    applies. A wait of `0` means the cookie has expired, so the caller must
+    close the stream instead of waiting again.
+    """
+    if deadline is None:
+        return POLL
+    return max(0.0, min(POLL, deadline - now))
+
+
 async def stream(
     request: web.Request,
     feed: AuditFeed,
     store: Store,
-    secret: str | None,
     org: str,
     user: str | None,
+    secret: str | None = None,
+    deadline: float | None = None,
     tools: list[str] | None = None,
 ) -> web.StreamResponse:
     response = web.StreamResponse(
@@ -136,8 +156,11 @@ async def stream(
         await response.write(b"event: ready\ndata: {}\n\n")
         heartbeat = asyncio.get_running_loop().time()
         while not feed.closed:
+            wait = next_wait(deadline, time.time())
+            if wait == 0:
+                break
             try:
-                await asyncio.wait_for(queue.get(), timeout=1)
+                await asyncio.wait_for(queue.get(), timeout=wait)
             except asyncio.TimeoutError:
                 pass
             if feed.closed:
@@ -152,7 +175,7 @@ async def stream(
                 await response.write(b"event: audit\ndata: {}\n\n")
                 latest = current
                 heartbeat = now
-            elif now - heartbeat >= 15:
+            elif now - heartbeat >= HEARTBEAT:
                 await response.write(b": heartbeat\n\n")
                 heartbeat = now
     except (ConnectionError, RuntimeError):
@@ -164,7 +187,7 @@ async def stream(
 
 def setup(app: web.Application, store: Store, secret: str | None, feed: AuditFeed) -> None:
     async def observe(request: web.Request) -> web.StreamResponse:
-        await require_admin(request, secret)
+        admin = await require_admin(request, secret)
         try:
             if any(key != "tool" and len(request.query.getall(key)) != 1 for key in request.query):
                 raise ValueError("Supply each query parameter other than tool only once.")
@@ -193,7 +216,16 @@ def setup(app: web.Application, store: Store, secret: str | None, feed: AuditFee
             if request.query.get("stream") == "true" or "text/event-stream" in request.headers.get(
                 "Accept", ""
             ):
-                return await stream(request, feed, store, secret, org, user, tools)
+                return await stream(
+                    request,
+                    feed,
+                    store,
+                    org,
+                    user,
+                    secret=secret,
+                    deadline=admin.expires_at if admin else None,
+                    tools=tools,
+                )
             result = await store.observe(
                 org, user, numbers.get("before"), numbers.get("limit", 50), tools=tools
             )

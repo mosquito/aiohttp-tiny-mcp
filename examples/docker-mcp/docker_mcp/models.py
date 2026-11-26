@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
 Stream = Literal["stdout", "stderr"]
 
@@ -103,7 +103,7 @@ class Written(BaseModel):
     note: str | None = None
 
 
-class CreateRequest(BaseModel):
+class CreateOptions(BaseModel):
     """Container creation options; only image is required."""
 
     image: str = Field(description='Image to run, such as "redis:7-alpine".')
@@ -123,7 +123,6 @@ class CreateRequest(BaseModel):
         default_factory=list,
         description='Paths to mount, as "/on/host:/in/container" or with ":ro" appended.',
     )
-    network: str | None = Field(None, description="Network to join. Otherwise the default one.")
     restart: Literal["no", "on-failure", "always", "unless-stopped"] = Field(
         "no", description="Whether the daemon starts it again after it stops."
     )
@@ -133,6 +132,30 @@ class CreateRequest(BaseModel):
         "missing", description="When to download the image first."
     )
     start: bool = Field(True, description="Start it once created.")
+
+
+class CreateRequest(CreateOptions):
+    network: str | None = Field(None, description="Network to join. Otherwise the default one.")
+
+
+class FixedNetworkCreateRequest(CreateOptions):
+    model_config = ConfigDict(extra="forbid")
+
+
+NamedVolume = Annotated[
+    str,
+    StringConstraints(pattern=r"^[a-zA-Z0-9][a-zA-Z0-9_.-]*:/[^:\x00\r\n]+(?::ro|:rw)?$"),
+]
+
+
+class UnprivilegedCreateRequest(FixedNetworkCreateRequest):
+    volumes: list[NamedVolume] = Field(
+        default_factory=list,
+        description=(
+            'Named volumes only: "data:/data" or "data:/data:ro". '
+            "Missing volumes are created with the local driver. Host paths are forbidden."
+        ),
+    )
 
 
 class WaitRequest(ContainerRef):
@@ -172,6 +195,14 @@ class PruneRequest(BaseModel):
             "For images: remove only untagged ones. False removes every image "
             "no container uses, which is far more."
         ),
+    )
+
+
+class FixedNetworkPruneRequest(PruneRequest):
+    model_config = ConfigDict(extra="forbid")
+
+    what: Literal["containers", "images", "volumes"] = Field(
+        description="Which kind of unused thing to remove."
     )
 
 
