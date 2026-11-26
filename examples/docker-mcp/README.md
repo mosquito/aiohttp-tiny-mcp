@@ -16,16 +16,36 @@ uv run docker-mcp --stdio               # for a locally-installed client
 uv run docker-mcp --port 9000 --state /var/lib/docker-mcp/state.sqlite3
 ```
 
-Every setting can also come from the environment or a config file. The order of
-precedence is defaults, then `docker-mcp.ini`, then `DOCKER_MCP_*`, then the
-command line:
+Every setting can also come from the environment or a config file. Three files
+are read where they exist: `/etc/docker/mcp.ini`, then `~/.config/docker/mcp.ini`,
+then `.docker-mcp.ini` in this directory, each overriding the one before.
+`--config FILE` overrides all three. The order of precedence is defaults, then
+those files, then `DOCKER_MCP_*`, then the command line:
 
 ```bash
 DOCKER_MCP_PORT=9000 DOCKER_MCP_STATE=/tmp/state.sqlite3 uv run docker-mcp
 ```
 
 `--help` lists everything, including which environment variable each setting
-reads.
+reads. `--generate-config` writes every setting, its help and its default to a
+config file, so a deployment edits that file instead of a command line:
+
+```bash
+uv run docker-mcp --generate-config /etc/docker/mcp.ini
+uv run docker-mcp --generate-config -        # to standard output
+```
+
+Top-level settings go under `[DEFAULT]`, and a group of settings has its own
+section, such as `[jwt]`. A list is written as a Python literal, in the config
+file and in the environment alike:
+
+```ini
+allowed_origin = ["https://docker.example.com"]
+```
+
+```bash
+DOCKER_MCP_ALLOWED_ORIGIN='["https://docker.example.com"]' uv run docker-mcp
+```
 
 ## Unprivileged mode
 
@@ -88,22 +108,23 @@ endpoint's public URL: a token must name it, and the endpoint publishes it as
 its protected resource.
 
 ```bash
-uv run docker-mcp --jwt-psk-file /etc/docker-mcp/jwt.key \
+uv run docker-mcp --jwt-psk "$KEY" \
     --jwt-audience https://docker.example.com/mcp \
     --jwt-issuer https://docker.example.com
 ```
 
-The key needs at least 32 bytes. `DOCKER_MCP_JWT_PSK` or `--jwt-psk-file`
-keep it out of the command line, which another user on the machine can read.
-The key is a secret argument: its `repr` is `******`, so a log of the settings
-does not hold it. `--jwt-issuer` is optional; an empty issuer accepts a token
-from any issuer.
+The key needs at least 32 bytes. It is a secret argument: its `repr` is
+`******`, so a log of the settings does not hold it. The config file or
+`DOCKER_MCP_JWT_PSK` keeps it out of the command line, which another user on
+the machine can read. `--jwt-issuer` is optional; an empty issuer accepts a
+token from any issuer.
 
-These four settings are one group, and the config file holds them in one section:
+These three settings are one group, and the config file holds them in one
+section:
 
 ```ini
 [jwt]
-psk_file = /etc/docker-mcp/jwt.key
+psk = a-key-of-at-least-32-random-bytes
 audience = https://docker.example.com/mcp
 issuer = https://docker.example.com
 ```

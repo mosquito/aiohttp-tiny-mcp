@@ -28,13 +28,9 @@ class JWT(argclass.Group):
     psk: str = argclass.Secret(
         default="",
         help=(
-            "Pre-shared key, at least 32 bytes. Prefer the environment variable "
-            "or --jwt-psk-file: another user on this machine can read a command line."
+            "Pre-shared key, at least 32 bytes. Prefer the config file or the "
+            "environment variable: another user on this machine can read a command line."
         ),
-    )
-    psk_file: Path | None = argclass.Argument(
-        default=None,
-        help="File holding the pre-shared key alone. Surrounding blank space is ignored.",
     )
     audience: str = argclass.Argument(
         default="",
@@ -83,10 +79,16 @@ class Parser(argclass.Parser):
         default="/console",
         help="Path to mount the web console at. Empty turns it off.",
     )
-    allowed_origin: list[str] = argclass.Argument(
+    allowed_origin: frozenset[str] = argclass.Argument(
         default=[],
-        nargs="*",
-        help="Browser origins to accept. Any Origin not listed is refused.",
+        nargs=argclass.Nargs.ZERO_OR_MORE,
+        type=str,
+        converter=frozenset,
+        help=(
+            "Browser origins to accept. Any Origin not listed is refused. The "
+            "environment variable and the config file hold a Python list, such "
+            'as ["https://docker.example.com"].'
+        ),
     )
     confirm: str = argclass.Argument(
         default="destructive",
@@ -99,6 +101,15 @@ class Parser(argclass.Parser):
         ),
     )
     session_ttl: int = argclass.Argument(default=3600, help="Seconds a session lives without use.")
+    generate_config = argclass.Argument(
+        action=argclass.GenerateConfigAction,
+        generator=argclass.INIConfigGenerator,
+        metavar="FILE",
+        help=(
+            "Write every setting and its default to a config file, then exit. "
+            "'-' writes to standard output."
+        ),
+    )
     log_level: str = argclass.Argument(
         default="info",
         choices=("debug", "info", "warning", "error"),
@@ -113,10 +124,6 @@ def authentication(parser: Parser) -> Authorization | None:
     what the endpoint publishes as its protected resource.
     """
     key = str(parser.jwt.psk)
-    if parser.jwt.psk_file is not None:
-        if key:
-            raise SystemExit("pass the pre-shared key once: --jwt-psk or --jwt-psk-file")
-        key = parser.jwt.psk_file.expanduser().read_text(encoding="utf-8").strip()
     if not key:
         return None
     if not parser.jwt.audience:
@@ -168,7 +175,7 @@ async def serve(parser: Parser) -> None:
     registry, storage, client = assemble(parser)
     endpoint = Endpoint(
         registry,
-        allowed_origins=set(parser.allowed_origin) or None,
+        allowed_origins=parser.allowed_origin or None,
         # Behind a reverse proxy, uncomment this and let the proxy check Origin.
         # trust_proxy_origin_validation=True,
     )
@@ -218,7 +225,10 @@ async def stdio(parser: Parser) -> None:
 def main() -> None:
     parser = Parser(
         auto_env_var_prefix="DOCKER_MCP_",
-        config_files=["docker-mcp.ini", "~/.config/docker-mcp.ini"],
+        # A later file overrides an earlier one, and a missing file is skipped:
+        # the machine's file, then this user's, then this directory's.
+        config_files=["/etc/docker/mcp.ini", "~/.config/docker/mcp.ini", ".docker-mcp.ini"],
+        config_argument="--config",
     )
     parser.parse_args()
     logging.basicConfig(level=parser.log_level.upper(), stream=None)
