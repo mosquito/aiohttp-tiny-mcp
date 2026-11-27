@@ -135,16 +135,14 @@ locking over NFS is not dependable.
 ### Tuning and maintenance
 
 `SqliteHub(look_again=...)` controls how often a waiting reader checks for a
-new event; SQLite cannot announce a new row. It does not extend a caller's
-`poll` deadline. `SqliteStorage(event_ttl_seconds=...)` controls how long hub
-events remain readable; a reader that falls farther behind misses them. Session
-lifetimes are controlled separately by `Registry(session_ttl_seconds=...)`.
+new event within the caller's `poll` deadline. Session lifetimes are controlled
+separately by `Registry(session_ttl_seconds=...)`.
 
 | Setting | Default | Use it to |
 | --- | --- | --- |
 | `SqliteStorage(path)` | required | Name the local database file; use persistent local storage in production. |
 | `busy_timeout_ms` | `5000` | Wait for SQLite's single writer instead of immediately raising `database is locked`. |
-| `event_ttl_seconds` | `3600` | Retain hub events for this long; it bounds how far a reader may lag. |
+| `event_ttl_seconds` | `3600` | Remove events older than this at the next sweep. |
 | `sweep_seconds` | `60` | Set the interval for the cleanup-context sweeper. |
 | `SqliteHub(look_again=...)` | `0.25` | Trade idle polling queries for event-delivery latency. |
 
@@ -185,10 +183,9 @@ application already has to the constructor -- `RedisStorage(client)` -- and it
 stays the application's to close; `from_url` is for callers who keep none. As with PostgreSQL, every
 setting is a class attribute too.
 
-A session is one key. `create` uses `SET NX`, so two workers cannot both make
-one, and an expired key is gone before the next `create` sees it. `save` is a
-short Lua script that checks the version and writes in the same step, because
-reading the version and updating after is not atomic.
+A session is a Redis hash. Lua scripts make both writes atomic. `create` checks
+that the key is absent, writes the data and version, and sets the expiry.
+`save` checks the version before updating.
 
 A topic is a Redis stream. `publish` is `XADD`, which assigns ids in
 publication order, so a stream id is a safe cursor. `poll` is `XREAD BLOCK`:
@@ -275,15 +272,13 @@ other, and a reader that moved past the higher id would never see the lower
 one. The lock is per topic, so publishers to different topics do not wait for
 each other.
 
-`PostgresStorage(event_ttl_seconds=...)` is how long an event stays readable.
-
 | Setting | Default | Use it to |
 | --- | --- | --- |
-| `PostgresStorage.from_url(conninfo, min_size=..., max_size=...)` | `4`, unbounded | Create a pool owned and closed by the storage. |
+| `PostgresStorage.from_url(conninfo, min_size=..., max_size=...)` | `4`, same as `min_size` | Create a pool owned and closed by the storage. |
 | `PostgresStorage(pool, ...)` | `owned=False` | Reuse an application-owned pool; the application closes it. |
 | `prefix` | `"mcp"` | Name the `<prefix>_sessions`, `_events`, and `_state` tables. |
 | `create_tables` | `True` | Let the package create the tables on first use, or use migrations matching `SCHEMA`. |
-| `event_ttl_seconds` | `3600` | Retain hub events for this long. |
+| `event_ttl_seconds` | `3600` | Remove events older than this at the next sweep. |
 | `sweep_seconds` | `60` | Default interval for `sweeping()` and `sweep_if_due()`. |
 | `PostgresHub(look_again=...)` | `0.25` | Trade polling queries for event-delivery latency. |
 
@@ -409,8 +404,8 @@ how it counts.
 
 ### On PostgreSQL
 
-`aiohttp_tiny_mcp.storage.postgres` implements this; see [On PostgreSQL](#on-postgresql-1)
-below. One table is enough, and `version` does the compare-and-set while
+`aiohttp_tiny_mcp.storage.postgres` implements this. See [On PostgreSQL](#on-postgresql).
+One table is enough, and `version` does the compare-and-set while
 `expires_at` does the expiry:
 
 ```sql
@@ -530,12 +525,14 @@ async for event in await hub.subscribe("demo", after=START, wait=0.1):
     break
 ```
 
-`MemoryHub` keeps the last `keep` events of a topic, 1000 by default, which is
-how far back a reconnecting client can be replayed. The storage backends keep
-theirs until they expire.
-
 `Registry(hub_poll_seconds=...)` sets how long one `poll` may wait. It is a
 deadline, not an interval.
+
+### Event retention
+
+`MemoryHub` keeps the last `keep` events per topic (1000 by default).
+`RedisHub` trims each stream to roughly `keep` events and expires idle topics.
+SQLite and PostgreSQL events remain readable until a sweep removes them.
 
 ### On PostgreSQL
 

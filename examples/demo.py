@@ -267,8 +267,9 @@ async def auth(request: web.Request, handler):
 
 @web.middleware
 async def tenant(request: web.Request, handler):
-    """Isolate demo callers by forwarded address or request.remote. Production deployments should
-    use an authenticated account or token subject.
+    """Group demo callers by X-Tenant or request.remote.
+
+    In production, use an authenticated account or token subject.
     """
     namespace.set(request.headers.get("X-Tenant") or request.remote)
     return await handler(request)

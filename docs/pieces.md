@@ -95,9 +95,9 @@ sequenceDiagram
     H-->>A: Reply
 ```
 
-The hub is an event log. It lets a question sent from A receive a reply that
-arrived on B; it also distributes resource-change notifications. Progress and
-logs travel directly on the active response stream, so they do not use the hub.
+The hub is an event log. It carries replies between workers and distributes
+resource-change notifications. Legacy HTTP+SSE also sends progress and logs
+through the hub. Streamable HTTP and stdio send them on the active channel.
 
 For a single process, `Registry` uses `MemorySessionStore()` and `MemoryHub()`
 by default. For multiple workers, all workers need shared implementations of

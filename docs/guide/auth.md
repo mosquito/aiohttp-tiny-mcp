@@ -285,9 +285,7 @@ assert await read_report(ReportRequest(report_id="quarterly"), bob) == CallToolR
 
 The dispatcher checks the tool scope; the handler checks ownership against
 server-side data. Calling the Python function directly bypasses dispatcher scope
-checks. For resources, prompts, and extensions, explicitly check `holds()` before
-reading or changing protected data. Scope checks do not hide tool definitions
-from the catalogue.
+checks. Scope checks do not hide tool definitions from the catalogue.
 
 ## Sending credentials
 
@@ -384,9 +382,8 @@ credential, because a server does not echo one back; a client that authenticates
 this way appends its own to that address.
 
 The URL reaches browser history, saved client settings, referrer headers, and
-proxies. The HTTP transports mask `token`, `access_token`, `secret`, `jwt`, and
-all names declared with `Query` in the server's aiohttp access log. Keep the
-lifetime of URL credentials short and prefer a header where the client has one.
+proxies. Keep the lifetime of URL credentials short and prefer a header where
+the client has one. See [access-log masking](#access-log-masking).
 
 Legacy HTTP+SSE clients must authenticate both `GET /sse` and every
 `POST /messages`. A successful stream opening does not authenticate later
@@ -423,9 +420,16 @@ assert (await auth.authenticate(request)).subject == "alice"
 
 The source receives the original `web.Request`. Read metadata such as headers,
 query parameters, cookies, and routing data. Leave the request body and state
-intact for the MCP handler. The access log automatically masks the names of
-`Query` objects in a registered policy's `sources` sequence, plus the common
-names `token`, `access_token`, `secret`, and `jwt`.
+intact for the MCP handler.
+
+A custom `Authentication` policy can call `read_credential(request, sources)`
+from `aiohttp_tiny_mcp.auth` to run the same lookup.
+
+#### Access-log masking
+
+`Endpoint.setup()`, `Endpoint.app()`, and `SseEndpoint.setup()` install the
+access-log filter by default. It masks `token`, `access_token`, `secret`, `jwt`,
+and the names of `Query` sources in registered policies.
 
 If your function or wrapper policy reads another query parameter, register its
 name with the access-log filter before serving requests.
@@ -438,9 +442,6 @@ install_token_filter("api_key")
 
 This adds the name to the process-wide `aiohttp.access` filter, including for
 requests rejected before authentication runs.
-
-A custom `Authentication` policy can call `read_credential(request, sources)`
-from `aiohttp_tiny_mcp.auth` to run the same lookup.
 
 ## Console authentication
 
@@ -463,8 +464,8 @@ server authentication message. Use **Authentication** to change credentials;
 **Connect** starts a new MCP session. Closing the dialog cancels editing without
 changing active credentials.
 
-Credentials are saved in browser `localStorage`, scoped to the console path and
-exact endpoint URL. Reloading restores matching credentials; editing the endpoint
+Credentials are saved in browser `localStorage`, scoped to the console path
+and the endpoint's origin and path. Reloading restores them. Editing the endpoint
 does not delete saved records. **Clear** removes the current endpoint's saved
 credentials and disconnects. Closing the dialog leaves saved credentials unchanged.
 If storage is unavailable, credentials stay in page memory.
@@ -642,7 +643,7 @@ The console reads the Bearer challenge, protected-resource metadata, and
 authorization-server metadata. **Sign in with OAuth** opens a popup that redirects
 straight to GitHub. The user signs in and returns to the console.
 The console checks the response state and issuer before exchanging the code
-with PKCE. The MCP token stays in page memory. Allow popups for this page.
+with PKCE. Allow popups for this page.
 
 Explicitly registered clients skip the local consent page by default. Register
 only clients you trust. To require local confirmation for a client, set
@@ -1105,6 +1106,10 @@ assert [resource.canonical for resource in root.router.resources()] == [
     auth.metadata_path,
 ]
 ```
+
+`routes()` only supplies route definitions. Call
+`install_token_filter(*registry.credential_arguments)` to enable
+[access-log masking](#access-log-masking) with manual route registration.
 
 When both HTTP transports share a protected resource, publish its metadata once:
 

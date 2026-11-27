@@ -58,7 +58,7 @@ for adapter in AdapterSet.default().adapters:
     assert result.content[0].text == "deployed web", adapter.version
 ```
 
-Four revisions, three mechanisms, one handler and one caller.
+Five revisions, three mechanisms, one handler and one caller.
 
 ## What actually happens
 
@@ -72,7 +72,7 @@ and `ask` returns immediately for anything already answered.
 answers with a plain JSON-RPC response, sent on its own. The call stays open in
 between.
 
-`2025-03-26` -- **the tool call.** This revision predates elicitation entirely.
+`2025-03-26` and `2024-11-05` -- **the tool call.** Both predate elicitation.
 The first call returns an ordinary result whose text says what is needed, and
 the answers come back as two extra tool arguments. See
 [Asking where the protocol cannot](../reference/revisions.md#asking-where-the-protocol-cannot).
@@ -186,8 +186,8 @@ answered.
 
 ## Where nobody can answer
 
-A client that cannot be asked is not a client to hang. Give `ask` a default and
-it is used instead of waiting.
+`ex.ask(default=...)` uses the default if the revision requires clients to
+declare elicitation and the client omits it.
 
 <!-- name: async test_asking_default; fixtures: serve -->
 ```python
@@ -211,8 +211,7 @@ async def careful(args: Nothing, ex: Exchange) -> str:
 
 
 url = await serve(registry)
-# No `on_ask`, so this client never declares that it can answer, and a pushed
-# question would wait for nobody.
+# This client has no handler for pushed questions.
 async with Client(url, AdapterSet.default().by_version["2025-11-25"]) as client:
     await client.initialize()
     result = await client.call_tool("careful", {})
@@ -220,9 +219,9 @@ async with Client(url, AdapterSet.default().by_version["2025-11-25"]) as client:
 assert result.content[0].text == "defaulted to decline"
 ```
 
-Without a default, a handler that asks a client which cannot answer gets an
-error naming the missing capability -- `-32021`, with
-`data.requiredCapabilities`. That is the spec's answer, not this package's.
+Without a default, a missing elicitation capability produces an error with
+`data.requiredCapabilities`. The code is `-32021` on `2026-07-28` and
+`-32603` on the two revisions that push questions.
 
 ## Several questions
 
@@ -332,12 +331,13 @@ guarantees.
 
 ## The client's side
 
-Passing `on_ask` does two things: it answers questions, and it is what makes
-the client declare that it can be asked. A server puts a question only to a
-client that said so.
+Pass `on_ask` to answer questions automatically. On `2025-11-25` and
+`2025-06-18`, the callback also enables the elicitation capability.
 
-Without it, a question on `2026-07-28` or `2025-03-26` comes back to the caller
-as a plain dictionary, to answer by calling again:
+On `2026-07-28`, the client declares elicitation automatically. On the two
+oldest revisions, tools can ask through their arguments. On these three
+revisions, `call_tool()` returns a plain dict if it has no callback to answer
+the question. Pass the answers into the next call.
 
 <!-- name: async test_asking_manual; fixtures: serve -->
 ```python
@@ -374,9 +374,6 @@ async with Client(url, adapter) as client:
 
 assert done.content[0].text == "went ahead"
 ```
-
-On a revision that pushes the question there is no such option: only `on_ask`
-can answer, and a client without one correctly says it cannot.
 
 ## Completions: asking the client's model
 

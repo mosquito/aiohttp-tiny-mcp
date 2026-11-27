@@ -97,9 +97,6 @@ written before this package catches up.
 
 ## What a tool may return
 
-A model produces an output schema and structured content. Anything else is
-rendered as text.
-
 <!-- name: test_tools -->
 ```python
 @registry.tool
@@ -110,10 +107,14 @@ async def health(args: Nothing) -> str:
 
 | Returned | Becomes |
 | --- | --- |
-| a pydantic model | `structuredContent` plus text, and an `outputSchema` |
+| a Pydantic model | JSON text and `structuredContent` |
 | a string | one text block |
-| a number, list or dict | one text block holding its JSON |
-| a `CallToolResult` | itself, unchanged |
+| a number, list or dict | JSON text and `structuredContent` |
+| a `CallToolResult` | the supplied result |
+
+`2025-11-25` and `2025-06-18` keep only objects in `structuredContent`.
+The two oldest revisions omit that field. A Pydantic return annotation
+supplies `outputSchema` from `2025-06-18` onward if the adapter supports the schema.
 
 Build a `CallToolResult` where a tool needs several content blocks, or content
 that is not text. A block is `TextContent`, `ImageContent`, `AudioContent`,

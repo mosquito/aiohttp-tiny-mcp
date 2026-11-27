@@ -5,25 +5,21 @@ extensions. Executable documentation examples run in the same test suite.
 
 ## The parametrized suite
 
-One suite runs every adapter against one registry. The harness supplies the
-requests; each adapter supplies its expectations.
-
 - **Method map.** Every operation an adapter exposes round-trips:
   `operation_for(method_for(op)) is op`.
 - **Failure map.** Every `FailureKind` produces the code and status its revision
   defines, and the mapping is total.
-- **Projection.** A listing validates against that revision's constraints, and a
-  hidden tool is absent from the listing *and* unreachable by call.
+- **Projection.** Legacy tool definitions omit fields the revision lacks.
+  A tool with a newer minimum revision has no legacy definition.
 - **Header rules.** Required headers are enforced or ignored exactly as
   specified, and encoded values are decoded before comparison.
-- **Selection.** Each adapter is reachable, and the choice is stable under
-  irrelevant header noise.
+- **Selection.** Tests cover version hints, fallback, and refusal.
 - **Listings and cache hints.** Listings reflect current declarations. Cacheable
   results carry revision-specific freshness fields.
 - **Against the published types.** Each adapter's method map is compared, per
   revision, with the client-to-server methods of the `mcp-types` distribution,
-  and the advertised capability names and sub-fields are validated against that
-  revision's capability model. A method this package does not decode is listed
+  and the advertised capabilities are compared with the `2025-11-25` and
+  `2026-07-28` capability models. A method this package does not decode is listed
   with its reason, and the comparison uses set equality, so a reason that stops
   applying also fails. A revision the source adds fails the suite until the
   adapters follow. `mcp-types` is a test dependency; nothing in `src` imports it.
@@ -34,10 +30,8 @@ adapters that allow it.
 
 ## Our client against our server
 
-Every capability is driven end to end through the bundled `Client`, over a real
-socket, once per revision. This is what catches a claim that holds in a unit
-test and fails on the wire -- reading a stream to its end before looking at it,
-for instance, which deadlocks exactly one case and no others.
+The bundled `Client` exercises tool calls, progress, and change notifications
+over real sockets across revisions.
 
 ## Independent implementations
 
@@ -82,10 +76,9 @@ as JSON.
 
 ## The documentation
 
-Every python block in these pages is executed by
-[markdown-pytest](https://pypi.org/project/markdown-pytest/) under the same
-suite as everything else. A page that stops being true stops passing.
-The copyable test setup is documented in [Testing a server](../guide/testing.md).
+The executable Python examples run under
+[markdown-pytest](https://pypi.org/project/markdown-pytest/).
+See [Testing a server](../guide/testing.md) for the test setup.
 
 That is not only a guard against rot. Writing this documentation found three
 real defects: a client that never returned the session id a server issued, a
@@ -94,8 +87,8 @@ that yielded one extra message on `2026-07-28` and nothing equivalent elsewhere.
 
 ## Running it
 
-Tests are grouped by subsystem under `tests/`. Each group's `conftest.py`
-provides its fixtures. The root `conftest.py` contains fixtures shared across groups.
+Tests are grouped by subsystem under `tests/`. The root `conftest.py` provides
+fixtures shared across groups.
 Console browser tests run in `tests/browser/`, with one Chromium process per
 session and a separate browser context for each test.
 
@@ -114,12 +107,6 @@ uv run sphinx-build -W --keep-going -b html docs docs/_build
 **Roots.** The `file://` model does not provide access to a remote client's
 filesystem. See [why roots are omitted](parity.md#deliberate-omissions).
 
-**Resumption of a response stream.** The `GET` notification stream resumes
-with `Last-Event-ID`; see [Transports](../deployment/transports.md#resuming-a-stream).
-The stream a `POST` opens for one request does not: it carries no ids.
-Retrying can execute the handler again, so the application must make retries
-safe. The SDK supports response replay through its `EventStore`.
-
 **Batch response envelopes over stdio.** `2025-03-26` batch input is decoded,
 but stdio emits individual response lines rather than one response array.
 Use individual requests over stdio. Streamable HTTP supports batch envelopes
@@ -135,8 +122,7 @@ carried a progress token, and the completion and elicitation requests this serve
 sends carry none, so a conforming client has nothing to report against. See
 [Notifications](../guide/notifications.md).
 It is a declared difference in the comparison against the published types, and so
-is `notifications/cancelled`, which is consumed by the transport before the
-adapter reaches it.
+is `notifications/cancelled`, which stdio handles before adapter dispatch.
 
 ## Extension coverage
 

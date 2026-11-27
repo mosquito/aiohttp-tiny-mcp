@@ -32,9 +32,6 @@ endpoint.setup(web.Application(), "/mcp")  # the same routes, added for you
 alone = endpoint.app("/mcp")  # ...on an application of its own
 ```
 
-Every one of these logs the paths it registers at `DEBUG` on the
-`aiohttp_tiny_mcp` logger, including the ones you did not name yourself.
-
 `POST` carries every request. `GET` opens the stream on which the revisions
 before `2026-07-28` read their notifications; `2026-07-28` reads the same events
 through `subscriptions/listen` and is told so with a `405`.
@@ -141,21 +138,18 @@ same argument.
 
 ### Resuming a stream
 
-`2025-03-26` through `2025-11-25` let a server number its SSE events and a
-client that lost the connection ask, with `Last-Event-ID`, for what followed.
-The `GET` stream does this. Each event carries the id the hub gave it, so the
-replay is a poll from that exact id and works on whichever worker takes the
+`2025-03-26` through `2025-11-25` allow optional SSE replay with
+`Last-Event-ID`. The endpoint replays events on the `GET` notification stream.
+Each event carries its hub id, so replay works on whichever worker takes the
 reconnect. An id the hub never issued is ignored and the stream starts from
-now. How far back a replay can reach is the hub's retention: `MemoryHub(keep=)`
-counts events, the storage backends keep theirs until they expire.
+now. Replay depends on the hub's [event retention](stores.md#event-retention).
 
 The bundled client remembers the latest id in `client.last_event_id` and passes
 one back with `stream_notifications(last_event_id=...)`.
 
-The stream a `POST` opens for one request carries no ids and cannot resume.
-Retrying the request can execute the handler again. Applications must make
-retries safe when handlers have side effects. `2026-07-28` has no `GET` stream;
-it returns `405` and ignores `Last-Event-ID`.
+On `2026-07-28`, closing a request's SSE response cancels the request.
+Retrying starts a new call and can repeat side effects. See
+[Streamable HTTP cancellation](https://modelcontextprotocol.io/specification/2026-07-28/basic/transports/streamable-http#cancellation).
 
 The class is exported, and takes events the way `WebSocketResponse` takes
 messages, so an application can use it for its own streams:
@@ -289,8 +283,7 @@ from the URL it is given:
 https://example.com/mcp?mcp=2025-06-18
 ```
 
-The query wins over anything in the body or the headers, deliberately: it
-states what the deployment intends this client to speak.
+See [how the pin is applied](../reference/selection.md#the-mcp-pin).
 
 ## stdio
 

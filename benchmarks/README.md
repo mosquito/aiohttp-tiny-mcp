@@ -55,16 +55,10 @@ a small and for a realistic schema.
 
 ## The floor
 
-Every table names two rows that are not MCP at all: one aiohttp handler and
-one Starlette handler, each parsing the request and answering a fixed JSON
-body. They exist because this package runs on aiohttp and the official SDK
-runs on uvicorn, and **without them a reader compares two web servers and
-believes they compared two MCP libraries.**
-
-`of floor` is each row's rate as a share of its own stack answering that fixed
-body. It is the number to read. A library that reaches 70% of its floor is
-spending 30% of the request on protocol work; the absolute rates also carry
-whatever separates aiohttp from uvicorn on the day.
+The HTTP server tables include bare aiohttp and Starlette handlers that return
+a fixed JSON body. `Of floor` divides each server's rate by its own stack's
+baseline. The stdio tables include a raw pipe baseline. The HTTP client tables
+contain MCP pairings only.
 
 ## Conditions
 

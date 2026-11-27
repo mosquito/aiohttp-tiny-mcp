@@ -1,7 +1,7 @@
 # The client
 
 `Client` speaks one revision -- whichever adapter it is given -- and the calling
-code is the same for all of them. `StdioClient` is the same class over a
+code is the same for all of them. `StdioClient` offers the same MCP calls over a
 subprocess's standard streams.
 
 For protected HTTP servers, use [Client OAuth](client-oauth.md) for browser login
@@ -177,10 +177,10 @@ client = Client(
 )
 ```
 
-`on_ask` and `on_completion` are the two that change what the server
-does: a server asks only a client that declared it can answer, and passing
-these is that declaration. See [Asking the user](asking.md#the-clients-side)
-and [Model completions](asking.md#completions-asking-the-clients-model).
+`on_ask` handles user questions. How the client declares elicitation depends
+on the revision. See [Asking the user](asking.md#the-clients-side).
+`on_completion` handles model requests and declares the sampling capability.
+See [Model completions](asking.md#completions-asking-the-clients-model).
 
 ## Calls
 

@@ -27,15 +27,9 @@ an implementation comparison, not a claim that the two projects expose the
 same public class names. The benchmark uses the SDK version pinned in the
 conditions below.
 
-Over HTTP they do not stand on the same web framework: this package is
-aiohttp, the official SDK is Starlette on uvicorn. So every HTTP table ends
-with two rows that speak **no protocol at all** -- one hand-written handler per
-stack, parsing the request and answering a fixed JSON body. Compare a row with
-the floor of its own stack, not with the other library's. Without those rows a
-reader compares two web servers and believes they compared two MCP libraries.
-
-The stdio tables have no such problem, and are the cleanest comparison here:
-one subprocess, one pipe, no framework on either side.
+The HTTP server tables include bare aiohttp and Starlette handlers that return
+a fixed JSON body. Each is the baseline for its own stack. The stdio tables
+use a raw pipe as their baseline. HTTP client tables compare MCP pairings only.
 
 The server rows have no client library in them. The bytes of one real request
 are recorded, then replayed with nothing but `aiohttp` in the way. The client

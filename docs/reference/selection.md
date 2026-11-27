@@ -10,9 +10,8 @@ batch arrays and the others do not -- so a typed decode cannot happen until the
 revision is known. A shallow parse is the smallest thing that makes selection
 total.
 
-That shallow parse is the `Preamble`: the raw bytes, `json.loads` output or
-`None`, the headers, and the three places a version can be stated. Building one
-validates nothing beyond "is this JSON".
+The `Preamble` holds the raw bytes, parsed JSON, headers, and version hints
+from the query, `_meta`, protocol header, and `initialize` parameters.
 
 ## The algorithm
 
@@ -20,7 +19,8 @@ Executed once per POST.
 
 0. **Unparseable body** -- select the fallback adapter and let it render a parse
    error.
-1. **`?mcp=` in the URL** -- resolve it and stop. See below.
+1. **Body version type and URL pin** -- reject a non-string `_meta` version,
+   then apply `?mcp=` if present.
 2. **Header and body disagree** -- `-32020`, header mismatch.
 3. **Body states a version** (`_meta`) -- select the adapter that claims it, or
    refuse with the supported list and what was requested.
@@ -59,7 +59,7 @@ assert (
     == "2025-11-25"
 )
 
-# The body alone, which outranks a header that is absent.
+# The body alone.
 assert (
     chosen(
         b'{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{"_meta":'
@@ -77,8 +77,8 @@ A revision may be pinned on the endpoint URL:
 POST /mcp?mcp=2025-11-25
 ```
 
-This outranks everything, including body metadata, and a header/body
-disagreement it resolves is not an error.
+After the JSON parse and the `_meta` version type check, the pin takes
+precedence over other version hints.
 
 <!-- name: test_selection -->
 ```python
@@ -92,14 +92,7 @@ assert (
 )
 ```
 
-The asymmetry is deliberate. The pin is written by whoever deployed the URL, not
-by the client, so it is the one place an operator can say "this endpoint speaks
-this revision" -- the fix for a client that negotiates badly, or that can only be
-configured with a URL and no custom headers. Both kinds exist; see
-[Client compatibility](parity.md#client-compatibility).
-
-It chooses which revision's rules apply. It does not waive them: a request
-pinned to `2026-07-28` must still satisfy that revision's HTTP binding.
+A request pinned to `2026-07-28` must still satisfy that revision's HTTP binding.
 
 ## Refusal
 
@@ -129,17 +122,6 @@ assert "2026-07-28" in failure.data["supported"]
 The refusal is rendered by the fallback adapter, which is the newest the server
 speaks. Only the newer revisions define the structured error that lets a client
 recover, and an older client ignores the extra fields harmlessly.
-
-## Superseding
-
-An adapter may claim revisions other than its own. The legacy trio project
-identically in most respects, so one class answers for several dates where that
-is true, and subclasses diverge only where they must.
-
-<!-- name: test_selection -->
-```python
-assert set(adapters.versions) >= {"2026-07-28", "2025-11-25", "2025-06-18", "2025-03-26"}
-```
 
 ## Remembering the choice
 

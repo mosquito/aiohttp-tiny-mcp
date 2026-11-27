@@ -48,7 +48,7 @@ authentication types declared for the endpoint are offered. The token selects
 the organization and user. **Connect** applies the fields to the URL and connects;
 **Cancel** leaves it unchanged. You can also enter additional query parameters
 directly in the URL. The console remembers the last URL and entered credentials
-in `localStorage`. Opening it does not connect automatically; click **Connect**.
+in `localStorage`. Click **Connect** on first open. Reloading a connected tab reconnects.
 
 The default server listens on `127.0.0.1:8080` and stores data in
 `mcp-chat.sqlite3`. The root URL redirects to `/ui/`.

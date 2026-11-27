@@ -53,16 +53,13 @@ async def complete(args: CompleteParams) -> list[str]:
 
 ## What the handler is told
 
-`CompleteParams` carries two things.
-
-`ref` says what is being completed -- `{"type": "ref/prompt", "name": ...}` for
+`CompleteParams.ref` identifies the target. Use `{"type": "ref/prompt", "name": ...}` for
 a prompt argument, `{"type": "ref/resource", "uri": ...}` for a template
 variable. Read it where the same argument name means different things in
 different places.
 
-`argument` says which argument and what has been typed: `name` and `value`.
-`value` is a prefix and may be empty, which is the case for "show me
-everything".
+`argument.name` identifies the argument. `argument.value` is the prefix and may
+be empty. The optional `context` holds extra completion context from the caller.
 
 <!-- name: async test_completion; fixtures: serve -->
 ```python

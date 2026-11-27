@@ -125,13 +125,7 @@ notifications. A handler keeps the same API on all five revisions, while any
 worker can handle the next request; nothing leaves the server except opaque
 identifiers.
 
-The SDK is also disproportionately slow before application work begins. The
-local benchmark normalizes each HTTP stack against its bare framework and still
-measures about 3–4× the `tools/call` rate here; over stdio, where no web
-framework is involved, it is about 4–5×. Its stateless mode is slower than its
-stateful mode on legacy revisions because it creates and destroys a session for
-each request. These are small-handler measurements, not production capacity
-claims; see [What it costs](reference/benchmarks.md).
+See [What it costs](reference/benchmarks.md) for HTTP and stdio benchmarks.
 
 ### Choose deliberately
 

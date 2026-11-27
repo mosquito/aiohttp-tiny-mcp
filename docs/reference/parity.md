@@ -45,10 +45,9 @@ there. `2025-03-26` and `2024-11-05` predate the field entirely and get the
 same data as text, which is where a tool of those revisions is supposed to put
 it. The console reads it back either way, so it looks the same to a person.
 
-**Schemas the older clients cannot read.** A tool whose input schema uses
-composition or `$ref` is simplified where that is lossless, and hidden where it
-is not. Declaring `min_revision` says so explicitly; the rest is decided in one
-place, by the adapter.
+**Legacy schemas.** Adapters simplify tool schemas for older clients and omit
+tools whose input schema they cannot project. Set `min_revision` to limit a
+tool to newer revisions.
 
 **Icons.** A tool, a resource, a resource template, a prompt and the server info
 carry `icons` on `2026-07-28` and `2025-11-25`, and the server info carries
@@ -131,10 +130,8 @@ bounds it; the default is two minutes.
 
 ## What it takes
 
-A session store and a hub, both required. See
-[Stores and hubs](../deployment/stores.md). Given a shared pair, nothing pins a
-client to a worker: a round trip started on one finishes on another, and a
-question asked by one is answered through another.
+`Registry` defaults to an in-memory session store and hub. With
+[shared backends](../deployment/stores.md), an interaction can span workers.
 
 ## Client compatibility
 

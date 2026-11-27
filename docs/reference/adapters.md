@@ -27,6 +27,7 @@ flowchart TB
         A25c["Adapter2025_11_25"]
         A25b["Adapter2025_06_18"]
         A25a["Adapter2025_03_26"]
+        A24["Adapter2024_11_05"]
     end
 
     subgraph transport["Transport"]
@@ -45,7 +46,7 @@ flowchart TB
     Exchange --> Adapter
     Registry --> Specs
     Specs --> Bound
-    Adapter -.-> A26 & A25c & A25b & A25a
+    Adapter -.-> A26 & A25c & A25b & A25a & A24
 ```
 
 Adapters translate protocol messages into normalized calls, and no adapter
@@ -169,23 +170,19 @@ assert modern.http_status(unknown) == 404
 assert legacy.http_status(unknown) == 200
 ```
 
-Two codes exist only on `2026-07-28` because only that revision defines them:
-`-32021` for a missing client capability, `-32022` for an unsupported version.
-A legacy adapter reports the same internal failure in its own vocabulary.
+The [revision table](revisions.md#the-inventory) lists the error codes specific
+to `2026-07-28`.
 
-## Argument failures are results, not errors
+## Tool argument validation
 
-A tool called with arguments that fail validation did not fail to be called. The
-model asked for something and deserves to be told what happened, so
-`INVALID_ARGUMENTS` is never encoded as a JSON-RPC error -- it becomes a tool
-result with `isError` set. It is in `FailureKind` so the dispatcher can name it,
-not so an adapter can render it.
+When a tool's argument model fails validation, the dispatcher returns a tool
+result with `isError` set.
 
 ## Adding a revision
 
 1. Write `protocol/vYYYY_MM_DD.py` with one `Adapter` subclass. Subclass the
-   nearest existing revision and override what differs -- the legacy trio is
-   three classes deep for exactly this reason.
+   nearest existing revision and override what differs. The four legacy
+   adapters form one inheritance chain.
 2. Add it to the `AdapterSet`.
 3. Set the behavioural flags to the truth.
 4. Test it in isolation: `decode`, `encode`, and the projections.

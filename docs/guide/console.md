@@ -266,7 +266,7 @@ references on 2026-11-16:
 | [Claude Code](https://code.claude.com/docs/en/mcp#user-scope) | `.mcp.json` | `~/.claude.json` | `mcpServers`, `type: "http"`, `url` |
 | [Codex](https://learn.chatgpt.com/docs/config-file/config-basic) | `.codex/config.toml` | `~/.codex/config.toml` | `mcp_servers`, `url`, `http_headers` |
 | [Cursor](https://cursor.com/docs/mcp) | `.cursor/mcp.json` | `~/.cursor/mcp.json` | `mcpServers`, `url` |
-| [VS Code / Copilot](https://code.visualstudio.com/docs/agents/reference/mcp-configuration) | `.mcp.json` | `~/.copilot/mcp-config.json` | `mcpServers`, `type: "http"`, `url`, `tools` |
+| [GitHub Copilot](https://code.visualstudio.com/docs/agents/reference/mcp-configuration) | `.mcp.json` | `~/.copilot/mcp-config.json` | `mcpServers`, `type: "http"`, `url`, `tools` |
 | [Gemini CLI](https://geminicli.com/docs/tools/mcp-server/) | `.gemini/settings.json` | `~/.gemini/settings.json` | `mcpServers`, `httpUrl` |
 | [Pi](https://docs.pi.dev/latest/mcp) | `.pi/mcp.json` | `~/.pi/agent/mcp.json` | `mcpServers`, `url` |
 | [Antigravity](https://antigravity.google/docs/mcp) | `.agents/mcp_config.json` | `~/.gemini/config/mcp_config.json` | `mcpServers`, `serverUrl` |
@@ -340,9 +340,8 @@ support inline Markdown; embedded HTML and tags with attributes stay escaped.
 The Markdown renderer is included with the console. It needs no external
 library or network request.
 
-Everything from the server is escaped before a single tag is added, and links
-are limited to `http`, `https` and `mailto`. A description cannot bring its own
-HTML, which matters most exactly when the server is one you have not read.
+The renderer escapes server text. Links can start with `http:`, `https:`,
+`mailto:`, `#`, or `/`.
 
 ## Every revision
 

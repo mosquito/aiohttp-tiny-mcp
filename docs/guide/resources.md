@@ -275,9 +275,8 @@ render the thing, and how.
 
 ## Reading one that is not there
 
-A URI that matches no resource and no template is a `-32002`, resource not
-found. That is a protocol failure rather than a result, because -- unlike a
-tool call -- there was nothing to reach.
+An unknown URI produces JSON-RPC error `-32602` (HTTP 404) on `2026-07-28`
+and `-32002` on older revisions.
 
 <!-- name: async test_resources; fixtures: serve -->
 ```python

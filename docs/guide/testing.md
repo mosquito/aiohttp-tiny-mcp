@@ -63,9 +63,9 @@ assert {version: result.structured_content for version, result in results.items(
 The two oldest revisions return structured output as text. They have no
 `structuredContent` field.
 
-The helpers are async context managers. They close streams, HTTP clients, and
-temporary servers when the block exits. Use a production Client and a deployed
-URL in integration tests that must cover your proxy, TLS, or load balancer.
+`connect`, `over_http`, and `serving` close their resources when the async
+context exits. Await `every_revision` directly. Use a production `Client` and
+a deployed URL to test your proxy, TLS, or load balancer.
 
 `connect` limits request and response lines to 1 MiB by default, matching
 `StdioClient.spawn`. Pass `limit=...` in bytes to change both in-memory reader

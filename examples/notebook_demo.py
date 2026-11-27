@@ -58,11 +58,7 @@ class Entry:
 
 
 class NoteStore:
-    """The notebook itself, on one SQLite file.
-
-    This is the application's own data, not the protocol's: sessions and
-    events go to `aiohttp_tiny_mcp.storage.sqlite`, which keeps its own tables.
-    """
+    """Store the application's notes and TODOs in SQLite."""
 
     def __init__(self, path: str) -> None:
         self.path = path
