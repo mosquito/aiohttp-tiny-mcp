@@ -14,7 +14,7 @@ from aiohttp_tiny_mcp.protocol.adapter import Adapter
 from aiohttp_tiny_mcp.protocol.models import Implementation
 from aiohttp_tiny_mcp.transport.sse import read_sse
 
-from .base import BaseClient, CompletionProvider, Elicitor
+from .base import BaseClient, ClientError, CompletionProvider, Elicitor
 from .oauth import OAuth, OAuthError
 
 ANSWER_METHOD = "elicitation/create"
@@ -26,14 +26,34 @@ BASE_HEADERS = {"Content-Type": "application/json", "Accept": "application/json,
 log = logging.getLogger(__name__)
 
 
+BODY_EXCERPT = 120
+
+
 async def frames(resp: aiohttp.ClientResponse) -> AsyncIterator[dict[str, Any]]:
-    """Yield JSON or SSE messages immediately; waiting for EOF would deadlock pushed questions."""
-    if resp.content_type != "text/event-stream":
-        yield await resp.json(content_type=None)
+    """Yield JSON or SSE messages immediately; waiting for EOF would deadlock pushed questions.
+
+    A reply that is not JSON is reported with its HTTP status, because that is what a
+    mistyped address, a proxy error page and a gateway timeout all look like. A JSON-RPC
+    error keeps its own path, whatever the status: it carries a code of its own.
+
+    The address is named without its query, which may carry a credential.
+    """
+    if resp.content_type == "text/event-stream":
+        async for event in read_sse(resp):
+            if event.data:
+                yield json.loads(event.data)
         return
-    async for event in read_sse(resp):
-        if event.data:
-            yield json.loads(event.data)
+    raw = await resp.read()
+    try:
+        yield json.loads(raw)
+    except (ValueError, UnicodeDecodeError):
+        excerpt = " ".join(raw[: BODY_EXCERPT * 2].decode("utf-8", "replace").split())
+        raise ClientError(
+            -32000,
+            f"{resp.status} {resp.reason} from {resp.url.with_query(None)} "
+            f"is not an MCP reply: {excerpt[:BODY_EXCERPT] or 'no body'}",
+            data={"status": resp.status},
+        ) from None
 
 
 class Client(BaseClient):

@@ -288,6 +288,14 @@ async with Client(url, AdapterSet.default().by_version["2026-07-28"]) as client:
         await client.call_tool("absent", {})
 ```
 
+A reply that is not JSON at all raises `ClientError` too, naming the HTTP
+status, the address and the start of the body: `404 Not Found from
+https://example.test/mcp is not an MCP reply: Not Found`. That is what a
+mistyped address, a proxy error page and a gateway timeout look like, and
+`error.data["status"]` carries the status for a caller that branches on it. The
+address is named without its query, because a query may carry a credential and
+an exception message travels into logs.
+
 ## Over stdio
 
 `StdioClient.spawn` starts a subprocess and talks to its standard input and

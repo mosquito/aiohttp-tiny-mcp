@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import pytest
+from aiohttp import web
+from aiohttp.test_utils import TestServer
 from pydantic import BaseModel
 
 from aiohttp_tiny_mcp import (
     BlobResourceContents,
     CallToolResult,
     Client,
+    ClientError,
     EmbeddedResource,
     Registry,
     TextResourceContents,
@@ -110,3 +113,66 @@ async def test_embedded_resource_survives_a_round_trip(adapter) -> None:
     assert isinstance(block, EmbeddedResource)
     assert isinstance(block.resource, TextResourceContents)
     assert block.resource.text == "done"
+
+
+@pytest.mark.parametrize(
+    ("status", "body", "content_type", "named"),
+    [
+        (502, "<html>bad gateway</html>", "text/html", "502 Bad Gateway"),
+        (404, "Not Found", "text/plain", "404 Not Found"),
+        (200, "", "text/plain", "200 OK"),
+        (500, "a" * 4000, "text/plain", "500 Internal Server Error"),
+    ],
+)
+async def test_a_reply_that_is_not_json_names_its_status(status, body, content_type, named) -> None:
+    """A mistyped address, a proxy page and a gateway error all looked like a parse error.
+
+    The message names the status and the address, so the reader knows whether to fix the
+    URL or the server.
+    """
+
+    async def answer(request: web.Request) -> web.Response:
+        return web.Response(status=status, text=body, content_type=content_type)
+
+    app = web.Application()
+    app.router.add_route("*", "/mcp", answer)
+    async with TestServer(app) as server:
+        async with Client(str(server.make_url("/mcp")), ADAPTERS[0]) as client:
+            with pytest.raises(ClientError, match=named) as reported:
+                await client.initialize()
+    assert reported.value.data == {"status": status}
+    assert len(str(reported.value)) < 400, "the excerpt is bounded"
+
+
+async def test_the_address_in_the_message_carries_no_credential() -> None:
+    """A query may hold a token, and an exception message travels into logs."""
+
+    async def answer(request: web.Request) -> web.Response:
+        return web.Response(status=502, text="nope", content_type="text/plain")
+
+    app = web.Application()
+    app.router.add_route("*", "/mcp", answer)
+    async with TestServer(app) as server:
+        url = str(server.make_url("/mcp")) + "?access_token=secret-value"
+        async with Client(url, ADAPTERS[0]) as client:
+            with pytest.raises(ClientError) as reported:
+                await client.initialize()
+    assert "secret-value" not in str(reported.value)
+
+
+async def test_a_json_rpc_error_keeps_its_own_code() -> None:
+    """A protocol error carries a code already, whatever HTTP status it arrives with."""
+
+    async def answer(request: web.Request) -> web.Response:
+        return web.json_response(
+            {"jsonrpc": "2.0", "id": 1, "error": {"code": -32021, "message": "declare something"}},
+            status=400,
+        )
+
+    app = web.Application()
+    app.router.add_route("*", "/mcp", answer)
+    async with TestServer(app) as server:
+        async with Client(str(server.make_url("/mcp")), ADAPTERS[0]) as client:
+            with pytest.raises(ClientError, match="declare something") as reported:
+                await client.initialize()
+    assert reported.value.code == -32021
