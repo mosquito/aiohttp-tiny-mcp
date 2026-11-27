@@ -12,7 +12,7 @@ from aiohttp import ClientSession, web
 from aiohttp.test_utils import TestClient, TestServer
 from yarl import URL
 
-from aiohttp_tiny_mcp import Principal
+from aiohttp_tiny_mcp import Header, Principal, Query
 from aiohttp_tiny_mcp.console import Console
 from aiohttp_tiny_mcp.oauth import (
     Identity,
@@ -164,6 +164,7 @@ async def test_github_sign_in_produces_resource_bound_mcp_token(protected, provi
     assert metadata["grant_types_supported"] == ["authorization_code"]
     prm = await (await client.get("/.well-known/oauth-protected-resource/mcp")).json()
     assert prm["authorization_servers"] == [server.issuer]
+    assert prm["bearer_methods_supported"] == ["header"]
     result = await access_token(server, client)
     token = result["access_token"]
     assert token != "github-secret"
@@ -209,6 +210,24 @@ async def test_github_sign_in_produces_resource_bound_mcp_token(protected, provi
     else:
         await server.revoke(token)
         assert await server.verify(token) is None
+
+
+@pytest.mark.parametrize(
+    "protected", [{"sources": (Header("Bearer"), Query("access_token"))}], indirect=True
+)
+async def test_oauth_resource_accepts_a_token_from_a_query_source(protected):
+    server, client = protected
+    metadata = await (await client.get("/.well-known/oauth-protected-resource/mcp")).json()
+    assert metadata["bearer_methods_supported"] == ["header", "query"]
+    token = (await access_token(server, client))["access_token"]
+    response = await client.post(
+        "/mcp",
+        params={"access_token": token},
+        json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
+        headers={"Accept": "application/json, text/event-stream"},
+    )
+    assert response.status == 200, await response.text()
+    assert (await response.json())["result"]["tools"][0]["name"] == "who"
 
 
 @pytest.mark.parametrize(

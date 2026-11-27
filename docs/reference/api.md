@@ -164,6 +164,14 @@ The classes below provide the API reference.
 .. autoclass:: aiohttp_tiny_mcp.auth.Authentication
    :members:
 
+.. autodata:: aiohttp_tiny_mcp.auth.Source
+
+.. autoclass:: aiohttp_tiny_mcp.auth.Header
+
+.. autoclass:: aiohttp_tiny_mcp.auth.Query
+
+.. autofunction:: aiohttp_tiny_mcp.auth.read_credential
+
 .. autoclass:: aiohttp_tiny_mcp.auth.BasicAuth
    :members:
 

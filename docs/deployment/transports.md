@@ -79,9 +79,13 @@ endpoint.setup(app, "/mcp")
 runner = web.AppRunner(app)
 ```
 
-A logging filter replaces every `token` query value with `[REDACTED]` in request
-lines and logged URL headers, including `Referer`. Text and structured fields
-are both masked. Repeated and percent-encoded parameter names are recognized.
+A logging filter replaces query values for `token`, `access_token`, `secret`,
+and `jwt` with `[REDACTED]` in request lines and logged URL headers, including
+`Referer`. It also masks names from `Query` objects in a registered policy's
+`sources`. See [custom credential sources](../guide/auth.md#custom-credential-sources)
+to register additional names. Text and
+structured fields are both masked. Repeated and percent-encoded parameter names
+are recognized.
 The filter preserves the original request, log format, handlers, and logger class.
 It also covers refusals before an MCP handler runs.
 

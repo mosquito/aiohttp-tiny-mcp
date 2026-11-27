@@ -17,7 +17,7 @@ from typing import Any
 from aiohttp import ClientSession, ClientTimeout, DummyCookieJar, web
 from yarl import URL
 
-from aiohttp_tiny_mcp.auth import Authorization, Principal
+from aiohttp_tiny_mcp.auth import Authorization, Header, Principal, Source
 from aiohttp_tiny_mcp.storage.sessions import MemorySessionStore, SessionRecord, SessionStore
 from aiohttp_tiny_mcp.transport.metadata import metadata_route
 
@@ -136,7 +136,12 @@ class OAuthServer:
         self.callback_url = issuer + "/callback"
         self._http: ClientSession | None = None
 
-    def resource(self, *, required_scopes: Sequence[str] = ()) -> Authorization:
+    def resource(
+        self,
+        *,
+        required_scopes: Sequence[str] = (),
+        sources: Sequence[Source] = (Header("Bearer"),),
+    ) -> Authorization:
         """Return the Registry authentication policy bound to this resource and issuer."""
         if set(required_scopes) - set(self.scopes):
             raise ValueError("required scopes must be declared by the server")
@@ -146,6 +151,7 @@ class OAuthServer:
             authorization_servers=(self.issuer,),
             scopes_supported=self.scopes,
             required_scopes=tuple(required_scopes),
+            sources=sources,
         )
 
     def metadata(self) -> dict[str, Any]:

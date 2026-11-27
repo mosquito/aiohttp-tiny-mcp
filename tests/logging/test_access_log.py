@@ -11,8 +11,16 @@ from aiohttp.test_utils import TestClient, TestServer, make_mocked_request
 from aiohttp.web_log import AccessLogger
 from yarl import URL
 
-from aiohttp_tiny_mcp import Endpoint, Registry, SseEndpoint, StaticBasicAuth
-from aiohttp_tiny_mcp.access_log import TOKEN_QUERY_FILTER, install_token_filter, mask_token
+from aiohttp_tiny_mcp import (
+    Authorization,
+    Endpoint,
+    Principal,
+    Registry,
+    SseEndpoint,
+    StaticBasicAuth,
+    StaticVerifier,
+)
+from aiohttp_tiny_mcp.access_log import TokenQueryFilter, install_token_filter, mask_token
 
 pytestmark = pytest.mark.usefixtures("restore_access_filters")
 
@@ -21,6 +29,10 @@ pytestmark = pytest.mark.usefixtures("restore_access_filters")
     ("url", "expected"),
     [
         ("/mcp?token=private&org=team", "/mcp?token=[REDACTED]&org=team"),
+        (
+            "/mcp?access_token=one&SECRET=two&jwt=three",
+            "/mcp?access_token=[REDACTED]&SECRET=[REDACTED]&jwt=[REDACTED]",
+        ),
         (
             "/mcp?org=a%20b&%74oken=one%26two&token=again&empty=&flag",
             "/mcp?org=a%20b&%74oken=[REDACTED]&token=[REDACTED]&empty=&flag",
@@ -179,7 +191,8 @@ async def test_existing_logger_handlers_filters_and_runner_options_are_preserved
     install_token_filter()
     Endpoint(Registry("another", "1"))
     SseEndpoint(Registry("legacy", "1"))
-    assert access_logger.filters.count(TOKEN_QUERY_FILTER) == 1
+    installed = [f for f in access_logger.filters if isinstance(f, TokenQueryFilter)]
+    assert len(installed) == 1, "installing again replaces the filter, it does not stack"
     assert existing_filter in access_logger.filters
     assert access_logger.handlers == handlers
     assert type(access_logger) is logger_type
@@ -196,6 +209,43 @@ async def test_existing_logger_handlers_filters_and_runner_options_are_preserved
     assert len(records) == 1
     assert records[0].existing_filter is True
     assert records[0].getMessage() == "404 GET /missing?token=[REDACTED] HTTP/1.1"
+
+
+async def test_explicit_filter_masks_a_custom_source_query_name(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(logging.INFO, logger=access_logger.name)
+
+    def api_key(request: web.Request) -> str | None:
+        return request.query.get("api_key")
+
+    auth = Authorization(
+        StaticVerifier({"private-key": Principal(subject="alice")}),
+        "https://example.test/mcp",
+        sources=(api_key,),
+    )
+    registry = Registry("test", "1", auth=auth)
+    assert registry.credential_arguments == ()
+    install_token_filter("api_key")
+    async with TestClient(TestServer(Endpoint(registry).app())) as client:
+        authenticated = await client.post(
+            "/mcp?api_key=private-key",
+            headers={"Accept": "application/json, text/event-stream"},
+            json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
+        )
+        assert authenticated.status == 200
+        await authenticated.read()
+        missing = await client.get("/missing?api_key=other-key")
+        assert missing.status == 404
+        await missing.read()
+
+    records = [record for record in caplog.records if record.name == access_logger.name]
+    assert len(records) == 2
+    for record in records:
+        assert "api_key=[REDACTED]" in record.first_request_line
+        assert "api_key=[REDACTED]" in record.getMessage()
+        assert "private-key" not in record.getMessage()
+        assert "other-key" not in record.getMessage()
 
 
 def test_filter_preserves_records_without_token_query_values(
@@ -227,7 +277,7 @@ async def test_setup_opt_out_leaves_stock_access_logging_unchanged(
         app = Endpoint(registry).app(mask_tokens_in_logs=False)
     else:
         Endpoint(registry).setup(app, mask_tokens_in_logs=False)
-    assert TOKEN_QUERY_FILTER not in access_logger.filters
+    assert not any(isinstance(f, TokenQueryFilter) for f in access_logger.filters)
     async with TestClient(TestServer(app)) as client:
         response = await client.get("/missing?token=optout-test-value")
         assert response.status == 404
@@ -252,7 +302,7 @@ async def test_setup_opt_out_preserves_masking_installed_by_another_application(
         app = Endpoint(registry).app(mask_tokens_in_logs=False)
     else:
         Endpoint(registry).setup(app, mask_tokens_in_logs=False)
-    assert access_logger.filters.count(TOKEN_QUERY_FILTER) == 1
+    assert sum(isinstance(f, TokenQueryFilter) for f in access_logger.filters) == 1
     async with TestClient(TestServer(app)) as client:
         response = await client.get("/missing?token=protected-test-value")
         assert response.status == 404

@@ -237,7 +237,7 @@ class Endpoint:
         mask_tokens_in_logs: bool = True,
     ) -> web.Application:
         if mask_tokens_in_logs:
-            install_token_filter()
+            install_token_filter(*self.registry.credential_arguments)
         log.debug("adding the MCP routes to %r", app)
         app[MCP_ENDPOINT] = self
         app.add_routes(self.routes(path, name=name))

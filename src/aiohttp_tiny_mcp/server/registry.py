@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable, Iterable, Mapping
 from typing import Any
 
-from aiohttp_tiny_mcp.auth import Authentication, Principal
+from aiohttp_tiny_mcp.auth import Authentication, Principal, Query
 from aiohttp_tiny_mcp.extensions import Extension, ExtensionSpec
 from aiohttp_tiny_mcp.protocol.models import Implementation
 from aiohttp_tiny_mcp.storage.hub import NOTIFICATIONS, Cursor, Hub, MemoryHub, topic
@@ -92,6 +92,17 @@ class Registry:
         if isinstance(self._auth, Authentication):
             return (self._auth,)
         return self._auth
+
+    @property
+    def credential_arguments(self) -> tuple[str, ...]:
+        """Return distinct names from Query objects in the policies' sources."""
+        found = {
+            source.name: None
+            for policy in self.auth_policies
+            for source in getattr(policy, "sources", ())
+            if isinstance(source, Query)
+        }
+        return tuple(found)
 
     def extension(self, extension: Extension) -> None:
         """Install an extension and its resources after checking all declarations.

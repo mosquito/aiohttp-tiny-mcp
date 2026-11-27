@@ -407,7 +407,7 @@ class SseEndpoint:
         mask_tokens_in_logs: bool = True,
     ) -> web.Application:
         if mask_tokens_in_logs:
-            install_token_filter()
+            install_token_filter(*self.registry.credential_arguments)
         log.debug("adding the HTTP+SSE routes to %r", app)
         app.add_routes(self.routes(sse_path, message_path, metadata=metadata))
         app.on_shutdown.append(self.closing)

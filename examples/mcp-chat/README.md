@@ -109,6 +109,8 @@ http://127.0.0.1:8080/mcp?token=<token>
 
 Bearer headers are preferable when supported: URL tokens can appear in copied
 links and proxy logs. Use HTTPS when sending credentials over a network.
+The chat's [custom credential source](mcp_chat/auth.py) rejects duplicate
+credentials and requests that send both forms.
 
 ### Identity and organizations
 
