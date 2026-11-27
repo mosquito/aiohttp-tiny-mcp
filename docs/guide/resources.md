@@ -122,7 +122,8 @@ The setting applies to each request, including discovery and notification stream
 
 Repeated values are accepted. Empty or unknown values return HTTP 400.
 Other endpoint query parameters are preserved. On legacy HTTP+SSE, the advertised
-POST URL carries the selected modes. Stdio uses native resources.
+POST URL carries the selected modes. To use the tools over stdio, pass
+`resources="tool"` to [the launch function](../deployment/transports.md#stdio).
 
 Tool mode exposes two names through `tools/list`:
 
@@ -176,9 +177,13 @@ In tool-only mode, the server omits the native `resources` capability and reject
 native resource listing, reading, subscription, and completion requests. Resource
 notifications are disabled. Use both modes when the client needs subscriptions.
 
-`Registry` reserves exactly `mcp_resources_list` and `mcp_resources_read` by default.
-Registering either as an application tool raises `ValueError`. Disable the feature
-to release both names and stop interpreting the `resources` query parameter:
+The tool catalogue also lists [prompts](prompts.md#clients-without-native-prompts)
+as address templates. With native resources, add `prompts=resource` to include
+those templates in `resources/templates/list` and use `resources/read`.
+
+`Registry` reserves the tool names `mcp_resources_list` and `mcp_resources_read`
+and the `mcp-prompt:` scheme by default. Disable the feature to release those
+names and turn off the two compatibility query options:
 
 <!-- name: test_resource_tools_opt_out -->
 ```python

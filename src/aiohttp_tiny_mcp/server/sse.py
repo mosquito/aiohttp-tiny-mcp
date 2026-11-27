@@ -135,6 +135,8 @@ class SseEndpoint:
         query = [("session_id", session_id)]
         if self.registry.resource_tools:
             query.extend(("resources", mode) for mode in request.query.getall("resources", []))
+            if "resource" in request.query.getall("prompts", ()):
+                query.append(("prompts", "resource"))
         await self.write(response, "endpoint", str(URL(posting).with_query(query)))
 
         try:

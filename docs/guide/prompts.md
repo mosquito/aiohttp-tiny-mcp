@@ -116,7 +116,47 @@ A person filling in `language` should not have to guess what is accepted. See
 
 ## A prompt may ask, too
 
-A prompt handler receives the `Exchange` like any other, so it can ask the user
-something while it builds the messages. Whether that is a good idea depends on
-your host -- a prompt is already a person interacting -- but nothing stops it.
+Prompt handlers can call `ex.ask()`. Pass `on_ask` to answer questions through
+`get_prompt()` on `2026-07-28`, `2025-11-25`, and `2025-06-18`. On
+`2026-07-28`, the Python client retries the request with the answers and any
+request state. If a callback is missing, it raises `ClientError` with the
+`input_required` result in `error.data`.
+
+On `2025-03-26` and `2024-11-05`, call `mcp_resources_read` through
+`Client.call_tool()` so the answers can travel as tool arguments.
 See [Asking the user](asking.md).
+
+## Clients without native prompts
+
+Add `prompts=resource` to the endpoint URL to list prompts as native resource
+templates. A client that uses `resources=tool` finds the same addresses with
+`mcp_resources_list` and reads them with `mcp_resources_read`.
+Over stdio, pass `prompts="resource"` to `run_stdio()` to add the templates to
+the native catalogue, or pass `resources="tool"` to use the resource tools.
+
+An address starts with `mcp-prompt:///` and the URL-encoded prompt name.
+Replace `{arguments}` with a percent-encoded JSON object. Omit the query
+when the prompt accepts an empty argument object. A read uses the same prompt
+handler and argument validation as `prompts/get`. The result contains
+`messages` and any `description` returned by the handler.
+
+<!-- name: async test_prompts; fixtures: serve -->
+```python
+import json
+from urllib.parse import quote
+
+url = await serve(registry)
+endpoint = url + "?prompts=resource"
+async with Client(endpoint, AdapterSet.default().by_version["2026-07-28"]) as client:
+    await client.initialize()
+    template = next(
+        item
+        for item in await client.list_resource_templates()
+        if item.uri_template.startswith("mcp-prompt:///code_review?")
+    )
+    arguments = quote(json.dumps({"language": "python"}), safe="")
+    uri = template.uri_template.replace("{arguments}", arguments)
+    result = await client.read_resource(uri)
+    prompt = json.loads(result.contents[0].text)
+    assert "python code" in prompt["messages"][0]["content"]["text"]
+```

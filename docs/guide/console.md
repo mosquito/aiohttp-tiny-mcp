@@ -301,6 +301,12 @@ every version of an agent lacks native resource support.
 Selecting only native resources removes all existing `resources` parameters.
 The Antigravity format and paths were checked on 2026-11-21.
 
+Codex defaults to native resources with **include prompts** enabled. This adds
+`prompts=resource` to the generated URL. Select or clear **include prompts**
+when using native resources to control this setting. The resource tools already
+include [prompt addresses](prompts.md#clients-without-native-prompts), including
+in the Pi preset.
+
 When the registry disables resource tools, pass the same setting to the console:
 
 ```python

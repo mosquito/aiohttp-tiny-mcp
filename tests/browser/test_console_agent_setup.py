@@ -112,6 +112,10 @@ async def test_agent_dialog_switches_formats_and_rejects_invalid_names(
         )
         if method == "codex":
             assert '[mcp_servers."test_server"]' in code
+            assert "prompts=resource" in code
+            await expect(page.locator("#agent-prompt-resources")).to_be_checked()
+            await page.locator("#agent-prompt-resources").uncheck()
+            assert "prompts=resource" not in await page.locator("#agent-code").input_value()
             await expect(page.locator("#agent-target")).to_have_text(
                 "Configuration file: ~/.codex/config.toml"
             )

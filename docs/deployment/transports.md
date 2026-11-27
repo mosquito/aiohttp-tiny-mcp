@@ -314,6 +314,17 @@ if __name__ == "__main__":
 It reads until its input closes, so there is nothing to stop and no port to
 choose. The host that launched it owns its lifetime.
 
+Use `run_stdio(registry, resources="tool")` for clients that read data through
+[resource tools](../guide/resources.md#access-through-tools). For clients with
+native resources but no native prompts, use `run_stdio(registry, prompts="resource")`
+to add [prompt addresses](../guide/prompts.md#clients-without-native-prompts)
+to the native resource catalogue. `serve_stdio()` accepts the same keywords.
+Omit either keyword, or pass `None` or `"native"`, for its native mode.
+
+The tool catalogue includes prompt addresses. With `resources="tool"`, use
+that catalogue to find and read prompts. `Registry(resource_tools=False)`
+disables both compatibility modes.
+
 It is not a reduced transport. Subscriptions, questions, logging, progress and
 cancellation all work there. Two things follow from having one channel instead
 of two.

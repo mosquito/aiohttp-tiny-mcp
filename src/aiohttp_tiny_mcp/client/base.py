@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
-from typing import Any
+from typing import Any, Literal
 
 from aiohttp_tiny_mcp.protocol.adapter import Adapter
 from aiohttp_tiny_mcp.protocol.core import ClientProfile, InputRequest, Operation
@@ -271,24 +271,47 @@ class BaseClient(ABC):
     ) -> CallToolResult | dict[str, Any]:
         if tool_definition is not None:
             self.tool_definitions[name] = tool_definition
+        result, needs_input = await self.request_with_input(
+            Operation.CALL_TOOL,
+            name,
+            arguments,
+            input_responses=input_responses,
+            request_state=request_state,
+        )
+        if needs_input:
+            return result
+        return CallToolResult.model_validate(result)
+
+    async def request_with_input(
+        self,
+        operation: Literal[Operation.CALL_TOOL, Operation.GET_PROMPT],
+        name: str,
+        arguments: dict[str, Any],
+        *,
+        input_responses: dict[str, Any] | None = None,
+        request_state: Any = None,
+    ) -> tuple[dict[str, Any], bool]:
+        """Return a tool or prompt result and whether it needs an answer from the caller."""
         answers = dict(input_responses or {})
         state = request_state
+        params_type = CallToolParams if operation is Operation.CALL_TOOL else GetPromptParams
         for _ in range(ASK_ROUNDS):
-            params = CallToolParams(
+            params = params_type(
                 name=name,
                 arguments=arguments,
                 input_responses=answers or None,
                 request_state=state,
             )
-            result = await self.request(Operation.CALL_TOOL, params, name=name)
+            result = await self.request(operation, params, name=name)
+            if operation is Operation.GET_PROMPT and not self.adapter.can_ask:
+                return result, False
             asked = self.adapter.client_input_requests(result)
             if asked is None:
-                return CallToolResult.model_validate(result)
+                return result, False
             requests, state = asked
             if not self.can_answer(requests):
-                # Without a provider, return the requests for the caller to answer.
-                return result
-            # Resend earlier answers because the handler restarts on each round.
+                return result, True
+            # Send the previous answers again when the handler starts a new round.
             for key, request in requests.items():
                 answers[key] = dict(await self.answer_request(request))
         raise ClientError(-32000, f"{name} still asking after {ASK_ROUNDS} rounds")
@@ -382,9 +405,11 @@ class BaseClient(ABC):
         return found
 
     async def get_prompt(self, name: str, arguments: dict[str, str]) -> GetPromptResult:
-        result = await self.request(
-            Operation.GET_PROMPT, GetPromptParams(name=name, arguments=arguments), name=name
-        )
+        result, needs_input = await self.request_with_input(Operation.GET_PROMPT, name, arguments)
+        if needs_input:
+            raise ClientError(
+                -32000, f"Prompt {name!r} requires input with no matching callback", result
+            )
         return GetPromptResult.model_validate(result)
 
     async def complete(self, ref: dict[str, Any], argument: dict[str, str]) -> CompleteResult:

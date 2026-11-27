@@ -13,7 +13,7 @@ from typing import Any
 import pytest
 from pydantic import BaseModel
 
-from aiohttp_tiny_mcp import Exchange, Registry
+from aiohttp_tiny_mcp import ClientError, Exchange, Registry, StdioClient
 from aiohttp_tiny_mcp.protocol.selection import AdapterSet
 from aiohttp_tiny_mcp.server.stdio import serve_stdio, stdin_reader
 from aiohttp_tiny_mcp.testing import connect
@@ -31,6 +31,84 @@ def feed(*messages: dict[str, Any]) -> asyncio.StreamReader:
 
 class Nothing(BaseModel):
     pass
+
+
+@pytest.mark.parametrize(
+    ("resources", "prompts", "enabled"),
+    [
+        (None, None, True),
+        ("tool", None, True),
+        ("native", "resource", True),
+        ("tool", "resource", True),
+        ("tool", "resource", False),
+    ],
+)
+async def test_run_stdio_selects_resource_and_prompt_modes(tmp_path, resources, prompts, enabled):
+    script = tmp_path / "stdio_modes.py"
+    script.write_text(
+        f"""import asyncio
+from pydantic import BaseModel
+from aiohttp_tiny_mcp import Registry, run_stdio
+
+class Empty(BaseModel):
+    pass
+
+registry = Registry("test", "1", resource_tools={enabled!r})
+
+@registry.resource("file://example")
+async def example(args: Empty) -> str:
+    return "ordinary resource"
+
+@registry.prompt
+async def guide(args: Empty) -> str:
+    return "prompt message"
+
+asyncio.run(run_stdio(registry, resources={resources!r}, prompts={prompts!r}))
+"""
+    )
+    adapter = AdapterSet.default().by_version["2026-07-28"]
+    async with StdioClient.spawn(sys.executable, str(script), adapter=adapter) as client:
+        capabilities = (await client.initialize())["capabilities"]
+        uri = "mcp-prompt:///guide"
+        prompt = await client.get_prompt("guide", {})
+        assert prompt.messages[0].content.text == "prompt message"
+        if resources == "tool" and enabled:
+            assert "resources" not in capabilities
+            assert {tool.name for tool in await client.list_tools()} == {
+                "mcp_resources_list",
+                "mcp_resources_read",
+            }
+            data = await client.call_tool("mcp_resources_list", {})
+            assert {
+                item.get("uriTemplate", item.get("uri"))
+                for item in data.structured_content["items"]
+            } == {
+                "file://example",
+                uri,
+            }
+            result = await client.call_tool("mcp_resources_read", {"uri": uri})
+            assert result.structured_content["messages"][0]["content"]["text"] == "prompt message"
+            with pytest.raises(ClientError):
+                await client.list_resources()
+        else:
+            assert "resources" in capabilities
+            assert await client.list_tools() == []
+            assert [item.uri for item in await client.list_resources()] == ["file://example"]
+            templates = await client.list_resource_templates()
+            if prompts == "resource" and enabled:
+                assert [item.uri_template for item in templates] == [uri]
+                result = await client.read_resource(uri)
+                assert json.loads(result.contents[0].text)["messages"][0]["content"]["text"] == (
+                    "prompt message"
+                )
+            else:
+                assert templates == []
+
+
+@pytest.mark.parametrize("option", ["resources", "prompts"])
+async def test_serve_stdio_rejects_an_unknown_mode(option):
+    with pytest.raises(ValueError, match=option):
+        await serve_stdio(Registry("test", "1"), feed(), lambda reply: None, **{option: "unknown"})
 
 
 @pytest.mark.parametrize("version", AdapterSet.default().versions)

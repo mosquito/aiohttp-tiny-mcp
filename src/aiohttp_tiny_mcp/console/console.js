@@ -805,6 +805,7 @@ const page = {
   agentResources: document.getElementById("agent-resources"),
   agentResourcesTool: document.getElementById("agent-resources-tool"),
   agentResourcesNative: document.getElementById("agent-resources-native"),
+  agentPromptResources: document.getElementById("agent-prompt-resources"),
   agentTarget: document.getElementById("agent-target"),
   agentInstructions: document.getElementById("agent-instructions"),
   agentLanguage: document.getElementById("agent-language"),
@@ -905,6 +906,7 @@ function resetAgentResources() {
   const modes = agentResourceDefaults(page.agentMethod.value);
   page.agentResourcesTool.checked = modes.includes("tool");
   page.agentResourcesNative.checked = modes.includes("native");
+  page.agentPromptResources.checked = agentPromptResourceDefault(page.agentMethod.value);
 }
 
 function agentLevelKey() {
@@ -929,12 +931,14 @@ function renderAgentSetup() {
   page.agentDocs.hidden = true;
   try {
     if (!agentConnection) return;
+    page.agentPromptResources.disabled = !page.agentResourcesNative.checked;
     const variants = agentConfigurations({
       endpoint: agentConnection.url,
       level: page.agentLevel.value,
       name: page.agentName.value,
       headers: page.agentHeaders.checked ? agentConnection.headers : {},
       resourceTools: document.documentElement.dataset.resourceTools !== "false",
+      promptResources: page.agentPromptResources.checked,
       resourceModes: page.agentResources ? [
         ...(page.agentResourcesTool.checked ? ["tool"] : []),
         ...(page.agentResourcesNative.checked ? ["native"] : []),
@@ -1003,6 +1007,7 @@ function setupAgentDialog() {
   if (page.agentResources) {
     page.agentResourcesTool.onchange = renderAgentSetup;
     page.agentResourcesNative.onchange = renderAgentSetup;
+    page.agentPromptResources.onchange = renderAgentSetup;
   }
   page.agentLevel.onchange = () => {
     try { localStorage.setItem(agentLevelKey(), page.agentLevel.value); } catch {}

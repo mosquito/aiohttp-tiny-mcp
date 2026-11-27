@@ -4,8 +4,12 @@ function agentResourceDefaults(agent) {
   return ['pi', 'antigravity', 'copilot'].includes(agent) ? ['tool'] : ['native'];
 }
 
+function agentPromptResourceDefault(agent) {
+  return agent === 'codex';
+}
+
 function agentConfigurations({endpoint, name = 'mcp', headers = {}, level = 'user',
-  resourceTools = true, resourceModes} = {}) {
+  resourceTools = true, resourceModes, promptResources} = {}) {
   if (!['project', 'user'].includes(level)) {
     throw new Error('Choose Project or User configuration level.');
   }
@@ -38,24 +42,28 @@ function agentConfigurations({endpoint, name = 'mcp', headers = {}, level = 'use
     }
   }
   const credentials = entries.length ? {headers: Object.fromEntries(entries)} : {};
-  const withResources = modes => {
+  const withResources = (modes, includePromptResources) => {
     if (!Array.isArray(modes) || !modes.length || modes.some(mode => !['tool', 'native'].includes(mode))) {
       throw new Error('Select at least one resource interface.');
     }
     const queryStart = endpoint.indexOf('?');
     const base = queryStart === -1 ? endpoint : endpoint.slice(0, queryStart);
     const parameters = queryStart === -1 ? [] : endpoint.slice(queryStart + 1).split('&')
-      .filter(parameter => parameter && !new URLSearchParams(parameter).has('resources'));
+      .filter(parameter => {
+        const pair = new URLSearchParams(parameter);
+        return parameter && !pair.has('resources') && pair.get('prompts') !== 'resource';
+      });
     const selected = [...new Set(modes)];
     if (selected.includes('tool')) {
       parameters.push('resources=tool');
       if (selected.includes('native')) parameters.push('resources=native');
     }
+    if (includePromptResources && selected.includes('native')) parameters.push('prompts=resource');
     return parameters.length ? `${base}?${parameters.join('&')}` : base;
   };
-  const selectedEndpoint = resourceTools && resourceModes !== undefined ? withResources(resourceModes) : null;
-  const endpointFor = agent => !resourceTools ? endpoint : selectedEndpoint ??
-    withResources(agentResourceDefaults(agent));
+  const endpointFor = agent => !resourceTools ? endpoint : withResources(
+    resourceModes === undefined ? agentResourceDefaults(agent) : resourceModes,
+    promptResources ?? agentPromptResourceDefault(agent));
   const server = agent => ({url: endpointFor(agent), ...credentials});
   const json = value => JSON.stringify(value, null, 2);
   const named = value => ({mcpServers: {[name]: value}});

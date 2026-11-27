@@ -179,7 +179,9 @@ def test_codex_toml_round_trip() -> None:
         "process.stdout.write(configs.find(config => config.id === 'codex').code);\n"
     )
     assert tomllib.loads(result) == {
-        "mcp_servers": {"chat-test_1": {"url": endpoint, "http_headers": headers}},
+        "mcp_servers": {
+            "chat-test_1": {"url": endpoint + "&prompts=resource", "http_headers": headers}
+        },
     }
 
 
@@ -220,10 +222,13 @@ def test_explicit_resource_modes_apply_to_every_agent() -> None:
 const endpoint = 'https://example.com/mcp?token=a%20b&resources=native&resources=tool&x=%2f';
 for (const resourceModes of [['tool'], ['native'], ['tool', 'native']]) {
   for (const config of agentConfigurations({endpoint, resourceModes})) {
-    const expected = 'https://example.com/mcp?token=a%20b&x=%2f'
+    let expected = 'https://example.com/mcp?token=a%20b&x=%2f'
       + (resourceModes.includes('tool')
         ? '&' + resourceModes.map(mode => `resources=${mode}`).join('&') : '');
-    if (config.language === 'toml') assert.ok(config.code.includes(JSON.stringify(expected)));
+    if (config.language === 'toml') {
+      if (resourceModes.includes('native')) expected += '&prompts=resource';
+      assert.ok(config.code.includes(JSON.stringify(expected)));
+    }
     else {
       const body = JSON.parse(config.code);
       const server = (body.mcpServers || body.mcp.servers).mcp;
@@ -276,6 +281,16 @@ def test_agent_dialog_resource_defaults_and_independent_overrides() -> None:
 openAgentSetup();
 assert.equal(page.agentResourcesTool.checked, false);
 assert.equal(page.agentResourcesNative.checked, true);
+assert.equal(page.agentPromptResources.checked, false);
+page.agentMethod.value = 'codex';
+page.agentMethod.onchange();
+assert.equal(page.agentResourcesTool.checked, false);
+assert.equal(page.agentResourcesNative.checked, true);
+assert.equal(page.agentPromptResources.checked, true);
+assert.match(page.agentCode.value, /mcp\?prompts=resource/);
+page.agentPromptResources.checked = false;
+page.agentPromptResources.onchange();
+assert.doesNotMatch(page.agentCode.value, /prompts=resource/);
 for (const agent of ['copilot', 'pi', 'antigravity']) {
   page.agentMethod.value = agent;
   page.agentMethod.onchange();

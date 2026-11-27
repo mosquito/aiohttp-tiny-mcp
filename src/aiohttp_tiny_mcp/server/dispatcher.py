@@ -45,6 +45,7 @@ from aiohttp_tiny_mcp.protocol.models import (
     SetLevelParams,
     SubscribeParams,
     TextContent,
+    TextResourceContents,
     ToolDef,
     cache_ttl_milliseconds,
 )
@@ -54,7 +55,14 @@ from .exchange import Exchange, waiting_for
 from .registry import Registry
 from .request_state import RequestStates, protect_request_state, restore_request_state
 from .resource_auth import resource_refusal, visible_resource
-from .resource_tools import resource_capabilities, resource_modes
+from .resource_tools import (
+    PROMPT_SCHEME,
+    prompt_address,
+    prompt_addresses,
+    prompts_as_resources,
+    resource_capabilities,
+    resource_modes,
+)
 from .specs import ToolSpec
 from .subscriptions import listen, subscribe, unsubscribe
 
@@ -310,9 +318,14 @@ class Dispatcher:
 
     async def describe(self, ex: Exchange) -> Outcome:
         result = ex.adapter.describe_server(self.registry, ex.call)
-        caps = resource_capabilities(
-            self.registry, ex.adapter, resource_modes(self.registry, ex.request)
-        )
+        modes = resource_modes(self.registry, ex.request)
+        caps = resource_capabilities(self.registry, ex.adapter, modes)
+        if (
+            "native" in modes
+            and self.registry.prompts
+            and prompts_as_resources(self.registry, ex.request)
+        ):
+            caps.setdefault("resources", {})
         return Value(result=result.model_copy(update={"capabilities": caps}))
 
     async def handshake_complete(self, ex: Exchange) -> Outcome:
@@ -402,6 +415,8 @@ class Dispatcher:
             for spec in self.registry.resources_templated
             if isinstance(d := ex.adapter.describe_resource(spec), ResourceTemplateDef)
         ]
+        if prompts_as_resources(self.registry, ex.request):
+            defs.extend(prompt_addresses(self.registry, ex.adapter))
         defs.sort(key=lambda item: item.uri_template)
         found = self.paged(ex, defs, lambda item: item.uri_template, params)
         if isinstance(found, Failure):
@@ -413,6 +428,23 @@ class Dispatcher:
 
     async def read_resource(self, ex: Exchange, *, uri: str | None = None) -> Outcome:
         uri = uri if uri is not None else ex.call.target or ""
+        if uri.casefold().startswith(PROMPT_SCHEME) and prompts_as_resources(
+            self.registry, ex.request
+        ):
+            prompt = await self.read_prompt_address(ex, uri)
+            if not isinstance(prompt, Value):
+                return prompt
+            return Value(
+                result=ReadResourceResult(
+                    contents=[
+                        TextResourceContents(
+                            uri=uri,
+                            mime_type="application/json",
+                            text=prompt.result.model_dump_json(by_alias=True, exclude_none=True),
+                        )
+                    ]
+                )
+            )
         found = self.registry.match_resource(uri)
         if found is None:
             return Failure(FailureKind.RESOURCE_NOT_FOUND, f"resource not found: {uri}")
@@ -451,15 +483,34 @@ class Dispatcher:
         shown, next_cursor = found
         return Value(result=ListPromptsResult(prompts=shown, next_cursor=next_cursor))
 
-    async def get_prompt(self, ex: Exchange) -> Outcome:
-        spec = self.registry.prompts.get(ex.call.target or "")
+    async def get_prompt(
+        self, ex: Exchange, *, name: str | None = None, arguments: Mapping[str, Any] | None = None
+    ) -> Outcome:
+        name = name if name is not None else ex.call.target
+        spec = self.registry.prompts.get(name or "")
         if spec is None or ex.adapter.describe_prompt(spec) is None:
-            return Failure(FailureKind.UNKNOWN_TARGET, f"unknown prompt: {ex.call.target}")
+            return Failure(FailureKind.UNKNOWN_TARGET, f"unknown prompt: {name}")
         try:
-            value = await spec.bound.call(dict(ex.call.arguments), ex)
+            value = await spec.bound.call(
+                dict(ex.call.arguments if arguments is None else arguments), ex
+            )
         except ValidationError as e:
             return Failure(FailureKind.INVALID_PARAMS, str(e))
         return Value(result=prompt_result(value))
+
+    async def read_prompt_address(self, ex: Exchange, uri: str) -> Outcome:
+        try:
+            name, arguments = prompt_address(uri)
+        except ValueError:
+            return Failure(FailureKind.INVALID_PARAMS, "Invalid prompt address or arguments")
+        try:
+            return await self.get_prompt(ex, name=name, arguments=arguments)
+        except NeedInput:
+            if ex.call.operation is Operation.READ_RESOURCE and ex.adapter.asks_in_arguments:
+                return Failure(
+                    FailureKind.INPUT_UNSUPPORTED, "Use the resource tool to answer this prompt"
+                )
+            raise
 
     async def complete(self, ex: Exchange) -> Outcome:
         if isinstance(ex.call.params, CompleteParams) and ex.call.params.ref.type == "ref/resource":

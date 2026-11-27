@@ -16,7 +16,7 @@ from .caching import Cache, CacheHint, checked_cache_hints
 from .exchange import Exchange, Instance
 from .request_state import DEFAULT_TTL_SECONDS as STATE_TTL_SECONDS
 from .request_state import RequestStates
-from .resource_tools import RESOURCE_TOOL_NAMES, resource_tool_specs
+from .resource_tools import PROMPT_SCHEME, RESOURCE_TOOL_NAMES, resource_tool_specs
 from .specs import Bound, PromptSpec, ResourceSpec, ToolSpec
 
 
@@ -167,6 +167,7 @@ class Registry:
             for address in {uri, resource.legacy_uri}:
                 if address is None:
                     continue
+                self.check_resource_address(address)
                 if (
                     address in claimed
                     or address in self.resources_fixed
@@ -295,6 +296,8 @@ class Registry:
         return register(fn) if fn else register
 
     def resource(self, uri: str, fn: Callable[..., Awaitable[Any]] | None = None, **kw: Any):
+        self.check_resource_address(uri)
+
         def register(fn: Callable[..., Awaitable[Any]]):
             spec = ResourceSpec.build(uri, fn, **kw)
             if spec.scopes and self.auth is None:
@@ -322,6 +325,10 @@ class Registry:
             return fn
 
         return register(fn) if fn else register
+
+    def check_resource_address(self, uri: str) -> None:
+        if self.resource_tools and uri.casefold().startswith(PROMPT_SCHEME):
+            raise ValueError(f"resource address uses reserved scheme {PROMPT_SCHEME} {uri}")
 
     def prompt(self, fn: Callable[..., Awaitable[Any]] | None = None, **kw: Any):
         def register(fn: Callable[..., Awaitable[Any]]):

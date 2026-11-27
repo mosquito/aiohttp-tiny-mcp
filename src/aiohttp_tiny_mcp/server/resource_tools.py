@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import json
 from typing import TYPE_CHECKING, Any
+from urllib.parse import parse_qs, quote, unquote, urlsplit
 
 from aiohttp import web
 from pydantic import BaseModel, ConfigDict, Field
@@ -13,6 +15,7 @@ from aiohttp_tiny_mcp.protocol.models import (
     CallToolResult,
     Hint,
     ListParams,
+    PromptArgumentDef,
     ResourceDef,
     ResourceTemplateDef,
 )
@@ -24,13 +27,18 @@ if TYPE_CHECKING:
     from .registry import Registry
 
 RESOURCE_TOOL_NAMES = frozenset({"mcp_resources_list", "mcp_resources_read"})
+PROMPT_SCHEME = "mcp-prompt:"
 NATIVE = frozenset({"native"})
 
 
 def resource_modes(registry: Registry, request: RequestLike) -> frozenset[str]:
     """Read interface modes without assigning state to a shared registry."""
-    if not registry.resource_tools or not isinstance(request, web.Request):
+    if not registry.resource_tools:
         return NATIVE
+    if not isinstance(request, web.Request):
+        from .stdio import StdioRequest
+
+        return request.resource_modes if isinstance(request, StdioRequest) else NATIVE
     modes = frozenset(request.query.getall("resources", ["native"]))
     if not modes <= {"native", "tool"}:
         raise web.HTTPBadRequest(text="resources must be native or tool")
@@ -82,6 +90,74 @@ class ResourceReadArguments(BaseModel):
     )
 
 
+class PromptAddress(ResourceTemplateDef):
+    arguments: list[PromptArgumentDef]
+
+
+def prompts_as_resources(registry: Registry, request: RequestLike) -> bool:
+    if not registry.resource_tools:
+        return False
+    if isinstance(request, web.Request):
+        return "resource" in request.query.getall("prompts", ())
+
+    from .stdio import StdioRequest
+
+    return isinstance(request, StdioRequest) and request.prompts_as_resources
+
+
+def prompt_addresses(registry: Registry, adapter: Adapter) -> list[PromptAddress]:
+    addresses = []
+    for spec in registry.prompts.values():
+        prompt = adapter.describe_prompt(spec)
+        if prompt is None:
+            continue
+        uri = f"{PROMPT_SCHEME}///{quote(prompt.name, safe='')}"
+        description = prompt.description or f"Render the {prompt.name} prompt."
+        if prompt.arguments:
+            uri += "?arguments={arguments}"
+            fields = ", ".join(
+                f"{arg.name} ({'required' if arg.required else 'optional'})"
+                for arg in prompt.arguments
+            )
+            description += f" Percent-encode the JSON arguments object. Fields: {fields}."
+        addresses.append(
+            PromptAddress(
+                uri_template=uri,
+                name=prompt.name,
+                description=description,
+                mime_type="application/json",
+                arguments=prompt.arguments,
+            )
+        )
+    return addresses
+
+
+def prompt_address(uri: str) -> tuple[str, dict[str, Any]]:
+    address = urlsplit(uri)
+    name = address.path.removeprefix("/")
+    # Python 3.10 rejects an empty query in strict mode.
+    params = (
+        parse_qs(address.query, keep_blank_values=True, strict_parsing=True, errors="strict")
+        if address.query
+        else {}
+    )
+    encoded = params.get("arguments", ["{}"])
+    if (
+        address.netloc
+        or address.fragment
+        or not address.path.startswith("/")
+        or not name
+        or "/" in name
+        or set(params) - {"arguments"}
+        or len(encoded) != 1
+    ):
+        raise ValueError("invalid prompt address")
+    arguments = json.loads(encoded[0])
+    if not isinstance(arguments, dict):
+        raise ValueError("prompt arguments must be a JSON object")
+    return unquote(name, errors="strict"), arguments
+
+
 def resource_result(outcome: Outcome) -> CallToolResult:
     if isinstance(outcome, Failure):
         return CallToolResult.failure(outcome.message)
@@ -110,6 +186,11 @@ async def mcp_resources_list(args: ResourceListArguments, ex: Exchange) -> CallT
             for spec in ex.registry.resources_templated
             if isinstance(definition := ex.adapter.describe_resource(spec), ResourceTemplateDef)
             and query in definition.uri_template.casefold()
+        )
+        entries.extend(
+            (f"template:{address.uri_template}", address)
+            for address in prompt_addresses(ex.registry, ex.adapter)
+            if query in address.uri_template.casefold()
         )
     entries.sort(key=lambda entry: entry[0])
     page = Dispatcher(ex.registry).paged(
@@ -140,7 +221,10 @@ async def mcp_resources_read(args: ResourceReadArguments, ex: Exchange) -> CallT
     """Read URL-addressed data as text or base64-encoded binary content."""
     from .dispatcher import Dispatcher
 
-    return resource_result(await Dispatcher(ex.registry).read_resource(ex, uri=args.uri))
+    dispatcher = Dispatcher(ex.registry)
+    if args.uri.casefold().startswith(PROMPT_SCHEME):
+        return resource_result(await dispatcher.read_prompt_address(ex, args.uri))
+    return resource_result(await dispatcher.read_resource(ex, uri=args.uri))
 
 
 def resource_tool_specs() -> dict[str, ToolSpec]:
