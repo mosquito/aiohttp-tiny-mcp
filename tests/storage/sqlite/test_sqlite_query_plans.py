@@ -1,10 +1,11 @@
 import sqlite3
+from contextlib import closing
 
 from aiohttp_tiny_mcp.storage.sqlite import SCHEMA
 
 
 def test_expired_events_use_time_index_without_scanning_live_events() -> None:
-    with sqlite3.connect(":memory:") as connection:
+    with closing(sqlite3.connect(":memory:")) as connection:
         connection.executescript(SCHEMA)
         connection.executemany(
             "INSERT INTO mcp_events(topic,message,created_at) VALUES (?,?,?)",
