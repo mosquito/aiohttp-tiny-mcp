@@ -5,6 +5,11 @@
 ```{eval-rst}
 .. autoclass:: aiohttp_tiny_mcp.Registry
    :members:
+
+.. autoclass:: aiohttp_tiny_mcp.Cache
+   :members: ttl, set_ttl
+
+.. autoclass:: aiohttp_tiny_mcp.CacheHint
 ```
 
 ## Extensions and skills

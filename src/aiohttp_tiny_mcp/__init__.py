@@ -51,6 +51,7 @@ from .protocol.models import (
     TextResourceContents,
 )
 from .protocol.selection import AdapterSet
+from .server.caching import Cache, CacheHint
 from .server.exchange import Exchange
 from .server.http import Endpoint
 from .server.registry import Registry
@@ -77,6 +78,8 @@ __all__ = [
     "Authorization",
     "BasicAuth",
     "BlobResourceContents",
+    "Cache",
+    "CacheHint",
     "CallToolResult",
     "Client",
     "ClientError",

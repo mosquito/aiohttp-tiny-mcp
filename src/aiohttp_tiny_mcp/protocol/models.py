@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from collections.abc import Mapping, Sequence
 from enum import Enum
+from math import isfinite
 from types import MappingProxyType
 from typing import Annotated, Any, Literal
 
@@ -101,6 +102,14 @@ class ResultModel(Model):
 
     result_type: Literal["complete"] | None = Field(default=None, alias="resultType")
     meta: Meta | None = Field(default=None, alias="_meta")
+
+
+def cache_ttl_milliseconds(seconds: int | float) -> int:
+    """Convert a server TTL in seconds to whole wire milliseconds."""
+    milliseconds = seconds * 1000
+    if seconds < 0 or (isinstance(milliseconds, float) and not isfinite(milliseconds)):
+        raise ValueError("cache TTL must be finite and non-negative")
+    return int(milliseconds)
 
 
 class CacheableResult(ResultModel):

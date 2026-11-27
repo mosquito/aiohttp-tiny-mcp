@@ -18,7 +18,7 @@ This page is that claim, stated precisely.
 | **Sessions** | by handle | by `Mcp-Session-Id` | same | same | same |
 | Tool hints (`annotations`) | yes | yes | yes | yes | no |
 | Display titles | yes | yes | yes | no | no |
-| Cache hints on results | yes | no | no | no | no |
+| Cache hints on results | per resource and per method | no | no | no | no |
 | Batching | no | no | no | yes | no |
 | Header mirroring | yes | no | no | no | no |
 | Extension methods and discovery | yes | resources only | resources only | resources only | resources only |
@@ -49,7 +49,11 @@ composition or `$ref` is simplified where that is lossless, and hidden where it
 is not. Declaring `min_revision` says so explicitly; the rest is decided in one
 place, by the adapter.
 
-**Cache hints.** `ttlMs` and `cacheScope` exist only on `2026-07-28`.
+**Cache hints.** `ttlMs` and `cacheScope` exist only on `2026-07-28`. A resource
+declares them with `cache_ttl` and `cache_scope`, and
+`Registry(cache_hints={method: CacheHint(...)})` states a default per cacheable
+method. The fallback is `ttlMs: 0` with `cacheScope: "private"`. See
+[Cache hints](../guide/caching.md) for examples and precedence.
 
 **Extension methods.** Older clients can list and read extension files and a
 manifest under `mcp-extensions://{name}/...`. Every registered method, including methods that change state,

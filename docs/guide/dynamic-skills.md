@@ -82,7 +82,7 @@ async def get_skill(args: ReadResourceParams) -> Detail:
     return Detail(skill=entry())
 
 
-@extension.resource(URI, mime_type="text/markdown", cache_ttl_ms=0, cache_scope="private")
+@extension.resource(URI, mime_type="text/markdown", cache_ttl=0, cache_scope="private")
 async def read_skill(args: Nothing, source: Instructions) -> str:
     return f"---\nname: deploy\ndescription: {DESCRIPTION}\n---\n{source.text}\n"
 

@@ -17,6 +17,7 @@ from __future__ import annotations
 import pytest
 from mcp_types import _v2025_11_25 as v2025_11_25_types
 from mcp_types import _v2026_07_28 as v2026_07_28_types
+from mcp_types.methods import CACHEABLE_METHODS as spec_cacheable_methods
 from mcp_types.methods import (
     CLIENT_NOTIFICATIONS,
     CLIENT_REQUESTS,
@@ -31,6 +32,7 @@ from aiohttp_tiny_mcp.protocol.adapter import Adapter
 from aiohttp_tiny_mcp.protocol.core import Operation
 from aiohttp_tiny_mcp.protocol.selection import AdapterSet
 from aiohttp_tiny_mcp.protocol.v2025_11_25 import LEGACY_VERSIONS
+from aiohttp_tiny_mcp.server.caching import CACHEABLE_METHODS
 
 ADAPTERS = AdapterSet.default().adapters
 
@@ -163,3 +165,13 @@ def test_the_extensions_capability_is_a_field_of_2026_07_28():
     model = CAPABILITY_MODELS["2026-07-28"]
     aliases = {field.alias or name for name, field in model.model_fields.items()}
     assert "extensions" in aliases
+
+
+def test_the_cacheable_methods_match_the_source():
+    """Both sides derive the set from their own models, so neither is a hand-written list.
+
+    Here it follows `RESULT_MODELS`; in the source it follows the result arm of each
+    method. A revision that makes another result cacheable fails this until the models
+    follow.
+    """
+    assert CACHEABLE_METHODS == spec_cacheable_methods

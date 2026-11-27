@@ -312,25 +312,9 @@ See [Notifications](notifications.md#changes-to-what-the-server-offers).
 
 ## Cache hints
 
-`2026-07-28` lets a result say how long it may be cached and by whom. The
-default is not to cache, which is the safe answer for anything that depends on
-who is asking.
-
-<!-- name: test_resources -->
-```python
-@registry.resource(
-    "notebook://schema",
-    mime_type="application/json",
-    cache_ttl_ms=300_000,
-    cache_scope="public",
-)
-async def schema(args: Nothing) -> dict:
-    """The same for every caller, and it rarely changes."""
-    return {"version": 3}
-```
-
-Say `public` only where the answer genuinely does not depend on the caller. On
-the older revisions the hints are absent entirely and the fields are ignored.
+Use `cache_ttl` and `cache_scope` to set freshness hints for reads of a
+resource or template. See [Cache hints](caching.md) for examples, registry
+defaults, and the order in which values take effect.
 
 ## When a resource is the wrong shape
 

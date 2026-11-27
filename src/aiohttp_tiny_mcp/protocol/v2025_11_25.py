@@ -14,6 +14,7 @@ from aiohttp_tiny_mcp.protocol.core import (
     Operation,
 )
 from aiohttp_tiny_mcp.protocol.models import (
+    CacheableResult,
     CallToolParams,
     CallToolResult,
     CompleteParams,
@@ -120,6 +121,8 @@ class Adapter2025_11_25(Adapter):  # noqa: N801 -- revision date, greppable agai
         return METHOD_NAMES.get(operation)
 
     def encode_value(self, call: Call, registry: RegistryProtocol, result: Any) -> dict[str, Any]:
+        if isinstance(result, CacheableResult):
+            result = result.model_copy(update={"ttl_ms": None, "cache_scope": None})
         if isinstance(result, CallToolResult) and result.structured_content is not None:
             if not isinstance(result.structured_content, dict):
                 result = result.model_copy(update={"structured_content": None})

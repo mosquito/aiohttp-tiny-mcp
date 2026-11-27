@@ -46,8 +46,10 @@ from aiohttp_tiny_mcp.protocol.models import (
     SubscribeParams,
     TextContent,
     ToolDef,
+    cache_ttl_milliseconds,
 )
 
+from .caching import Cache
 from .exchange import Exchange, waiting_for
 from .registry import Registry
 from .request_state import RequestStates, protect_request_state, restore_request_state
@@ -419,11 +421,22 @@ class Dispatcher:
             return Failure(FailureKind.RESOURCE_NOT_FOUND, f"resource not found: {uri}")
         if (refused := resource_refusal(spec, ex.principal)) is not None:
             return Failure(FailureKind.ACCESS_DENIED, refused)
+        ttl = spec.cache_ttl
+        if ttl is None and (hint := self.registry.cache_hints.get("resources/read")) is not None:
+            ttl = hint.cache_ttl
+        cache = Cache(0 if ttl is None else ttl)
+        ex.resolved[Cache] = cache
         try:
             value = await spec.bound.call(variables, ex)
         except ValidationError as e:
             return Failure(FailureKind.INVALID_PARAMS, str(e))
-        return Value(result=ReadResourceResult(contents=spec.contents(uri, value)))
+        finally:
+            ex.resolved.pop(Cache, None)
+        return Value(
+            result=ReadResourceResult(
+                contents=spec.contents(uri, value), ttl_ms=cache_ttl_milliseconds(cache.ttl)
+            )
+        )
 
     async def list_prompts(self, ex: Exchange) -> Outcome:
         prompts: list[PromptDef] = [

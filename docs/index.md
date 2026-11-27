@@ -46,6 +46,7 @@ pieces
 
 guide/tools
 guide/resources
+guide/caching
 guide/extensions
 guide/extension-compatibility
 guide/dynamic-skills

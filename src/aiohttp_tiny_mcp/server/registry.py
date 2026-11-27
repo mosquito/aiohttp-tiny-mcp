@@ -11,6 +11,7 @@ from aiohttp_tiny_mcp.protocol.models import Implementation
 from aiohttp_tiny_mcp.storage.hub import NOTIFICATIONS, Cursor, Hub, MemoryHub, topic
 from aiohttp_tiny_mcp.storage.sessions import DEFAULT_TTL_SECONDS, MemorySessionStore, SessionStore
 
+from .caching import Cache, CacheHint, checked_cache_hints
 from .exchange import Exchange, Instance
 from .request_state import DEFAULT_TTL_SECONDS as STATE_TTL_SECONDS
 from .request_state import RequestStates
@@ -47,6 +48,7 @@ class Registry:
         completion_timeout_seconds: float = 300.0,
         page_size: int | None = None,
         resource_tools: bool = True,
+        cache_hints: Mapping[str, CacheHint] | None = None,
     ) -> None:
         self.info = Implementation(name=name, version=version)
         self.instructions = instructions
@@ -56,6 +58,8 @@ class Registry:
         self.session_ttl_seconds = session_ttl_seconds
         #: Most entries per listing page. `None`, the default, answers with all of them.
         self.page_size = page_size
+        #: The freshness a cacheable method answers with where nothing else states it.
+        self.cache_hints = checked_cache_hints(cache_hints)
         self.resource_tools = resource_tools
         self.resource_tool_specs = resource_tool_specs() if resource_tools else {}
         self.request_state = RequestStates(self.session_store, request_state_ttl_seconds)
@@ -166,7 +170,7 @@ class Registry:
                 ):
                     raise ValueError(f"duplicate resource: {address}")
                 claimed.add(address)
-            self.check(uri, resource.bound)
+            self.check(uri, resource.bound, resource=True)
         self.extensions[extension.name] = extension.snapshot()
         for uri, resource in resources.items():
             resource = resource.model_copy(deep=True)
@@ -247,8 +251,10 @@ class Registry:
             )
         self.providers[kind or type(value)] = Instance(value)
 
-    def check(self, what: str, bound: Bound) -> None:
+    def check(self, what: str, bound: Bound, *, resource: bool = False) -> None:
         for name, kind in bound.plan:
+            if kind is Cache and resource:
+                continue
             if kind is Principal:
                 if self.auth is None:
                     raise TypeError(
@@ -291,7 +297,7 @@ class Registry:
                     f"{uri}: scopes were declared, but this registry has no auth= -- "
                     f"a scope nothing verifies is a check that never runs"
                 )
-            self.check(uri, spec.bound)
+            self.check(uri, spec.bound, resource=True)
             if spec.definition is not None:
                 if (
                     spec.definition.uri in self.resources_fixed

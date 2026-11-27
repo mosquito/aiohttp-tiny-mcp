@@ -23,6 +23,7 @@ from aiohttp_tiny_mcp.protocol.models import (
     ResourceTemplateDef,
     TextResourceContents,
     ToolDef,
+    cache_ttl_milliseconds,
 )
 from aiohttp_tiny_mcp.protocol.schema import header_params, json_schema
 
@@ -163,7 +164,7 @@ class ResourceSpec(Model):
     template: ResourceTemplateDef | None = None  # URI template
     pattern: Any = None  # compiled matcher for the template
     mime_type: str | None = None
-    cache_ttl_ms: int | None = None
+    cache_ttl: int | float | None = None
     cache_scope: Literal["public", "private"] | None = None
     legacy_uri: str | None = None
     legacy_pattern: Any = None
@@ -181,10 +182,12 @@ class ResourceSpec(Model):
         title: str | None = None,
         description: str | None = None,
         mime_type: str | None = None,
-        cache_ttl_ms: int | None = None,
+        cache_ttl: int | float | None = None,
         cache_scope: Literal["public", "private"] | None = None,
         scopes: Iterable[str] | None = None,
     ) -> ResourceSpec:
+        if cache_ttl is not None:
+            cache_ttl_milliseconds(cache_ttl)
         required = frozenset(scopes or ())
         if required and cache_scope == "public":
             raise ValueError("Resources with scopes cannot use public caching.")
@@ -196,7 +199,7 @@ class ResourceSpec(Model):
                 bound=bound,
                 scopes=required,
                 mime_type=mime_type,
-                cache_ttl_ms=cache_ttl_ms,
+                cache_ttl=cache_ttl,
                 cache_scope=cache_scope,
                 definition=ResourceDef(
                     uri=uri, name=name, title=title, description=description, mime_type=mime_type
@@ -212,7 +215,7 @@ class ResourceSpec(Model):
             bound=bound,
             scopes=required,
             mime_type=mime_type,
-            cache_ttl_ms=cache_ttl_ms,
+            cache_ttl=cache_ttl,
             cache_scope=cache_scope,
             pattern=re.compile("^" + "".join(parts) + "$"),
             template=ResourceTemplateDef(

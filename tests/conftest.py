@@ -237,7 +237,7 @@ def registry(store_and_hub) -> Registry:
         """Templated resource."""
         return f"item-{args.id}"
 
-    @reg.resource("res://public", cache_ttl_ms=60_000, cache_scope="public")
+    @reg.resource("res://public", cache_ttl=60, cache_scope="public")
     async def public_doc(args: Nothing) -> str:
         """Explicitly opted into public client-side caching."""
         return "public content"
