@@ -363,6 +363,23 @@ Nothing pins that POST to the worker holding the stream, so the reply is
 published to the hub under a topic named for the connection and written out by
 whichever worker holds it. A handler cannot tell which worker it is running on.
 
+Each POST is answered `202` before its handler runs, and the handler's own
+reply follows on the stream. The wait would otherwise be a deadlock: a client
+of this transport posts one message at a time, including the answer to a
+question a handler asked, so a handler that waits for that answer would wait
+for a message the client cannot send until the first POST has been answered.
+The consequence is that replies arrive in completion order, as they do for a
+batch, and are matched by `id`.
+
+**Handler lifetime.** The `202` also ends the POST middleware scope. Middleware
+may set identity or other request data before calling the endpoint, but resources
+it releases after `await handler(request)` are no longer alive when an MCP
+handler uses them. Move transactions and borrowed connections into
+[async-generator providers](../guide/dependencies.md#an-async-generator).
+Those providers stay open for the handler and close on return, error or cancellation.
+Application-wide pools may remain in `app.cleanup_ctx` and be supplied through an
+application key. The endpoint cancels remaining background work on shutdown.
+
 The transport is not the revision. It was defined by `2024-11-05`, and that is
 what a client is assumed to speak here before it has said otherwise, but the
 handshake decides -- the official SDK's own SSE client speaks `2025-11-25` over

@@ -72,14 +72,16 @@ async def test_sse_batch_execution_and_reply_order(concurrency: int | None):
 
             sending = asyncio.create_task(send_batch())
             await asyncio.wait_for(first_started.wait(), 5)
+            # The 202 does not wait for the work. A client of this transport posts one
+            # message at a time, so a handler that waits for an answer would wait for a
+            # message the client cannot send until this response arrives.
+            assert await asyncio.wait_for(sending, 5) == 202
             replies = []
             if concurrent:
                 replies.append(await asyncio.wait_for(client.seen.get(), 5))
                 assert replies[0]["id"] == 2
-                assert not sending.done()
                 assert events == [("start", 1), ("start", 2), ("finish", 2)]
             release_first.set()
-            assert await sending == 202
             while len(replies) < 2:
                 replies.append(await asyncio.wait_for(client.seen.get(), 5))
             assert [reply["id"] for reply in replies] == ([2, 1] if concurrent else [1, 2])

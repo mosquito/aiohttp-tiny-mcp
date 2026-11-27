@@ -201,3 +201,90 @@ async def test_a_listing_pages_over_this_transport_too(offered):
     assert seen == sorted(seen)
     assert len(seen) == len(set(seen)), "no entry arrived twice"
     assert pages == len(seen), "one at a time, as the page size says"
+
+
+async def test_a_pushed_question_is_answered_through_the_message_endpoint(old):
+    """A revision that pushes a question must be able to receive the answer here.
+
+    Two things were missing. This transport opens the session before the handshake, so
+    the capabilities the client declared were never stored and the server refused to ask
+    anything. And the answer is a JSON-RPC response, with no method and no handler, which
+    this endpoint decoded as a request.
+
+    The endpoint answers 202 before the handler returns. The client answers the
+    question on another POST while it reads the result from the stream.
+    """
+    await old.call(
+        "initialize",
+        {
+            "protocolVersion": "2025-06-18",
+            "clientInfo": {"name": "asker", "version": "1"},
+            "capabilities": {"elicitation": {}},
+        },
+    )
+    posting = asyncio.ensure_future(
+        old.send("tools/call", {"name": "gated", "arguments": {}}, request_id=4)
+    )
+    try:
+        while True:
+            pushed = await asyncio.wait_for(old.seen.get(), 5)
+            if pushed.get("method") == "elicitation/create":
+                break
+        assert pushed["params"]["message"] == "Go ahead?"
+
+        await old.raw(
+            {"jsonrpc": "2.0", "id": pushed["id"], "result": {"action": "accept", "content": {}}}
+        )
+
+        while True:
+            answered = await asyncio.wait_for(old.seen.get(), 5)
+            if answered.get("id") == 4:
+                break
+    finally:
+        posting.cancel()
+    assert answered["result"]["content"][0]["text"] == "went ahead"
+
+
+async def test_a_declined_question_reaches_the_handler(old):
+    """A refusal is an answer, so the handler continues with it."""
+    await old.call(
+        "initialize",
+        {
+            "protocolVersion": "2025-06-18",
+            "clientInfo": {"name": "asker", "version": "1"},
+            "capabilities": {"elicitation": {}},
+        },
+    )
+    posting = asyncio.ensure_future(
+        old.send("tools/call", {"name": "gated", "arguments": {}}, request_id=5)
+    )
+    try:
+        while True:
+            pushed = await asyncio.wait_for(old.seen.get(), 5)
+            if pushed.get("method") == "elicitation/create":
+                break
+        await old.raw({"jsonrpc": "2.0", "id": pushed["id"], "result": {"action": "decline"}})
+        while True:
+            answered = await asyncio.wait_for(old.seen.get(), 5)
+            if answered.get("id") == 5:
+                break
+    finally:
+        posting.cancel()
+    assert answered["result"]["content"][0]["text"] == "stopped"
+
+
+async def test_the_handshake_capabilities_are_remembered_for_later_requests(old):
+    """Without the stored capabilities the server reads a client that declared nothing."""
+    await old.call(
+        "initialize",
+        {
+            "protocolVersion": "2025-06-18",
+            "clientInfo": {"name": "asker", "version": "1"},
+            "capabilities": {},
+        },
+    )
+    answered = await old.call("tools/call", {"name": "gated", "arguments": {}}, request_id=6)
+    # The stored declaration is what the server reads, so a client that declared nothing
+    # is refused instead of being asked, and told what to declare.
+    assert answered["error"]["message"] == "client did not declare the elicitation capability"
+    assert answered["error"]["data"] == {"requiredCapabilities": {"elicitation": {}}}

@@ -48,8 +48,17 @@ suite therefore also drives the server with the official `mcp` SDK's
 Those checks are where several assumptions were corrected. The SDK opens the
 `GET` notification stream only once a session id has been issued; it delivers a
 parsed notification rather than an envelope; it sets the `elicitation`
-capability only when a callback is actually configured. None of that is in the
-specification, and all of it matters.
+capability only when a callback is actually configured; and its HTTP+SSE client
+posts one message at a time, which is why the message endpoint answers before
+its handler runs. None of that is in the specification, and all of it matters.
+
+The rules this package applies to a declaration are checked against the SDK's
+implementation of the same rule, so a divergence is either caught or declared.
+A tool name is refused here exactly where the SDK calls it invalid. Every
+resource URI this package serves also parses in the SDK's RFC 6570 parser,
+because this syntax is a subset of it. A URI that is structurally wrong is
+refused by both. The three forms the SDK accepts and this package does not
+are listed with their reason, and a change on either side fails the suite.
 
 ## Two stacks in four processes
 

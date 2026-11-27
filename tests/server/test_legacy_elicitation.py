@@ -92,12 +92,18 @@ async def test_pushed_question_round_trip(client, reply, expected):
 
 
 async def test_a_client_that_declared_nothing_is_not_asked(client):
-    """Legacy elicitation capability must be retained from the handshake."""
+    """Legacy elicitation capability must be retained from the handshake.
+
+    The revision can push a question, so the refusal names the missing declaration and
+    says what to declare. It used to report that the revision cannot ask at all.
+    """
     session = await handshake(client, {})
     response = await call(client, session)
     assert response.headers["Content-Type"].startswith("application/json")
     body = await response.json()
     assert body["error"]["code"] == -32603
+    assert body["error"]["message"] == "client did not declare the elicitation capability"
+    assert body["error"]["data"] == {"requiredCapabilities": {"elicitation": {}}}
 
 
 async def test_2025_03_26_asks_in_the_tool_call(client):

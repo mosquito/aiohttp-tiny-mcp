@@ -126,7 +126,10 @@ class Dispatcher:
             return await self.ask_on_the_stream(ex, e)
         if ex.can_ask:
             return NeedsInput(requests=e.requests, state=e.state)
-        if ex.adapter.can_ask:
+        # A revision that asks in any way puts the fault on the client, which declared
+        # nothing, and says what to declare. Only a revision with no channel at all
+        # reports that the question cannot be put.
+        if ex.adapter.can_ask or ex.adapter.can_push_ask:
             return Failure(
                 FailureKind.MISSING_REQUIRED_CAPABILITY,
                 "client did not declare the elicitation capability",
