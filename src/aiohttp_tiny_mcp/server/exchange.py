@@ -358,7 +358,7 @@ class Exchange:
         """Emit a message at the requested severity on the current request stream. Without a
         stream, emit nothing.
         """
-        if not self.logs(level):
+        if not self.logs(level) or (self.sse is None and self.send is None):
             return
         params: dict[str, Any] = {"level": level, "data": data}
         if logger is not None:
