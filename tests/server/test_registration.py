@@ -138,3 +138,70 @@ async def test_a_duplicate_is_still_refused():
     registry.resource("config://app", config)
     with pytest.raises(ValueError, match="duplicate resource"):
         registry.resource("config://app", config)
+
+
+@pytest.mark.parametrize(
+    ("uri", "fault"),
+    [
+        ("notebook://entries/{id", "is never closed"),
+        ("x://a}b", "closes nothing"),
+        ("x://{1id}", "is not a variable name"),
+        ("x://{+path}", "RFC 6570 operator"),
+        ("x://{}", "is not a variable name"),
+        ("", "must not be empty"),
+        ("x://a/{id}/b/{id}", "appears more than once"),
+        ("x://{id}{path}", "no literal text between them"),
+    ],
+)
+async def test_a_malformed_resource_uri_is_refused_at_registration(uri, fault):
+    """Each of these used to register, at an address no request could reach.
+
+    A typo in a template produced a fixed resource at the literal URI, and a repeated
+    variable reached the regular expression engine, which raised its own error.
+    """
+    registry = fresh()
+    with pytest.raises(ValueError, match=fault):
+        registry.resource(uri, item)
+    assert not registry.resources_fixed
+    assert not registry.resources_templated
+
+
+@pytest.mark.parametrize(
+    "uri",
+    [
+        "config://app",
+        "file://docs/{name}",
+        "x://{a}-{b}",
+        "file://Stra\u00dfe/{name}",
+        "mcp-extensions://ext/method?params={params}",
+    ],
+)
+async def test_a_usable_resource_uri_still_registers(uri):
+    """The forms this package already serves keep working, templated or fixed."""
+    registry = fresh()
+    registry.resource(uri, item)
+    assert len(registry.resources_fixed) + len(registry.resources_templated) == 1
+
+
+async def test_a_tool_name_outside_the_specification_is_refused():
+    """A host is allowed to reject the name, so the registry rejects it first."""
+    registry = fresh()
+    with pytest.raises(ValueError, match="invalid tool name"):
+        registry.tool(add, name="my tool")
+    with pytest.raises(ValueError, match="invalid tool name"):
+        registry.tool(add, name="search/items")
+    assert not registry.tools
+
+
+async def test_a_reserved_name_is_still_refused_as_reserved():
+    """`mcp_resources_list` is a valid name, so the reserved check is what must catch it."""
+    registry = fresh()
+    with pytest.raises(ValueError, match="reserved"):
+        registry.tool(add, name="mcp_resources_list")
+
+
+async def test_a_prompt_name_is_not_constrained():
+    """The specification states a rule for tool names only."""
+    registry = fresh()
+    registry.prompt(greet, name="greet/user")
+    assert "greet/user" in registry.prompts

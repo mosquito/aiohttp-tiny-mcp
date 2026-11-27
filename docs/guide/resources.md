@@ -61,6 +61,16 @@ async def entry(args: Entry) -> str:
 
 A variable matches one path segment: `{id}` does not span a `/`.
 
+A variable name starts with a letter or `_`, and continues with letters, digits
+or `_`. Registration refuses a URI that breaks the form: an unclosed or
+unopened brace, a name of another shape, the same name twice, and two variables
+with no literal text between them. The last one has no single answer when an
+address is divided, and the others are typos that would otherwise register a
+fixed resource at an address no request can reach.
+
+A URI is limited to 8192 characters and a template to 256 variables. RFC 6570
+operators such as `{+path}` are not supported; use simple `{name}` variables.
+
 Fixed resources appear in `resources/list`. Templates appear in
 `resources/templates/list`, because a client cannot enumerate them -- it has to
 be told the shape and fill it in.

@@ -49,6 +49,20 @@ manifest under `mcp-extensions://{name}/...`. Every registered method, including
 runs through a `resources/read` route. Native extension capabilities and custom
 JSON-RPC methods remain unavailable on these revisions. See [Extension compatibility through resources](../guide/extension-compatibility.md).
 
+## Where this package is stricter
+
+**Tool names.** The specification's rule is a character set and a length, and
+this package refuses a name that breaks it at registration. The official SDK
+logs a warning and registers the tool anyway. A server that a host would reject
+therefore does not start here, which is deliberate: every comparable mistake in
+a declaration also raises at registration. See
+[Names and addresses](../concepts.md#names-and-addresses).
+
+**Resource templates.** Only a simple `{name}` variable is supported, matching
+one path segment. An RFC 6570 operator such as `{+path}`, a repeated variable
+and two adjacent variables are refused, where the SDK implements more of
+RFC 6570.
+
 ## What costs something
 
 Two, worth knowing before you rely on them.

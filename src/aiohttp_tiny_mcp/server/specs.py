@@ -26,6 +26,8 @@ from aiohttp_tiny_mcp.protocol.models import (
 )
 from aiohttp_tiny_mcp.protocol.schema import header_params, json_schema
 
+from .naming import checked_tool_name, template_variables
+
 
 class Resolver(Protocol):
     """What `Bound.call` needs from its caller."""
@@ -125,7 +127,7 @@ class ToolSpec(Model):
         streaming: bool = False,
     ) -> ToolSpec:
         bound = Bound.of(fn)
-        name = name or getattr(fn, "__name__", repr(fn))
+        name = checked_tool_name(name or getattr(fn, "__name__", repr(fn)))
         schema = json_schema(bound.args_model)
         return cls(
             name=name,
@@ -189,7 +191,7 @@ class ResourceSpec(Model):
         bound = Bound.of(fn)
         name = name or getattr(fn, "__name__", repr(fn))
         description = described(description, fn) or None
-        if not cls.VAR.search(uri):
+        if not template_variables(uri):
             return cls(
                 bound=bound,
                 scopes=required,

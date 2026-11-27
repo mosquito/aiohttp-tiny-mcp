@@ -39,6 +39,21 @@ The server's public surface consists of a registry and its handlers:
 `Exchange`, database clients, the store, and the hub are server-side objects.
 They are never tool arguments and are not visible in a tool listing.
 
+## Names and addresses
+
+A tool name has one to 128 characters, each a letter, a digit, `.`, `_` or
+`-`. That is the specification's own rule, and registration refuses anything
+else, including a space, a comma, a `/` and any non-ASCII letter. A leading or
+trailing `-` or `.` is discouraged rather than refused, so it registers and
+logs a warning. The name defaults to the function's own name, which satisfies
+the rule in Python. A prompt name is not constrained: the specification states
+the rule for tools only.
+
+A resource URI is either a fixed address or a template with `{name}`
+variables, each matching one path segment. Registration refuses a malformed
+template, because the alternative is an address no request can reach. See
+[Resources](guide/resources.md).
+
 ## MCP and this library
 
 MCP defines the messages on the wire: JSON-RPC, tools, resources, prompts,
