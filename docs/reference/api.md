@@ -40,6 +40,13 @@ resource URIs. Loading directories requires `aiohttp-tiny-mcp[skills]`.
              session, sessions, state, client_info, can_ask, cancel,
              wait_cancelled
 
+.. autoclass:: aiohttp_tiny_mcp.CompletionRequest
+
+.. autoclass:: aiohttp_tiny_mcp.CompletionMessage
+
+.. autoclass:: aiohttp_tiny_mcp.CompletionResult
+   :members: from_reply, text
+
 .. autofunction:: aiohttp_tiny_mcp.elicit
 
 .. autofunction:: aiohttp_tiny_mcp.elicit_accept

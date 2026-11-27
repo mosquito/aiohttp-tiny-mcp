@@ -3,12 +3,20 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from enum import Enum
 from types import MappingProxyType
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, StrictStr
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StrictBool,
+    StrictInt,
+    StrictStr,
+    ValidationError,
+)
 from pydantic.alias_generators import to_camel
 from pydantic_core import to_json
 
@@ -100,6 +108,60 @@ class CacheableResult(ResultModel):
 
     ttl_ms: int | None = None
     cache_scope: Literal["private", "public"] | None = None
+
+
+class CompletionMessage(Model):
+    """One turn of the conversation a server sends to be completed."""
+
+    role: Literal["user", "assistant"]
+    content: TextContent | ImageContent | AudioContent
+
+
+class CompletionRequest(Model):
+    """A conversation and options for a client model completion."""
+
+    messages: Sequence[CompletionMessage | Mapping[str, Any]]
+    max_tokens: int
+    system_prompt: str | None = None
+    model_preferences: Mapping[str, Any] | None = None
+    include_context: Literal["none", "thisServer", "allServers"] | None = None
+    temperature: float | None = None
+    stop_sequences: Sequence[str] | None = None
+    metadata: Mapping[str, Any] | None = None
+
+    def as_input(self) -> dict[str, Any]:
+        """Build the server request envelope."""
+        return {"method": "sampling/createMessage", "params": self.wire()}
+
+
+class CompletionResult(Model):
+    """The model-generated message returned to the handler.
+
+    `model` names what produced it, which is the client's choice rather than the
+    server's: a server states preferences and the client decides.
+    """
+
+    role: Literal["user", "assistant"]
+    content: TextContent | ImageContent | AudioContent
+    model: str
+    stop_reason: str | None = None
+
+    @classmethod
+    def from_reply(cls, reply: Mapping[str, Any]) -> CompletionResult:
+        """Parse a client reply. Raise ValueError if it contains no completion."""
+        if not reply:
+            raise ValueError("the client sent no answer to sampling/createMessage")
+        if "code" in reply and "message" in reply:
+            raise ValueError(f"the client refused the completion: {reply['message']}")
+        try:
+            return cls.model_validate(dict(reply))
+        except ValidationError as error:
+            raise ValueError(f"the client answered sampling/createMessage with: {error}") from None
+
+    @property
+    def text(self) -> str:
+        """The text of a text completion, or an empty string for another kind."""
+        return self.content.text if isinstance(self.content, TextContent) else ""
 
 
 class Hint(Enum):

@@ -40,6 +40,11 @@ log = logging.getLogger(__name__)
 
 Elicitor = Callable[[InputRequest], Awaitable[Mapping[str, Any]]]
 
+CompletionProvider = Callable[[InputRequest], Awaitable[Mapping[str, Any]]]
+"""Provide a model completion for a server request."""
+
+SAMPLING_METHOD = "sampling/createMessage"
+
 ASK_ROUNDS = 8
 
 ACKNOWLEDGED = "notifications/subscriptions/acknowledged"
@@ -59,6 +64,7 @@ class BaseClient(ABC):
         *,
         client_info: Implementation | None = None,
         on_ask: Elicitor | None = None,
+        on_completion: CompletionProvider | None = None,
         on_notification: Callable[[Mapping[str, Any]], Any] | None = None,
         log_level: str | None = None,
     ) -> None:
@@ -68,6 +74,9 @@ class BaseClient(ABC):
         )
         self.log_level = log_level
         self.on_ask = on_ask
+        #: Answers `sampling/createMessage` with a completion. `None` declares no
+        #: `sampling` capability, so the server does not ask for one.
+        self.on_completion = on_completion
         self.on_notification = on_notification
         self.next_id_counter = 0
         self.tool_definitions: dict[str, ToolDef] = {}
@@ -75,10 +84,33 @@ class BaseClient(ABC):
 
     @property
     def capabilities(self) -> Mapping[str, Any]:
-        """MRTR can be answered manually; pushed questions require an on_ask callback."""
+        """Declare the wire capabilities that this client can answer."""
+        found: dict[str, Any] = {}
         if self.on_ask is not None or self.adapter.can_ask:
-            return {"elicitation": {}}
-        return {}
+            found["elicitation"] = {}
+        if self.on_completion is not None:
+            found["sampling"] = {}
+        return found
+
+    def answerer(self, method: Any) -> Callable[[InputRequest], Awaitable[Any]] | None:
+        """What answers this method, or `None` where this client cannot answer it."""
+        if method == SAMPLING_METHOD:
+            return self.on_completion
+        if method == "elicitation/create":
+            return self.on_ask
+        return None
+
+    def can_answer(self, requests: Mapping[str, InputRequest]) -> bool:
+        """Whether this client can answer every request of one round."""
+        return all(
+            self.answerer(request.get("method")) is not None for request in requests.values()
+        )
+
+    async def answer_request(self, request: InputRequest) -> Mapping[str, Any]:
+        """Answer one server request with whatever this client has for that method."""
+        answer = self.answerer(request.get("method"))
+        assert answer is not None, request.get("method")
+        return await answer(request)
 
     @property
     def profile(self) -> ClientProfile:
@@ -127,16 +159,23 @@ class BaseClient(ABC):
                 if isinstance(await_me, Awaitable):
                     await await_me
             return
-        if self.on_ask is None or "method" not in frame:
+        pushed: InputRequest = {
+            "method": frame.get("method"),
+            "params": frame.get("params") or {},
+        }
+        if frame.get("method") is None or not self.can_answer({"": pushed}):
             await self.reply(
                 {
                     "jsonrpc": "2.0",
                     "id": frame["id"],
-                    "error": {"code": -32601, "message": f"unsupported: {frame.get('method')}"},
+                    "error": {
+                        "code": -32601,
+                        "message": f"unsupported: {frame.get('method')}",
+                    },
                 }
             )
             return
-        answer = await self.on_ask({"method": frame["method"], "params": frame.get("params") or {}})
+        answer = await self.answer_request(pushed)
         await self.reply({"jsonrpc": "2.0", "id": frame["id"], "result": dict(answer)})
 
     async def request(
@@ -243,13 +282,13 @@ class BaseClient(ABC):
             asked = self.adapter.client_input_requests(result)
             if asked is None:
                 return CallToolResult.model_validate(result)
-            if self.on_ask is None:
-                # Without a callback, return questions for the caller to answer manually.
-                return result
             requests, state = asked
+            if not self.can_answer(requests):
+                # Without a provider, return the requests for the caller to answer.
+                return result
             # Resend earlier answers because the handler restarts on each round.
             for key, request in requests.items():
-                answers[key] = dict(await self.on_ask(request))
+                answers[key] = dict(await self.answer_request(request))
         raise ClientError(-32000, f"{name} still asking after {ASK_ROUNDS} rounds")
 
     async def listen(

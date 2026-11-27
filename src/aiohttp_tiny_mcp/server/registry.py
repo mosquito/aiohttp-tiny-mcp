@@ -44,6 +44,7 @@ class Registry:
         request_state_ttl_seconds: int = STATE_TTL_SECONDS,
         hub_poll_seconds: float = 30.0,
         ask_timeout_seconds: float = 120.0,
+        completion_timeout_seconds: float = 300.0,
         page_size: int | None = None,
         resource_tools: bool = True,
     ) -> None:
@@ -60,6 +61,8 @@ class Registry:
         self.request_state = RequestStates(self.session_store, request_state_ttl_seconds)
         self.hub_poll_seconds = hub_poll_seconds
         self.ask_timeout_seconds = ask_timeout_seconds
+        #: A model call waits longer than a person does, so it has its own bound.
+        self.completion_timeout_seconds = completion_timeout_seconds
         self.tools: dict[str, ToolSpec] = {}
         self.resources_fixed: dict[str, ResourceSpec] = {}
         self.resources_templated: list[ResourceSpec] = []

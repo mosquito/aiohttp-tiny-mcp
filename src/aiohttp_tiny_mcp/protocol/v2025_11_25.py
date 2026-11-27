@@ -97,6 +97,8 @@ class Adapter2025_11_25(Adapter):  # noqa: N801 -- revision date, greppable agai
     has_handshake: ClassVar[bool] = True
     #: Elicitation starts in 2025-06-18; 2025-03-26 disables it.
     can_push_ask: ClassVar[bool] = True
+    #: Sampling requests can be pushed on all handshake revisions.
+    can_push_request: ClassVar[bool] = True
 
     def params_model(self, operation: Operation) -> type[Params]:
         return PARAMS_MODELS.get(operation, Params)

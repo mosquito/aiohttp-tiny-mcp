@@ -12,6 +12,7 @@ This page is that claim, stated precisely.
 | Structured output | any JSON value | object only | object only | as text | as text |
 | Progress | yes | yes | yes | yes | without a message |
 | **Ask the user** | MRTR | pushed request | pushed request | in the tool call | in the tool call |
+| **Ask the client's model for a completion** | MRTR | pushed request | pushed request | pushed request | pushed request |
 | **Logging** | per request | per session | per session | per session | per session |
 | **Subscriptions** | `subscriptions/listen` | `resources/subscribe` + `GET` | same | same | same |
 | **Sessions** | by handle | by `Mcp-Session-Id` | same | same | same |
@@ -26,6 +27,12 @@ This page is that claim, stated precisely.
 Rows in bold are the ones where the mechanism differs but the application code
 does not. Everything else is either present everywhere or a property of the
 revision that no amount of work can add.
+
+**Model completions.** `ex.completion()` asks the client's model for a completion on every
+revision: pushed on the call's stream where there is one, and carried in the
+result on `2026-07-28`, which restarts the handler with the answer. The adapter
+chooses the channel; the handler uses the same API. A client that declared no
+`sampling` wire capability is refused with the capability it needs.
 
 ## What is genuinely lost
 
@@ -62,6 +69,21 @@ a declaration also raises at registration. See
 one path segment. An RFC 6570 operator such as `{+path}`, a repeated variable
 and two adjacent variables are refused, where the SDK implements more of
 RFC 6570.
+
+## Deliberate omissions
+
+**Roots** let a client name directories or files that a server may work with.
+The specification restricts their URIs to `file://`. A root names a location;
+it does not transfer files or grant access to the client's filesystem.
+
+That leaves roots useful only when a local server can already access those
+paths, typically over stdio. A remote HTTP server cannot read the client's
+files from a path alone, and the browser console cannot offer its host
+filesystem. The specification provides no remote-access mechanism to bridge
+that gap. This package therefore omits roots: pass required paths through tool
+arguments or server configuration instead. SEP-2577 also marks the standalone
+roots wire API as deprecated in `2026-07-28`; the limited filesystem model is
+the reason for the omission across all revisions.
 
 ## What costs something
 

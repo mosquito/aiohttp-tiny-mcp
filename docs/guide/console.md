@@ -402,6 +402,20 @@ Untick **Can be asked** and the console stops declaring the capability, which
 is how to see what a client that cannot answer gets. A handler with a default
 takes it; one without is told the client cannot be asked.
 
+Select **Can answer for a model** before connecting to answer
+model completion requests yourself. The dialog shows the messages and model
+options, and accepts a text completion. The reply names its model
+`console-operator`; no API key or model service is needed. **Decline**,
+**Cancel**, and Escape return an error rather than an empty completion.
+The server waits up to its configured completion timeout. Background notifications
+continue while the dialog is open. Disconnect before changing the checkbox.
+
+To try it, run `uv run python examples/demo.py`, open
+`http://127.0.0.1:8080/console`, select the checkbox, and connect. Choose
+**summarize**, enter text, and click **Call**. Enter a sentence in the dialog
+and click **Send completion**. Try **Decline**, then disconnect and clear the
+checkbox to see the missing-capability refusal. This works on all five revisions.
+
 ## Your own page
 
 Pass `template` to serve your own HTML, and `variables` to fill in whatever it

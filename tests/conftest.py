@@ -132,6 +132,15 @@ def registry(store_and_hub) -> Registry:
         raise RuntimeError("kaboom")
 
     @reg.tool
+    async def sampled(args: Nothing, ex: Exchange) -> str:
+        """Have the client's model answer, and report what it said."""
+        answered = await ex.completion(
+            messages=[{"role": "user", "content": {"type": "text", "text": "say something"}}],
+            max_tokens=32,
+        )
+        return f"{answered.model}: {answered.text}"
+
+    @reg.tool
     async def confirm(args: Confirm, ex: Exchange) -> str:
         """MRTR round trip."""
         if (answer := ex.answers.get("confirm")) is not None:

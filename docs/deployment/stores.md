@@ -596,11 +596,14 @@ must account for whether an operation already changed business data.
 | Setting | Default | What it bounds |
 | --- | --- | --- |
 | `session_ttl_seconds` | 3600 | How long a session lives without use |
-| `request_state_ttl_seconds` | 600 | How long a round trip may take |
+| `request_state_ttl_seconds` | 600 | How long stored handler state remains available |
 | `hub_poll_seconds` | 30.0 | How long one `poll` may wait |
 | `ask_timeout_seconds` | 120.0 | How long a pushed question waits for an answer |
+| `completion_timeout_seconds` | 300.0 | How long a pushed model completion waits for a reply |
 
 When an open-stream question reaches `ask_timeout_seconds`, `ex.ask` returns
 an answer with action `cancel`. Expired request state is different: a later call
-with that state identifier is rejected. See [Sessions and state](../guide/sessions.md)
+with that state identifier is rejected. For an MRTR completion, the client
+controls when it replies. See [Model completions](../guide/asking.md#completions-asking-the-clients-model)
+and [Sessions and state](../guide/sessions.md)
 for handler-facing storage APIs.

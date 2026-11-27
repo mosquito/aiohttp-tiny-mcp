@@ -558,6 +558,8 @@ dialog.question #question-text p { margin: 0 0 8px; }
 dialog.question #question-text :last-child { margin-bottom: 0; }
 dialog.question menu { display: flex; justify-content: flex-end; gap: 8px; margin: 18px 0 0; padding: 0; }
 dialog.question .argument { margin-bottom: 10px; }
+#sampling-request { max-width: 640px; max-height: calc(100vh - 32px); overflow: auto; }
+#sampling-details { margin-bottom: 14px; }
 
 .auth-field { display: flex; flex-direction: column; gap: 4px; margin: 12px 0; }
 .auth-field[hidden] { display: none; }

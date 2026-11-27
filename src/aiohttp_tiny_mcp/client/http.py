@@ -14,7 +14,7 @@ from aiohttp_tiny_mcp.protocol.adapter import Adapter
 from aiohttp_tiny_mcp.protocol.models import Implementation
 from aiohttp_tiny_mcp.transport.sse import read_sse
 
-from .base import BaseClient, Elicitor
+from .base import BaseClient, CompletionProvider, Elicitor
 from .oauth import OAuth, OAuthError
 
 ANSWER_METHOD = "elicitation/create"
@@ -46,6 +46,7 @@ class Client(BaseClient):
         session: aiohttp.ClientSession | None = None,
         auth: OAuth | None = None,
         on_ask: Elicitor | None = None,
+        on_completion: CompletionProvider | None = None,
         on_notification: Callable[[Mapping[str, Any]], Any] | None = None,
         log_level: str | None = None,
     ) -> None:
@@ -53,6 +54,7 @@ class Client(BaseClient):
             adapter,
             client_info=client_info,
             on_ask=on_ask,
+            on_completion=on_completion,
             on_notification=on_notification,
             log_level=log_level,
         )

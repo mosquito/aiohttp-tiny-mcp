@@ -3,6 +3,10 @@
     uv run python examples/demo.py
     uv run python examples/demo.py --stdio
 
+For manual model completions, open http://127.0.0.1:8080/console. Select
+"Can answer for a model", connect, and call "summarize". Enter the model
+completion in the dialog. Decline the request to test a refusal.
+
 Then, for a 2026-07-28 client:
     curl localhost:8080/mcp -H 'Content-Type: application/json' \\
         -H 'Accept: application/json, text/event-stream' \\
@@ -100,6 +104,24 @@ async def add(args: Add) -> Sum:
 
 class Nothing(BaseModel):
     pass
+
+
+class Passage(BaseModel):
+    text: str
+
+
+@registry.tool
+async def summarize(args: Passage, ex: Exchange) -> str:
+    """Ask the client's model to summarize text in one sentence."""
+    completed = await ex.completion(
+        messages=[{"role": "user", "content": {"type": "text", "text": args.text}}],
+        max_tokens=128,
+        system_prompt="Summarize the text in one sentence.",
+        model_preferences={"speedPriority": 1.0},
+        include_context="none",
+        temperature=0.2,
+    )
+    return f"{completed.model}: {completed.text}"
 
 
 SETTINGS: dict[str, bool] = {"debug": False}

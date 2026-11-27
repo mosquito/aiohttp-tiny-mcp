@@ -96,8 +96,8 @@ async def open_clock(ex) -> Clock:
 registry.provide(Clock, open_clock)
 ```
 
-Called once per request, not once per handler: two parameters of the same type
-in one call get the same object.
+Two parameters of the same type in one handler invocation get the same object.
+A restarted handler opens a new dependency scope.
 
 ## An application key
 
@@ -156,6 +156,16 @@ assert len(released) == 1
 
 The part after `yield` runs whether the handler returned, raised, or was
 cancelled by a client that went away.
+
+If `NeedInput` restarts the handler, each invocation gets a new dependency
+scope. The previous invocation's generators close before the restart; their
+values are not reused. Application-wide instances and pools remain owned by
+the application.
+
+For HTTP+SSE, use these providers for transactions and borrowed connections.
+The POST returns `202` before the MCP handler runs, so middleware has already
+left its scope. A connection closed by middleware after `await handler(request)`
+cannot be used by that handler. See [HTTP+SSE handler lifetime](../deployment/transports.md).
 
 ## The exchange itself
 

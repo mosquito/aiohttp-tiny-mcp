@@ -23,6 +23,10 @@
     <input id="answerable" type="checkbox" checked>
     <span>Can be asked</span>
   </label>
+  <label class="toggle" title="Enter model completions yourself. Disconnect to change this setting.">
+    <input id="sampling" type="checkbox">
+    <span>Can answer for a model</span>
+  </label>
   <label class="toggle" title="Receive background notifications in Traffic. Disconnect to change this setting.">
     <input id="notifications" type="checkbox" checked>
     <span>Notifications</span>
@@ -97,6 +101,23 @@
       <button value="cancel" class="quiet">Cancel</button>
       <button value="decline" class="quiet">Decline</button>
       <button value="accept" class="primary" autofocus>Accept</button>
+    </menu>
+  </form>
+</dialog>
+
+<dialog id="sampling-request" class="question" aria-labelledby="sampling-title">
+  <form method="dialog">
+    <h2 id="sampling-title">Answer for a model</h2>
+    <p class="hint">The server is waiting for your completion. Its completion timeout may end this call.</p>
+    <div id="sampling-details"></div>
+    <div class="argument">
+      <label for="sampling-text">Completion</label>
+      <textarea id="sampling-text" rows="8"></textarea>
+    </div>
+    <menu>
+      <button value="cancel" class="quiet">Cancel</button>
+      <button value="decline" class="quiet">Decline</button>
+      <button value="accept" class="primary">Send completion</button>
     </menu>
   </form>
 </dialog>

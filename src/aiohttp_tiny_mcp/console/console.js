@@ -301,9 +301,11 @@ class Client {
     this.version = version;
     this.rules = REVISIONS[version];
     this.answerable = options.answerable;
+    this.completion = Boolean(options.completion);
     this.onFrame = options.onFrame;       // every message, either way
     this.onNotify = options.onNotify;     // progress, logging, changes
     this.onQuestion = options.onQuestion; // returns an ElicitResult
+    this.onCompletion = options.onCompletion;
     this.authHeaders = { ...(options.authHeaders || {}) };
     this.onAuthError = options.onAuthError;
     this.notifications = Boolean(options.notifications);
@@ -325,7 +327,26 @@ class Client {
   }
 
   get capabilities() {
-    return this.answerable ? { elicitation: {} } : {};
+    return {
+      ...(this.answerable ? { elicitation: {} } : {}),
+      ...(this.completion ? { sampling: {} } : {}),
+    };
+  }
+
+  answerer(method) {
+    if (method === "elicitation/create" && this.answerable) return this.onQuestion;
+    if (method === "sampling/createMessage" && this.completion) return this.onCompletion;
+    return null;
+  }
+
+  async answer(request) {
+    const callback = this.answerer(request.method);
+    if (!callback) return { error: { code: -32601, message: `unsupported: ${request.method}` } };
+    try {
+      return { result: await callback(request.params || {}, this.abort.signal) };
+    } catch (error) {
+      return { error: { code: error.code ?? -32603, message: error.message } };
+    }
   }
 
   nextId() {
@@ -500,15 +521,8 @@ class Client {
       return;
     }
     if (!frame.method) return;
-    // Pushed questions receive a separate bare JSON-RPC response.
-    const reply = this.answerable
-      ? { jsonrpc: "2.0", id: frame.id, result: await this.onQuestion(frame.params || {}) }
-      : {
-          jsonrpc: "2.0",
-          id: frame.id,
-          error: { code: -32601, message: `unsupported: ${frame.method}` },
-        };
-    const response = await this.post(reply, "elicitation/create");
+    const reply = { jsonrpc: "2.0", id: frame.id, ...await this.answer(frame) };
+    const response = await this.post(reply, frame.method);
     await response.body?.cancel();
   }
 
@@ -743,10 +757,11 @@ class Client {
       const result = await this.request("tools/call", params, name);
       const asked = this.asked(result);
       if (!asked) return result;
-      if (!this.answerable) return result;
+      if (Object.values(asked.requests).some((request) => !this.answerer(request.method))) return result;
       state = asked.state;
       for (const [key, request] of Object.entries(asked.requests)) {
-        answers[key] = await this.onQuestion(request.params || {});
+        const reply = await this.answer(request);
+        answers[key] = reply.error || reply.result;
       }
     }
     throw new Error(`${name} is still asking after 8 rounds`);
@@ -827,6 +842,7 @@ const page = {
   endpointParameters: document.getElementById("endpoint-parameters"),
   revision: document.getElementById("revision"),
   answerable: document.getElementById("answerable"),
+  completion: document.getElementById("sampling"),
   notifications: document.getElementById("notifications"),
   connect: document.getElementById("connect"),
   refresh: document.getElementById("refresh"),
@@ -849,6 +865,9 @@ const page = {
   questionText: document.getElementById("question-text"),
   questionFields: document.getElementById("question-fields"),
   answerForm: document.getElementById("answer"),
+  completionDialog: document.getElementById("sampling-request"),
+  completionDetails: document.getElementById("sampling-details"),
+  completionText: document.getElementById("sampling-text"),
 };
 
 let client = null;
@@ -1502,6 +1521,32 @@ function askPerson(request) {
       },
       { once: true }
     );
+  });
+}
+
+
+function completePerson(request, signal) {
+  page.completionDetails.replaceChildren(valueViews(request));
+  page.completionText.value = "";
+  page.completionDialog.returnValue = "cancel";
+  page.completionDialog.showModal();
+  page.completionText.focus();
+  return new Promise((resolve, reject) => {
+    const cancel = () => page.completionDialog.close("cancel");
+    page.completionDialog.addEventListener("close", () => {
+      signal.removeEventListener("abort", cancel);
+      if (page.completionDialog.returnValue !== "accept") {
+        reject(Object.assign(new Error("Completion was refused."), { code: -32000 }));
+        return;
+      }
+      resolve({
+        role: "assistant",
+        content: { type: "text", text: page.completionText.value },
+        model: "console-operator",
+      });
+    }, { once: true });
+    signal.addEventListener("abort", cancel, { once: true });
+    if (signal.aborted) cancel();
   });
 }
 
@@ -2535,6 +2580,7 @@ function rememberConnection(connected) {
       endpoint: endpointUrl.href,
       revision: page.revision.value,
       answerable: page.answerable.checked,
+      completion: page.completion.checked,
       notifications: page.notifications.checked,
     }));
   } catch {}
@@ -2550,6 +2596,7 @@ function restoreConnection() {
     page.endpoint.value = url.pathname + url.search;
     page.revision.value = saved.revision;
     page.answerable.checked = saved.answerable;
+    page.completion.checked = saved.completion === true;
     page.notifications.checked = saved.notifications;
     connect();
   } catch {}
@@ -2572,6 +2619,7 @@ function disconnect() {
   page.refresh.disabled = true;
   page.revision.disabled = false;
   page.answerable.disabled = false;
+  page.completion.disabled = false;
   page.notifications.disabled = false;
   setEndpointDisabled(false);
   page.connect.textContent = "Connect";
@@ -2584,6 +2632,7 @@ async function connect() {
   page.authenticate.disabled = true;
   page.revision.disabled = true;
   page.answerable.disabled = true;
+  page.completion.disabled = true;
   page.notifications.disabled = true;
   setEndpointDisabled(true);
   say("connecting", "");
@@ -2596,11 +2645,13 @@ async function connect() {
       authHeaders: credentials.forEndpoint(endpointUrl.href),
       onAuthError: openAuthentication,
       answerable: page.answerable.checked,
+      completion: page.completion.checked,
       notifications: page.notifications.checked,
       onNotificationError: (error) => report("Notifications interrupted", error.message, true),
       onFrame: record,
       onNotify: noticed,
       onQuestion: askPerson,
+      onCompletion: completePerson,
     });
     const described = await client.initialize();
     setServerInstructions(described.instructions);
@@ -2619,6 +2670,7 @@ async function connect() {
     page.refresh.disabled = true;
     page.revision.disabled = false;
     page.answerable.disabled = false;
+    page.completion.disabled = false;
     page.notifications.disabled = false;
     setEndpointDisabled(false);
     page.connect.textContent = "Connect";

@@ -159,6 +159,7 @@ class MemorySessionStore(SessionStore):
 PROTOCOL_VERSION_KEY = "protocolVersion"
 CAPABILITIES_KEY = "capabilities"
 LOG_LEVEL_KEY = "logLevel"
+
 DATA_KEY = "data"
 SUBSCRIPTIONS_KEY = "subscriptions"
 SAVE_ATTEMPTS = 16

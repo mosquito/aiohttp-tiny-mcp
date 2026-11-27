@@ -24,6 +24,28 @@ class Nothing(BaseModel):
     pass
 
 
+@pytest.mark.parametrize("adapter", ADAPTERS, ids=lambda a: a.version)
+async def test_an_unsupported_request_does_not_reach_the_question_callback(adapter):
+    replies = []
+
+    async def on_ask(request):
+        raise AssertionError("an unsupported method is not an elicitation request")
+
+    async def reply(envelope):
+        replies.append(envelope)
+
+    client = Client("http://localhost/mcp", adapter, on_ask=on_ask)
+    client.reply = reply
+    await client.incoming({"jsonrpc": "2.0", "id": "unsupported", "method": "roots/list"})
+    assert replies == [
+        {
+            "jsonrpc": "2.0",
+            "id": "unsupported",
+            "error": {"code": -32601, "message": "unsupported: roots/list"},
+        }
+    ]
+
+
 def test_tool_without_a_description_is_still_a_tool() -> None:
     """A server may omit the description; the rest of the list must survive it."""
     result = ListToolsResult.model_validate(

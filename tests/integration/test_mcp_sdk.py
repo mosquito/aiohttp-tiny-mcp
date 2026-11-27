@@ -164,3 +164,36 @@ async def test_the_old_transport_serves_the_official_sse_client(offered_over_sse
     assert "add" in {tool.name for tool in tools.tools}
     assert called.content[0].text == '{"result": 5}'
     assert called.structured_content == {"result": 5}
+
+
+async def test_the_sdk_client_answers_a_pushed_sampling_request(real_server_url):
+    """The SDK declares `sampling` only with a callback, and answers the pushed request."""
+    from mcp_types import CreateMessageResult, TextContent
+
+    async def sampler(context, params):
+        assert params.max_tokens == 32
+        return CreateMessageResult(
+            role="assistant",
+            content=TextContent(type="text", text="from the sdk"),
+            model="sdk-model",
+        )
+
+    async with streamable_http_client(real_server_url) as (read, write):
+        async with ClientSession(read, write, sampling_callback=sampler) as session:
+            await session.initialize()
+            answered = await session.call_tool("sampled", {})
+
+    assert answered.content[0].text == "sdk-model: from the sdk"
+
+
+async def test_the_server_tells_the_sdk_client_it_needs_a_model(real_server_url):
+    """Without a callback the SDK declares no sampling, so the call is refused by name."""
+    from mcp.shared.exceptions import MCPError
+
+    async with streamable_http_client(real_server_url) as (read, write):
+        async with ClientSession(read, write) as session:
+            await session.initialize()
+            with pytest.raises(MCPError) as refused:
+                await session.call_tool("sampled", {})
+
+    assert "sampling" in str(refused.value)

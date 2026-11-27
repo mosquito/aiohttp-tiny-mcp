@@ -111,6 +111,9 @@ uv run sphinx-build -W --keep-going -b html docs docs/_build
 
 ## Not implemented
 
+**Roots.** The `file://` model does not provide access to a remote client's
+filesystem. See [why roots are omitted](parity.md#deliberate-omissions).
+
 **Resumption of a response stream.** The `GET` notification stream resumes
 with `Last-Event-ID`; see [Transports](../deployment/transports.md#resuming-a-stream).
 The stream a `POST` opens for one request does not: it carries no ids.
@@ -126,14 +129,14 @@ for that revision.
 Skills loader are available; see [Extensions and skills](../guide/extensions.md).
 That API does not implement Tasks lifecycle rules or MCP Apps rendering.
 
-**Sampling and roots APIs.** These do not have built-in server handler APIs.
-
-**Inbound progress and roots notifications.** The server emits
-`notifications/progress` and never consumes one. `notifications/roots/list_changed`
-has nothing to invalidate while there is no roots API. Both are declared
-differences in the comparison against the published types.
-`notifications/cancelled` is consumed, but by the transport before the adapter,
-so it is declared there too.
+**Inbound progress notifications.** The server emits `notifications/progress`
+and never consumes one. A client reports progress only against a request that
+carried a progress token, and the completion and elicitation requests this server
+sends carry none, so a conforming client has nothing to report against. See
+[Notifications](../guide/notifications.md).
+It is a declared difference in the comparison against the published types, and so
+is `notifications/cancelled`, which is consumed by the transport before the
+adapter reaches it.
 
 ## Extension coverage
 

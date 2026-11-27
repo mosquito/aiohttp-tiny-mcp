@@ -308,12 +308,13 @@ class Endpoint:
             spec = self.registry.tools.get(call.target or "")
             if spec is not None and spec.streaming:
                 return "streaming tool"
-        if (
-            call.operation in MAY_ASK
-            and adapter.can_push_ask
-            and call.client.capabilities.get("elicitation") is not None
-        ):
-            return "a question this revision would have to push"
+        # The stream is decided before the handler runs, so a client that could be
+        # asked gets one whether or not this particular handler asks anything.
+        if call.operation in MAY_ASK:
+            if adapter.can_push_ask and call.client.capabilities.get("elicitation") is not None:
+                return "a question this revision would have to push"
+            if adapter.can_push_request and call.client.capabilities.get("sampling") is not None:
+                return "a sampling request this revision would have to push"
         return None
 
     async def handle(self, request: web.Request) -> web.StreamResponse:

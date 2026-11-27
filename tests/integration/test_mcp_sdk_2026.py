@@ -93,3 +93,20 @@ async def test_mrtr_decline(real_server_url):
     ) as client:
         result = await client.call_tool("confirm", {"service": "web"})
         assert "cancelled" in result.content[0].text
+
+
+async def test_sampling_through_mrtr(real_server_url):
+    """2026-07-28 has no push channel, so a completion rides the restart contract."""
+    from mcp_types import CreateMessageResult, TextContent
+
+    async def sampler(context, params):
+        return CreateMessageResult(
+            role="assistant",
+            content=TextContent(type="text", text="modern"),
+            model="sdk-model",
+        )
+
+    async with Client(real_server_url, mode="2026-07-28", sampling_callback=sampler) as client:
+        answered = await client.call_tool("sampled", {})
+    assert answered.is_error is False
+    assert answered.content[0].text == "sdk-model: modern"

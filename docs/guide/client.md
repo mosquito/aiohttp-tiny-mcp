@@ -150,6 +150,15 @@ async def answer(request):
     return elicit_accept({})
 
 
+async def complete(request):
+    """Answer `sampling/createMessage` with a completion. Also declares the capability."""
+    return {
+        "role": "assistant",
+        "content": {"type": "text", "text": "a completion"},
+        "model": "example-model",
+    }
+
+
 async def note(frame):
     """Every notification the server sends, progress and logging included."""
     notifications.append(frame["method"])
@@ -161,14 +170,16 @@ client = Client(
     AdapterSet.default().by_version["2025-11-25"],
     client_info=Implementation(name="my-agent", version="2.0"),
     on_ask=answer,
+    on_completion=complete,
     on_notification=note,
     log_level="info",
 )
 ```
 
-`on_ask` is the only one that changes what the server does: a server puts a
-question only to a client that declared it can answer, and passing `on_ask` is
-that declaration. See [Asking the user](asking.md#the-clients-side).
+`on_ask` and `on_completion` are the two that change what the server
+does: a server asks only a client that declared it can answer, and passing
+these is that declaration. See [Asking the user](asking.md#the-clients-side)
+and [Model completions](asking.md#completions-asking-the-clients-model).
 
 ## Calls
 

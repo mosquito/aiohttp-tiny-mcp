@@ -146,7 +146,10 @@ async def serve_stdio(
                     adapter = selected
                 ex = Exchange(registry, request, selected, item)
                 ex.keep_log_level = keep_log_level
-                if not selected.can_ask and not ex.can_ask:
+                # Run it inline only where nothing can come back from the client. A
+                # handler that waits for an answer needs this loop to keep reading, and
+                # a client that offers its model can still be asked for a completion.
+                if not selected.can_ask and not ex.can_ask and not ex.can_push_request:
                     attach(ex)
                     outcome = await dispatcher.run(ex)
                     if not item.is_notification:

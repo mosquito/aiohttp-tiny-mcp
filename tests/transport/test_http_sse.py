@@ -49,7 +49,11 @@ async def test_a_request_is_answered_on_the_stream(old):
     assert answered["result"]["protocolVersion"] == "2024-11-05"
 
     listed = await old.call("tools/list", {}, request_id=2)
-    assert {tool["name"] for tool in listed["result"]["tools"]} == {"add", "counting", "gated"}
+    assert {tool["name"] for tool in listed["result"]["tools"]} == {
+        "add",
+        "counting",
+        "gated",
+    }
 
     called = await old.call("tools/call", {"name": "add", "arguments": {"a": 2, "b": 3}}, 3)
     assert called["result"]["content"][0]["text"] == "5"

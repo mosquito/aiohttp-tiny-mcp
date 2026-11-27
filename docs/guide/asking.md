@@ -377,3 +377,103 @@ assert done.content[0].text == "went ahead"
 
 On a revision that pushes the question there is no such option: only `on_ask`
 can answer, and a client without one correctly says it cannot.
+
+## Completions: asking the client's model
+
+A question goes to a person. `ex.completion` goes to the client's model, which is
+the other thing a server may ask for:
+
+<!-- name: async test_asking_completion; fixtures: serve -->
+```python
+from pydantic import BaseModel
+
+from aiohttp_tiny_mcp import Client, Exchange, Registry, CompletionMessage, TextContent
+from aiohttp_tiny_mcp.protocol.selection import AdapterSet
+
+registry = Registry("writer", "1.0")
+
+
+class Topic(BaseModel):
+    about: str
+
+
+@registry.tool
+async def headline(args: Topic, ex: Exchange) -> str:
+    """Have the client's model write a headline."""
+    answered = await ex.completion(
+        messages=[
+            CompletionMessage(
+                role="user", content=TextContent(text=f"A headline about {args.about}")
+            )
+        ],
+        max_tokens=32,
+        system_prompt="Answer with one line.",
+    )
+    return answered.text
+
+
+async def complete(request):
+    """A client answers with a completion, in the shape the specification states."""
+    return {
+        "role": "assistant",
+        "content": {"type": "text", "text": "Trees, mostly"},
+        "model": "example-model",
+    }
+
+
+url = await serve(registry)
+async with Client(url, AdapterSet.default().adapters[0], on_completion=complete) as client:
+    await client.initialize()
+    written = await client.call_tool("headline", {"about": "trees"})
+
+assert written.content[0].text == "Trees, mostly"
+```
+
+`max_tokens` is required by the specification. `system_prompt`,
+`model_preferences`, `include_context`, `temperature`, `stop_sequences` and
+`metadata` are optional and passed through. The client chooses the model, so
+preferences are a request and not an instruction; the answer says which model
+replied.
+
+The result is a `CompletionResult`: `role`, `content`, `model`, an optional
+`stop_reason`, and `.text` for the common case of a text completion. A client
+that refuses, or answers something that is not a completion, fails the call —
+a completion that did not happen is not an empty completion.
+
+Model completions reach every revision: pushed on the call's stream where there is
+one, and carried in the result on `2026-07-28`. The adapter chooses the channel;
+the handler calls `ex.completion()` on every revision. Its keyword arguments
+build a `CompletionRequest`. On `2026-07-28`, the handler
+restarts with the answer, so code before the call may run again.
+
+`ex.completion()` reuses an answer the call already carries. `ex.completed(key)` lets
+the handler inspect that completion without making a request:
+
+<!-- name: test_asking_completion_guard -->
+```python
+async def careful(args, ex):
+    """Request one completion, even where the handler restarts."""
+    answered = ex.completed() or await ex.completion(
+        messages=[{"role": "user", "content": {"type": "text", "text": "once"}}], max_tokens=16
+    )
+    return answered.text
+```
+
+A handler that requests more than one completion passes `key=` to keep the answers apart.
+`Registry(completion_timeout_seconds=...)` bounds each pushed completion wait,
+separately from `ask_timeout_seconds`. The default is five minutes. On
+`2026-07-28`, MRTR returns the request immediately; the client controls how
+long it takes to submit the answer. The pushed-wait timeout does not apply.
+`request_state_ttl_seconds` limits stored handler state only when the handler
+supplies state. It is not a deadline for a stateless completion request.
+
+A client declares `sampling` only when it has an `on_completion` callback, so a
+server refuses the call with `requiredCapabilities: {"sampling": {}}` rather
+than waiting for an answer nobody can give. In the bundled console, select
+**Can answer for a model** before connecting to enter the completion yourself.
+The dialog shows the completion request and replies as `console-operator`.
+See [The console](console.md#questions) and the `summarize` tool in
+`examples/demo.py` for a runnable example.
+
+`sampling.tools`, where a model may call tools during the completion, is not
+implemented here.

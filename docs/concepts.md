@@ -127,8 +127,8 @@ claims; see [What it costs](reference/benchmarks.md).
 
 ### Choose deliberately
 
-Choose the SDK when its sampling or roots APIs are required, or when
-Starlette/ASGI is a fixed constraint. This library supports aiohttp middleware,
+Choose the SDK when Starlette or ASGI is a fixed constraint, or when its MCP
+Apps or Tasks work is required. This library supports aiohttp middleware,
 [custom extensions and skill directories](guide/extensions.md), and extensible
 [authentication policies](guide/auth.md), including Basic and OAuth Bearer.
 Choose it for aiohttp and for legacy session-based MCP behind a load balancer.

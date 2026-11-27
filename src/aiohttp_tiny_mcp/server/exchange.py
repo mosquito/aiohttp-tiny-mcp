@@ -5,26 +5,36 @@ from __future__ import annotations
 import asyncio
 import inspect
 import logging
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from contextlib import AsyncExitStack, asynccontextmanager
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from aiohttp import web
 
 from aiohttp_tiny_mcp.auth import Principal
 from aiohttp_tiny_mcp.protocol.adapter import Adapter, RequestLike
 from aiohttp_tiny_mcp.protocol.core import (
+    COMPLETION_KEY,
+    NEEDED_CAPABILITY,
     Answer,
     AnswerAction,
     Call,
     ClientInfo,
+    Failure,
+    FailureKind,
     InputRequest,
     NeedInput,
+    Rejected,
     answer_of,
     logs_at,
 )
-from aiohttp_tiny_mcp.protocol.models import serialized
+from aiohttp_tiny_mcp.protocol.models import (
+    CompletionMessage,
+    CompletionRequest,
+    CompletionResult,
+    serialized,
+)
 from aiohttp_tiny_mcp.storage.hub import ASK, Hub, topic
 from aiohttp_tiny_mcp.storage.sessions import Session, SessionAccess
 from aiohttp_tiny_mcp.storage.sessions import new_session_id as new_id
@@ -34,6 +44,13 @@ if TYPE_CHECKING:
     from .registry import Registry
 
 log = logging.getLogger("aiohttp_tiny_mcp")
+
+
+def waiting_for(request: InputRequest, registry: Registry) -> float:
+    """How long to wait for this reply. A model call waits longer than a person does."""
+    if str(request.get("method")) == "sampling/createMessage":
+        return registry.completion_timeout_seconds
+    return registry.ask_timeout_seconds
 
 
 def is_reply(body: Any) -> bool:
@@ -88,8 +105,11 @@ class Exchange:
         """Release per-call dependencies, propagating handler exceptions into providers for
         rollback.
         """
-        async with self.stack:
-            yield
+        try:
+            async with self.stack:
+                yield
+        finally:
+            self.resolved.clear()
 
     async def resolve(self, kind: type) -> Any:
         if kind is Exchange:
@@ -137,6 +157,85 @@ class Exchange:
         return self.call.client.capabilities.get("elicitation") is not None
 
     @property
+    def can_push_request(self) -> bool:
+        """Whether any server request can go out on this request's stream.
+
+        A question has its own answer in `can_ask`, because elicitation arrived two
+        revisions after a server request did.
+        """
+        return self.adapter.can_push_request and self.can_complete
+
+    @property
+    def can_complete(self) -> bool:
+        """Whether this client offers its model at all."""
+        return self.call.client.capabilities.get("sampling") is not None
+
+    async def completion(
+        self,
+        *,
+        messages: Sequence[CompletionMessage | Mapping[str, Any]],
+        max_tokens: int,
+        key: str = COMPLETION_KEY,
+        system_prompt: str | None = None,
+        model_preferences: Mapping[str, Any] | None = None,
+        include_context: Literal["none", "thisServer", "allServers"] | None = None,
+        temperature: float | None = None,
+        stop_sequences: Sequence[str] | None = None,
+        metadata: Mapping[str, Any] | None = None,
+    ) -> CompletionResult:
+        """Ask the client's model to complete the conversation, and return what it answered.
+
+        The client chooses the model and may refuse. A refusal is a failure here rather
+        than an empty result, because a completion that did not happen is not a
+        completion. Use `key` to make more than one call in one handler.
+
+        The request travels the way the revision allows. On the revision that resolves
+        by restart, this raises `NeedInput` and the handler runs again with the answer.
+        An answer already carried by the call is reused.
+        """
+        request = CompletionRequest(
+            messages=messages,
+            max_tokens=max_tokens,
+            system_prompt=system_prompt,
+            model_preferences=model_preferences,
+            include_context=include_context,
+            temperature=temperature,
+            stop_sequences=stop_sequences,
+            metadata=metadata,
+        )
+        return self._read_completion(await self.request_input(key, request.as_input()))
+
+    def completed(self, key: str = COMPLETION_KEY) -> CompletionResult | None:
+        """The completion this call already carries, or None where it carries none."""
+        if key not in self.call.answers:
+            return None
+        return self._read_completion(self.call.answers[key])
+
+    @staticmethod
+    def _read_completion(reply: Mapping[str, Any]) -> CompletionResult:
+        """Convert an invalid completion reply to a protocol failure."""
+        try:
+            return CompletionResult.from_reply(reply)
+        except ValueError as error:
+            raise Rejected(Failure(FailureKind.MALFORMED, str(error))) from None
+
+    async def request_input(self, key: str, request: InputRequest) -> Mapping[str, Any]:
+        """Put one server request to the client, through whatever channel there is.
+
+        Returns the reply as it arrived, so a caller that is not a question reads its
+        own shape instead of an elicitation answer. Where this revision cannot push the
+        request, `NeedInput` hands it to the dispatcher, which resolves it by restart.
+        """
+        if self.answered(key):
+            return self.call.answers.get(key) or {}
+        needed = NEEDED_CAPABILITY.get(str(request.get("method")))
+        if self.adapter.can_push_request and (
+            needed is None or self.call.client.capabilities.get(needed) is not None
+        ):
+            return await self.push(key, request, timeout=waiting_for(request, self.registry))
+        raise NeedInput({key: request})
+
+    @property
     def sessions(self) -> SessionAccess:
         """Access sessions by explicit handles, including on revisions without protocol sessions."""
         return SessionAccess(self.registry.session_store, self.registry.session_ttl_seconds)
@@ -180,10 +279,18 @@ class Exchange:
         raise NeedInput({key: request})
 
     async def push_ask(self, key: str, request: InputRequest) -> Answer:
-        """Send a question on the active stream and wait through the hub.
+        """Send a question on the active stream and wait for the answer."""
+        reply = await self.push(key, request)
+        return answer_of(reply) if reply else Answer(action=AnswerAction.CANCEL)
 
-        The reply may reach another node. Subscribe before sending so fast replies are not
-        missed.
+    async def push(
+        self, key: str, request: InputRequest, *, timeout: float | None = None
+    ) -> Mapping[str, Any]:
+        """Send one server request on the active stream and wait through the hub.
+
+        Returns the reply as it arrived, or an empty mapping where the wait ended
+        without one. The reply may reach another node, so the subscription is made
+        before the request goes out and a fast answer is not missed.
         """
         hub = self.registry.hub
         wire_id = new_id()
@@ -191,17 +298,18 @@ class Exchange:
         replies = await hub.subscribe(where, wait=self.registry.hub_poll_seconds)
         await self.emit({"jsonrpc": "2.0", "id": wire_id, **request})
         loop = asyncio.get_running_loop()
-        deadline = loop.time() + self.registry.ask_timeout_seconds
+        waiting = self.registry.ask_timeout_seconds if timeout is None else timeout
+        deadline = loop.time() + waiting
         try:
             while not self.cancelled.is_set():
                 left = deadline - loop.time()
                 if left <= 0:
-                    return Answer(action=AnswerAction.CANCEL)
+                    return {}
                 for event in await replies.poll(timeout=min(left, replies.wait)):
                     reply = event.message.get("reply")
                     if isinstance(reply, Mapping):
-                        return answer_of(reply)
-            return Answer(action=AnswerAction.CANCEL)
+                        return reply
+            return {}
         finally:
             await hub.delete(where)
 

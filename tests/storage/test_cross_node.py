@@ -8,6 +8,8 @@ from aiohttp.test_utils import TestClient, TestServer
 from aiohttp_tiny_mcp import Client, ClientError, Endpoint, elicit_accept
 from aiohttp_tiny_mcp.protocol.models import CallToolResult, TextContent
 from aiohttp_tiny_mcp.protocol.selection import AdapterSet
+from aiohttp_tiny_mcp.storage.sessions import SESSION_HEADER
+from tests.server.test_legacy_elicitation import frame
 
 pytestmark = pytest.mark.asyncio
 
@@ -91,3 +93,61 @@ async def test_state_is_spent_once_the_round_trip_ends(registry):
                 await client.call_tool(
                     "confirm", {"service": "web"}, input_responses=answered, request_state=state
                 )
+
+
+LEGACY = AdapterSet.default().by_version["2025-11-25"]
+
+
+async def test_a_pushed_sampling_request_is_answered_through_another_node(registry):
+    """A completion asked on one worker is answered through the other, like a question."""
+    headers = {
+        "Accept": "application/json, text/event-stream",
+        "MCP-Protocol-Version": LEGACY.version,
+    }
+    async with (
+        TestClient(TestServer(Endpoint(registry).app())) as first,
+        TestClient(TestServer(Endpoint(registry).app())) as second,
+    ):
+        opened = await first.post(
+            "/mcp",
+            headers=headers,
+            json={
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "initialize",
+                "params": {"protocolVersion": LEGACY.version, "capabilities": {"sampling": {}}},
+            },
+        )
+        session = opened.headers[SESSION_HEADER]
+
+        asking = await first.post(
+            "/mcp",
+            headers={**headers, SESSION_HEADER: session},
+            json={
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "tools/call",
+                "params": {"name": "sampled", "arguments": {}},
+            },
+        )
+        pushed = await frame(asking)
+        assert pushed["method"] == "sampling/createMessage"
+
+        relayed = await second.post(
+            "/mcp",
+            headers={**headers, SESSION_HEADER: session},
+            json={
+                "jsonrpc": "2.0",
+                "id": pushed["id"],
+                "result": {
+                    "role": "assistant",
+                    "content": {"type": "text", "text": "from the other node"},
+                    "model": "shared",
+                },
+            },
+        )
+        assert relayed.status == 202
+
+        answered = await frame(asking)
+        asking.close()
+    assert answered["result"]["content"][0]["text"] == "shared: from the other node"

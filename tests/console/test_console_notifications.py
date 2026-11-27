@@ -503,8 +503,8 @@ def test_connection_controls_apply_notifications_and_reset_after_disconnect() ->
         + """
     const state = setup('2026-07-28');
     const page = Object.fromEntries([
-      'connect', 'authenticate', 'revision', 'answerable', 'notifications', 'endpoint',
-      'outcome', 'refresh', 'subject', 'about', 'invoke', 'args', 'catalogue',
+      'connect', 'authenticate', 'revision', 'answerable', 'completion', 'notifications',
+      'endpoint', 'outcome', 'refresh', 'subject', 'about', 'invoke', 'args', 'catalogue',
     ].map(name => [name, {disabled: false, append() {}}]));
     page.revision.value = '2026-07-28';
     page.notifications.checked = true;
@@ -522,6 +522,7 @@ def test_connection_controls_apply_notifications_and_reset_after_disconnect() ->
     function record() {}
     function noticed() {}
     function askPerson() {}
+    function completePerson() {}
     function say() {}
     function element() { return {}; }
     function report(title, message) { throw new Error(title + ': ' + message); }

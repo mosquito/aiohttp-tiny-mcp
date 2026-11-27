@@ -83,3 +83,26 @@ async def test_completion(adapter):
             {"type": "ref/prompt", "name": "greet"}, {"name": "language", "value": "py"}
         )
         assert result.completion.values == ["python"]
+
+
+@pytest.mark.parametrize("adapter", LEGACY_ADAPTERS, ids=lambda a: a.version)
+async def test_the_sdk_server_samples_through_this_client(adapter):
+    """The SDK asks `sampling/createMessage` mid-call, and this client answers it."""
+
+    async def on_completion(request):
+        assert request["params"]["maxTokens"] == 32
+        return {
+            "role": "assistant",
+            "content": {"type": "text", "text": "from this client"},
+            "model": "local",
+        }
+
+    async with StdioClient.spawn(
+        sys.executable, SCRIPT, adapter=adapter, on_completion=on_completion
+    ) as client:
+        await client.initialize()
+        answered = await client.call_tool("sampled", {})
+    assert isinstance(answered, CallToolResult)
+    content = answered.content[0]
+    assert isinstance(content, TextContent)
+    assert content.text == "local: from this client"

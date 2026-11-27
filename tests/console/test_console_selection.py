@@ -70,8 +70,8 @@ def test_server_instructions_do_not_disable_restored_tool(restore):
         + invoke
         + f"""
 const page = Object.fromEntries([
-  "connect", "authenticate", "revision", "answerable", "notifications", "endpoint", "outcome",
-  "refresh", "subject", "about", "invoke", "args", "serverTitle"
+  "connect", "authenticate", "revision", "answerable", "completion", "notifications", "endpoint",
+  "outcome", "refresh", "subject", "about", "invoke", "args", "serverTitle"
 ].map(name => [name, {{disabled: true}}]));
 let client, endpointUrl, chosen = null, called = null, serverInstructions = "", catalogue = null;
 let remembered = "search";
@@ -86,6 +86,7 @@ function openAuthentication() {{}}
 function record() {{}}
 function noticed() {{}}
 function askPerson() {{}}
+function completePerson() {{}}
 function say() {{}}
 function prose(text, into) {{ into.textContent = text; }}
 function report() {{}}

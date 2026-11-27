@@ -72,6 +72,47 @@ URL in integration tests that must cover your proxy, TLS, or load balancer.
 limits, for example `connect(registry, limit=4 * 1024 * 1024)` for 4 MiB.
 This permits large catalogues without pagination.
 
+## Test a model completion
+
+Pass `completion=` to `connect` or `over_http` for a fixed text reply. Use
+`on_completion=` for a callback that inspects the request or returns a different
+completion each time. Both helpers declare the `sampling` wire capability only
+when a provider is present.
+
+<!-- name: async test_testing_completion -->
+```python
+from pydantic import BaseModel
+
+from aiohttp_tiny_mcp import Exchange, Registry
+from aiohttp_tiny_mcp.testing import connect
+
+
+class Nothing(BaseModel):
+    pass
+
+
+registry = Registry("writer", "1.0")
+
+
+@registry.tool
+async def headline(args: Nothing, ex: Exchange) -> str:
+    """Ask the client's model for a headline."""
+    result = await ex.completion(
+        messages=[{"role": "user", "content": {"type": "text", "text": "A headline about trees"}}],
+        max_tokens=32,
+    )
+    return result.text
+
+
+async with connect(registry, completion="Trees store carbon") as client:
+    result = await client.call_tool("headline", {})
+
+assert result.content[0].text == "Trees store carbon"
+```
+
+Omit both options to test the missing-capability refusal. Pass a complete result
+mapping to `completion=` when the role, content type or model matters.
+
 ## Test the HTTP boundary
 
 Use over_http when the request itself is part of the behaviour. For example,

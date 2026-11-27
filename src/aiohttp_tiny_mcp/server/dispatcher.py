@@ -13,6 +13,8 @@ from aiohttp_tiny_mcp.auth import Principal
 from aiohttp_tiny_mcp.extensions import ExtensionResult
 from aiohttp_tiny_mcp.protocol.core import (
     LOG_LEVELS,
+    NEEDED_CAPABILITY,
+    QUESTIONS,
     Failure,
     FailureKind,
     NeedInput,
@@ -46,7 +48,7 @@ from aiohttp_tiny_mcp.protocol.models import (
     ToolDef,
 )
 
-from .exchange import Exchange
+from .exchange import Exchange, waiting_for
 from .registry import Registry
 from .request_state import RequestStates, protect_request_state, restore_request_state
 from .resource_auth import resource_refusal, visible_resource
@@ -107,9 +109,10 @@ class Dispatcher:
                 return failure
         operation = ex.call.operation
         try:
-            outcome = await self.dispatch(operation, ex)
-        except NeedInput as e:
-            outcome = await self.resolve_need_input(ex, e)
+            try:
+                outcome = await self.dispatch(operation, ex)
+            except NeedInput as e:
+                outcome = await self.resolve_need_input(ex, e)
         except Rejected as e:
             outcome = e.failure
         except Exception as e:  # noqa: BLE001 -- last resort, see the per-operation handlers
@@ -121,20 +124,41 @@ class Dispatcher:
             await self.request_state.drop(resumed)
         return outcome
 
+    def undeclared(self, ex: Exchange, e: NeedInput) -> tuple[str, ...]:
+        """Return the required capabilities that the client did not declare."""
+        wanted = {
+            NEEDED_CAPABILITY.get(str(request.get("method")), "elicitation")
+            for request in e.requests.values()
+            if not (ex.adapter.asks_in_arguments and request.get("method") in QUESTIONS)
+        }
+        return tuple(sorted(n for n in wanted if ex.call.client.capabilities.get(n) is None))
+
+    def pushable(self, ex: Exchange, e: NeedInput) -> bool:
+        """Return whether this revision can push every requested input."""
+        for request in e.requests.values():
+            question = str(request.get("method")) in QUESTIONS
+            if not (ex.adapter.can_push_ask if question else ex.adapter.can_push_request):
+                return False
+        return bool(e.requests)
+
     async def resolve_need_input(self, ex: Exchange, e: NeedInput) -> Outcome:
-        if ex.can_ask and ex.adapter.can_push_ask and not ex.adapter.can_ask:
-            return await self.ask_on_the_stream(ex, e)
-        if ex.can_ask:
-            return NeedsInput(requests=e.requests, state=e.state)
-        # A revision that asks in any way puts the fault on the client, which declared
-        # nothing, and says what to declare. Only a revision with no channel at all
-        # reports that the question cannot be put.
-        if ex.adapter.can_ask or ex.adapter.can_push_ask:
+        # The fault is the client's, and the reply names what to declare. A revision
+        # with no channel at all reports that the request cannot be put instead.
+        missing = self.undeclared(ex, e)
+        if missing:
+            if not ex.asks_somehow:
+                return Failure(
+                    FailureKind.INPUT_UNSUPPORTED, f"{ex.adapter.version} cannot ask the user"
+                )
             return Failure(
                 FailureKind.MISSING_REQUIRED_CAPABILITY,
-                "client did not declare the elicitation capability",
-                data={"requiredCapabilities": {"elicitation": {}}},
+                f"client did not declare the {' and '.join(missing)} capability",
+                data={"requiredCapabilities": {name: {} for name in missing}},
             )
+        if self.pushable(ex, e) and not ex.adapter.can_ask:
+            return await self.ask_on_the_stream(ex, e)
+        if ex.adapter.can_ask or ex.adapter.asks_in_arguments:
+            return NeedsInput(requests=e.requests, state=e.state)
         return Failure(FailureKind.INPUT_UNSUPPORTED, f"{ex.adapter.version} cannot ask the user")
 
     async def ask_on_the_stream(self, ex: Exchange, first: NeedInput) -> Outcome:
@@ -146,12 +170,20 @@ class Dispatcher:
         """
         asked = first
         for _ in range(PUSH_ASK_ROUNDS):
+            if self.undeclared(ex, asked) or not self.pushable(ex, asked):
+                return await self.resolve_need_input(ex, asked)
             answers = dict(ex.call.answers)
             actions = dict(ex.call.actions)
             for key, request in asked.requests.items():
-                answer = await ex.push_ask(key, request)
-                answers[key] = dict(answer.content)
-                actions[key] = answer.action
+                if str(request.get("method")) in QUESTIONS:
+                    answer = await ex.push_ask(key, request)
+                    answers[key] = dict(answer.content)
+                    actions[key] = answer.action
+                    continue
+                # Keep the completion in its original shape.
+                answers[key] = dict(
+                    await ex.push(key, request, timeout=waiting_for(request, self.registry))
+                )
             ex.call.answers = answers
             ex.call.actions = actions
             ex.call.state = asked.state
@@ -338,6 +370,10 @@ class Dispatcher:
         except ValidationError as e:
             return Value(result=CallToolResult.failure(f"invalid arguments:\n{e}"))
         except NeedInput:
+            raise
+        except Rejected:
+            # A protocol failure, not a tool fault: the client broke the exchange, so
+            # the reply is a JSON-RPC error rather than a result the model reads.
             raise
         except Exception as e:  # noqa: BLE001 -- tool faults are results, not RPC errors
             return Value(result=CallToolResult.failure(f"{type(e).__name__}: {e}"))

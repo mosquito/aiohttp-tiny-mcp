@@ -236,8 +236,8 @@ policies through `Registry(auth=...)`. No authentication middleware is required.
 For streaming responses, disable proxy buffering and allow connections to stay
 open while a tool runs or waits for a user's answer. The endpoint sets
 `X-Accel-Buffering: no` on its SSE responses; ensure your proxy configuration
-honors it. Set idle timeouts with `ask_timeout_seconds` and long-lived
-notification streams in mind.
+honors it. Set idle timeouts with `ask_timeout_seconds`,
+`completion_timeout_seconds`, and long-lived notification streams in mind.
 
 Shared backends allow new requests to reach any worker. An existing HTTP stream
 stays on the worker that accepted it and is lost if that worker stops.

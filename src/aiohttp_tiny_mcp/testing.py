@@ -10,7 +10,7 @@ from typing import Any
 
 from aiohttp import web
 
-from .client.base import BaseClient, Elicitor
+from .client.base import BaseClient, CompletionProvider, Elicitor
 from .client.http import Client
 from .client.stdio import DEFAULT_STREAM_LIMIT, StdioClient
 from .protocol.adapter import Adapter
@@ -53,6 +53,27 @@ def answering(answers: Mapping[str, Any] | None) -> Elicitor | None:
     return answer
 
 
+def completing(completion: str | Mapping[str, Any] | None, *, model: str = "test-model") -> Any:
+    """Build a completion provider that returns one canned result.
+
+    Pass the text, or the whole result where a test needs another shape. `None` builds
+    no callback, so the client declares no `sampling` capability.
+    """
+    if completion is None:
+        return None
+
+    async def answer(request: Mapping[str, Any]) -> Mapping[str, Any]:
+        if isinstance(completion, Mapping):
+            return completion
+        return {
+            "role": "assistant",
+            "content": {"type": "text", "text": completion},
+            "model": model,
+        }
+
+    return answer
+
+
 @asynccontextmanager
 async def connect(
     registry: Registry,
@@ -60,6 +81,8 @@ async def connect(
     adapter: Adapter | str | None = None,
     answers: Mapping[str, Any] | None = None,
     on_ask: Elicitor | None = None,
+    completion: str | Mapping[str, Any] | None = None,
+    on_completion: CompletionProvider | None = None,
     client_info: Implementation | None = None,
     initialize: bool = True,
     limit: int = DEFAULT_STREAM_LIMIT,
@@ -91,6 +114,7 @@ async def connect(
         chosen,
         client_info=client_info,
         on_ask=on_ask or answering(answers),
+        on_completion=on_completion or completing(completion),
     )
     try:
         if initialize:
@@ -135,6 +159,8 @@ async def over_http(
     adapter: Adapter | str | None = None,
     answers: Mapping[str, Any] | None = None,
     on_ask: Elicitor | None = None,
+    completion: str | Mapping[str, Any] | None = None,
+    on_completion: CompletionProvider | None = None,
     headers: Mapping[str, str] | None = None,
     initialize: bool = True,
 ) -> AsyncGenerator[Client, None]:
@@ -153,6 +179,7 @@ async def over_http(
                 pick(adapter),
                 session=session,
                 on_ask=on_ask or answering(answers),
+                on_completion=on_completion or completing(completion),
             ) as client:
                 if initialize:
                     await client.initialize()

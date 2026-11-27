@@ -41,13 +41,13 @@ NOT_DECODED: dict[str, str] = {
         "the transport handles it before the adapter: server/stdio.py matches pre.method "
         "and cancels the exchange"
     ),
-    "notifications/progress": (
-        "the server sends no progress token on the only request it makes, a pushed "
-        "question, so a conforming client has nothing to report against; sampling "
-        "would change that"
-    ),
     "notifications/roots/list_changed": (
-        "the server has no roots API; see verification.md, Not implemented"
+        "roots are deprecated and deliberately unsupported; paths belong in tool arguments "
+        "or server configuration"
+    ),
+    "notifications/progress": (
+        "server requests carry no progress token, so a conforming client has nothing "
+        "to report against"
     ),
 }
 

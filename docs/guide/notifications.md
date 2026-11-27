@@ -52,6 +52,12 @@ A tool without `streaming=True` answers in one piece and has nowhere to report,
 so `ex.progress` is silently ignored there. That is deliberate: a handler may be
 called either way and should not have to check.
 
+Progress travels one way here. A client reports progress only against a request
+the server sent it with a progress token, and this server sends no token on a
+question it pushes, so there is nothing for a client to report against. An
+inbound `notifications/progress` is therefore ignored. Completion requests also
+carry no progress token, so their progress cannot be reported to the handler.
+
 ## Logging
 
 `ex.log` takes one of the eight RFC 5424 severities.

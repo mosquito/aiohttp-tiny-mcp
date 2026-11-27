@@ -16,7 +16,7 @@ from .auth import (
     Unauthorized,
     principal_from_claims,
 )
-from .client.base import ClientError, Elicitor
+from .client.base import ClientError, CompletionProvider, Elicitor
 from .client.callback import OAuthCallback
 from .client.http import Client
 from .client.loopback import LoopbackCallback
@@ -37,6 +37,9 @@ from .protocol.models import (
     BlobResourceContents,
     CallToolResult,
     Completion,
+    CompletionMessage,
+    CompletionRequest,
+    CompletionResult,
     EmbeddedResource,
     GetPromptResult,
     Hint,
@@ -77,8 +80,12 @@ __all__ = [
     "CallToolResult",
     "Client",
     "ClientError",
-    "Elicitor",
     "Completion",
+    "CompletionMessage",
+    "CompletionProvider",
+    "CompletionRequest",
+    "CompletionResult",
+    "Elicitor",
     "EmbeddedResource",
     "Endpoint",
     "SSEResponse",
