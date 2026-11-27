@@ -12,7 +12,7 @@ import secrets
 from dataclasses import dataclass
 from typing import Any
 
-from aiohttp_tiny_mcp.protocol.core import Call, Failure, FailureKind, NeedsInput
+from aiohttp_tiny_mcp.protocol.core import Call, Failure, FailureKind, NeedsInput, Operation
 from aiohttp_tiny_mcp.storage.namespaces import scoped
 from aiohttp_tiny_mcp.storage.sessions import SessionStore
 
@@ -24,13 +24,20 @@ BINDING_KEY = "binding"
 PAYLOAD_KEY = "payload"
 
 
+# An extension call keeps its raw params as arguments, so a retry carries these fields too.
+RETRY_FIELDS = frozenset({"inputResponses", "requestState"})
+
+
 def binding_of(call: Call) -> str:
     """Hash normalized call arguments and target so state cannot be reused for a different call."""
+    arguments = call.arguments
+    if call.operation is Operation.EXTENSION:
+        arguments = {key: value for key, value in arguments.items() if key not in RETRY_FIELDS}
     material = json.dumps(
         {
             "operation": call.operation.value,
             "target": call.target,
-            "arguments": call.arguments,
+            "arguments": arguments,
         },
         ensure_ascii=False,
         sort_keys=True,
