@@ -119,10 +119,15 @@ async def mcp_resources_list(args: ResourceListArguments, ex: Exchange) -> CallT
     if isinstance(page, Failure):
         return CallToolResult.failure(page.message)
     shown, next_cursor = page
+    # A name and a title are for a person to read, and an icon is bytes or a URL for
+    # one to look at. None of the three helps the model that reads this catalogue.
     result: dict[str, Any] = {
         "items": [
             definition.model_dump(
-                mode="json", by_alias=True, exclude_none=True, exclude={"name", "title"}
+                mode="json",
+                by_alias=True,
+                exclude_none=True,
+                exclude={"name", "title", "icons"},
             )
             for key, definition in shown
         ]

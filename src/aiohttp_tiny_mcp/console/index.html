@@ -10,7 +10,7 @@
 <body>
 
 <header class="bar">
-  <h1><button id="server-title" type="button" title="Show server instructions" disabled>{{TITLE}}</button></h1>
+  <h1><span id="server-icon"></span><button id="server-title" type="button" title="Show server instructions" disabled>{{TITLE}}</button></h1>
   <label id="endpoint-manual" class="field grow" title="The path the server serves MCP on. A query string is sent as typed">
     <span>Endpoint</span>
     <input id="endpoint" class="endpoint" type="text" spellcheck="false" autocomplete="off">
@@ -88,6 +88,9 @@
     <div id="traffic" class="scroll log">
       <p class="empty">Every message, as it goes over the wire.</p>
     </div>
+    <footer class="credits">
+      Powered by <a href="https://pypi.org/project/aiohttp-tiny-mcp/" target="_blank" rel="noopener noreferrer">aiohttp-tiny-mcp</a>
+    </footer>
   </section>
 
 </main>
@@ -108,7 +111,7 @@
 <dialog id="sampling-request" class="question" aria-labelledby="sampling-title">
   <form method="dialog">
     <h2 id="sampling-title">Answer for a model</h2>
-    <p class="hint">The server is waiting for your completion. Its completion timeout may end this call.</p>
+    <p class="hint">The server is waiting for your completion. A pushed request may time out before you reply.</p>
     <div id="sampling-details"></div>
     <div class="argument">
       <label for="sampling-text">Completion</label>

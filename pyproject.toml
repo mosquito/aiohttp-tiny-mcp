@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Remote MCP server and client library for aiohttp"
 readme = "README.md"
 license = "Apache-2.0"
-license-files = ["LICENSE"]
+license-files = ["LICENSE", "licenses/*.txt"]
 requires-python = ">=3.10"
 classifiers = [
     "Development Status :: 4 - Beta",
@@ -12,7 +12,6 @@ classifiers = [
     "Framework :: aiohttp",
     "Environment :: Web Environment",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: Apache Software License",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3 :: Only",
     "Programming Language :: Python :: 3.10",
@@ -75,7 +74,7 @@ dev = [
 
 [tool.uv.build-backend]
 # Include console assets in source distributions as well as wheels.
-source-include = ["src/aiohttp_tiny_mcp/console/*.html", "src/aiohttp_tiny_mcp/console/*.css", "src/aiohttp_tiny_mcp/console/*.js"]
+source-include = ["src/aiohttp_tiny_mcp/console/*.html", "src/aiohttp_tiny_mcp/console/*.css", "src/aiohttp_tiny_mcp/console/*.js", "src/aiohttp_tiny_mcp/data/icons/*", "tools/prepare_icons.py"]
 
 [build-system]
 requires = ["uv_build>=0.12,<0.13"]

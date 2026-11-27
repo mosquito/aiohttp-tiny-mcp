@@ -11,12 +11,13 @@ from types import MappingProxyType
 
 import pytest
 from mcp import Client, ClientSession
+from mcp.client.streamable_http import streamable_http_client
 from mcp.shared.tool_name_validation import validate_tool_name
 from mcp.shared.uri_template import InvalidUriTemplate, UriTemplate
 from mcp_types import ElicitResult
 from pydantic import BaseModel
 
-from aiohttp_tiny_mcp import CacheHint, MemoryHub, MemorySessionStore, Registry
+from aiohttp_tiny_mcp import CacheHint, Icon, MemoryHub, MemorySessionStore, Registry
 from aiohttp_tiny_mcp.server.naming import checked_tool_name, template_variables
 from aiohttp_tiny_mcp.testing import serving
 
@@ -196,3 +197,42 @@ async def test_the_official_sse_client_answers_a_pushed_question(offered_over_ss
             answered = await session.call_tool("gate", {})
 
     assert answered.content[0].text == "accepted"
+
+
+@pytest.fixture
+async def decorated_server():
+    """A server that declares an icon on everything that can carry one."""
+    icon = Icon(src="https://example.test/i.png", sizes=["48x48"], mime_type="image/png")
+    registry = Registry(
+        "decorated",
+        "1.0",
+        hub=MemoryHub(),
+        session_store=MemorySessionStore(),
+        icons=[icon],
+        website_url="https://example.test",
+    )
+    registry.tool(anything, icons=[icon])
+    registry.prompt(anything, icons=[icon])
+    registry.resource("config://app", anything, icons=[icon])
+    async with serving(registry) as url:
+        yield url
+
+
+async def test_the_sdk_client_reads_the_icons_this_server_declares(decorated_server):
+    """The SDK validates the listing into its own typed models, so parsing is the check.
+
+    The handshake settles on 2025-11-25, which is the oldest revision with the field.
+    """
+    async with streamable_http_client(decorated_server) as (read, write):
+        async with ClientSession(read, write) as session:
+            handshake = await session.initialize()
+            tools = await session.list_tools()
+            resources = await session.list_resources()
+            prompts = await session.list_prompts()
+
+    assert handshake.protocol_version == "2025-11-25"
+    assert str(handshake.server_info.icons[0].src) == "https://example.test/i.png"
+    assert str(handshake.server_info.website_url) == "https://example.test"
+    assert tools.tools[0].icons[0].sizes == ["48x48"]
+    assert resources.resources[0].icons[0].mime_type == "image/png"
+    assert prompts.prompts[0].icons is not None

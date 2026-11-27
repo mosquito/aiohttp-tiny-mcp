@@ -394,6 +394,10 @@ routes. It does not declare protocol extension support. See
 
 ## Questions
 
+The catalogue and server title display declared icons on revisions that carry
+them. The console selects light/dark variants and scales images to 16 pixels.
+See [Icons](icons.md) for presets, custom images and the runnable demo.
+
 A handler that calls `ex.ask` puts a question to the page, and the page puts it
 to the person -- with a form built from the request's schema, and the three
 answers the protocol defines: accept, decline, cancel.
@@ -407,7 +411,8 @@ model completion requests yourself. The dialog shows the messages and model
 options, and accepts a text completion. The reply names its model
 `console-operator`; no API key or model service is needed. **Decline**,
 **Cancel**, and Escape return an error rather than an empty completion.
-The server waits up to its configured completion timeout. Background notifications
+For a pushed request, the server waits up to its configured completion timeout.
+With MRTR, the client controls when it submits the completion. Background notifications
 continue while the dialog is open. Disconnect before changing the checkbox.
 
 To try it, run `uv run python examples/demo.py`, open

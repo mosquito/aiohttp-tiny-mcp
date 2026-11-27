@@ -12,7 +12,7 @@ import pytest
 from aiohttp.test_utils import TestClient, TestServer
 from pydantic import BaseModel
 
-from aiohttp_tiny_mcp import Client, Endpoint, Extension, Registry, SseEndpoint
+from aiohttp_tiny_mcp import Client, Endpoint, Extension, Icon, Registry, SseEndpoint
 from aiohttp_tiny_mcp.client.base import ClientError
 from aiohttp_tiny_mcp.protocol.core import Operation
 from aiohttp_tiny_mcp.protocol.models import (
@@ -37,6 +37,16 @@ class Nothing(BaseModel):
 
 class Entry(BaseModel):
     name: str
+
+
+async def described_resource(args: Nothing) -> str:
+    """A resource with something to show beside its address."""
+    return "alpha content"
+
+
+async def entry_resource(args: Entry) -> str:
+    """One entry by name."""
+    return f"entry {args.name}"
 
 
 def resource_registry(**kwargs: Any) -> Registry:
@@ -661,3 +671,25 @@ async def test_resource_read_tool_executes_legacy_extension_method_alias(version
         assert result["contents"][0]["uri"] == uri
         assert json.loads(result["contents"][0]["text"]) == {"removed": "report"}
     assert calls == ["report"]
+
+
+@pytest.mark.parametrize("version", VERSIONS)
+async def test_the_resource_catalogue_carries_no_icon(version: str):
+    """An icon is a URL or bytes for a person to look at, and this catalogue is read by
+    a model. The name and the title are left out for the same reason.
+    """
+    registry = Registry("icons", "1")
+    icon = Icon(src="https://example.test/i.png")
+    registry.resource("file://alpha", described_resource, icons=[icon], title="Alpha")
+    registry.resource("file://entries/{name}", entry_resource, name="entry", icons=[icon])
+
+    async with resource_client(registry, version=version) as (client, discovery):
+        for templates in (False, True):
+            listed = tool_data(
+                await client.call_tool("mcp_resources_list", {"templates": templates})
+            )
+            assert listed["items"], listed
+            for item in listed["items"]:
+                assert "icons" not in item
+                assert "title" not in item
+                assert "name" not in item

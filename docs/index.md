@@ -45,6 +45,7 @@ pieces
 :caption: Writing handlers
 
 guide/tools
+guide/icons
 guide/resources
 guide/caching
 guide/extensions

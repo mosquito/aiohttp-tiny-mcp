@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable, Iterable, Mapping
+from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
 from typing import Any
 
 from aiohttp_tiny_mcp.auth import Authentication, Principal, Query
 from aiohttp_tiny_mcp.extensions import Extension, ExtensionSpec
-from aiohttp_tiny_mcp.protocol.models import Implementation
+from aiohttp_tiny_mcp.icons import Icons, expand_icons
+from aiohttp_tiny_mcp.protocol.models import Icon, Implementation
 from aiohttp_tiny_mcp.storage.hub import NOTIFICATIONS, Cursor, Hub, MemoryHub, topic
 from aiohttp_tiny_mcp.storage.sessions import DEFAULT_TTL_SECONDS, MemorySessionStore, SessionStore
 
@@ -49,8 +50,12 @@ class Registry:
         page_size: int | None = None,
         resource_tools: bool = True,
         cache_hints: Mapping[str, CacheHint] | None = None,
+        icons: Sequence[Icon | Icons] | None = None,
+        website_url: str | None = None,
     ) -> None:
-        self.info = Implementation(name=name, version=version)
+        self.info = Implementation(
+            name=name, version=version, icons=expand_icons(icons), website_url=website_url
+        )
         self.instructions = instructions
         self.hub = hub if hub is not None else MemoryHub()
         self.session_store = session_store if session_store is not None else MemorySessionStore()

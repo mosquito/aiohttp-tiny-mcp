@@ -30,7 +30,7 @@ The server's public surface consists of a registry and its handlers:
 
 | Declare | The client receives |
 | --- | --- |
-| `Registry(name, version, ...)` | Server identity and instructions |
+| `Registry(name, version, ...)` | Server identity, instructions, icons and a website |
 | Tool function, model, and docstring | Name, description, input schema, and result |
 | Resource URI and handler | A readable URI or URI template |
 | Prompt function and model | A named prompt and its arguments |
@@ -45,9 +45,17 @@ A tool name has one to 128 characters, each a letter, a digit, `.`, `_` or
 `-`. That is the specification's own rule, and registration refuses anything
 else, including a space, a comma, a `/` and any non-ASCII letter. A leading or
 trailing `-` or `.` is discouraged rather than refused, so it registers and
-logs a warning. The name defaults to the function's own name, which satisfies
-the rule in Python. A prompt name is not constrained: the specification states
+logs a warning. The name defaults to the function's own name. Python also allows
+Unicode identifiers; pass an ASCII `name=` for those functions. A prompt name is not constrained: the specification states
 the rule for tools only.
+
+An `icons=` list on a declaration, or on the registry, gives a host something to
+show beside the name. Each entry needs an `http:`, `https:` or `data:` source, and
+`sizes` entries of the form `WxH` or `any`. Icons reach the two newest revisions
+and are dropped on the rest. A `data:` source repeats its bytes in every listing
+that names it, so prefer a URL for larger assets. Use `Icons.MAGNIFYING_GLASS` and the other
+[built-in presets](guide/icons.md) for ready light/dark pairs, or load a custom
+image with `Icon.from_file()` or `Icon.from_bytes()`.
 
 A resource URI is either a fixed address or a template with `{name}`
 variables, each matching one path segment. Registration refuses a malformed

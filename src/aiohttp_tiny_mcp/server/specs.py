@@ -6,16 +6,18 @@ import base64
 import inspect
 import json
 import re
-from collections.abc import Awaitable, Callable, Iterable, Mapping
+from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
 from contextlib import AbstractAsyncContextManager
 from typing import Any, ClassVar, Literal, Protocol, get_type_hints
 
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 
+from aiohttp_tiny_mcp.icons import Icons, expand_icons
 from aiohttp_tiny_mcp.protocol.models import (
     BlobResourceContents,
     CallToolResult,
     Hint,
+    Icon,
     Model,
     PromptArgumentDef,
     PromptDef,
@@ -95,6 +97,7 @@ class ToolSpec(Model):
     name: str
     title: str | None = None
     description: str
+    icons: Sequence[Icon] | None = None
     bound: Bound
     input_schema: dict[str, Any]
     output_schema: dict[str, Any] | None = None
@@ -122,6 +125,7 @@ class ToolSpec(Model):
         name: str | None = None,
         title: str | None = None,
         description: str | None = None,
+        icons: Sequence[Icon | Icons] | None = None,
         annotations: Mapping[str, Any] | Hint | None = None,
         scopes: Iterable[str] | None = None,
         min_revision: str | None = None,
@@ -134,6 +138,7 @@ class ToolSpec(Model):
             name=name,
             title=title,
             description=described(description, fn),
+            icons=expand_icons(icons),
             bound=bound,
             input_schema=schema,
             output_schema=json_schema(bound.returns) if bound.structured else None,
@@ -152,6 +157,7 @@ class ToolSpec(Model):
             input_schema=schema,
             output_schema=output_schema,
             annotations=dict(self.annotations) or None,
+            icons=self.icons,
         )
 
 
@@ -182,6 +188,7 @@ class ResourceSpec(Model):
         title: str | None = None,
         description: str | None = None,
         mime_type: str | None = None,
+        icons: Sequence[Icon | Icons] | None = None,
         cache_ttl: int | float | None = None,
         cache_scope: Literal["public", "private"] | None = None,
         scopes: Iterable[str] | None = None,
@@ -194,6 +201,7 @@ class ResourceSpec(Model):
         bound = Bound.of(fn)
         name = name or getattr(fn, "__name__", repr(fn))
         description = described(description, fn) or None
+        resolved_icons = expand_icons(icons)
         if not template_variables(uri):
             return cls(
                 bound=bound,
@@ -202,7 +210,12 @@ class ResourceSpec(Model):
                 cache_ttl=cache_ttl,
                 cache_scope=cache_scope,
                 definition=ResourceDef(
-                    uri=uri, name=name, title=title, description=description, mime_type=mime_type
+                    uri=uri,
+                    name=name,
+                    title=title,
+                    description=description,
+                    mime_type=mime_type,
+                    icons=resolved_icons,
                 ),
             )
         parts, last = [], 0
@@ -224,6 +237,7 @@ class ResourceSpec(Model):
                 title=title,
                 description=description,
                 mime_type=mime_type,
+                icons=resolved_icons,
             ),
         )
 
@@ -273,6 +287,7 @@ class PromptSpec(Model):
         name: str | None = None,
         title: str | None = None,
         description: str | None = None,
+        icons: Sequence[Icon | Icons] | None = None,
     ) -> PromptSpec:
         bound = Bound.of(fn)
         name = name or getattr(fn, "__name__", repr(fn))
@@ -285,6 +300,7 @@ class PromptSpec(Model):
                 name=name,
                 title=title,
                 description=described(description, fn) or None,
+                icons=expand_icons(icons),
                 arguments=[
                     PromptArgumentDef(
                         name=k, description=v.get("description"), required=k in required

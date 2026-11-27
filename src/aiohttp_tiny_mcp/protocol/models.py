@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 import json
+import mimetypes
+import re
+from base64 import b64encode
 from collections.abc import Mapping, Sequence
 from enum import Enum
 from math import isfinite
+from pathlib import Path
 from types import MappingProxyType
 from typing import Annotated, Any, Literal
 
@@ -17,6 +21,7 @@ from pydantic import (
     StrictInt,
     StrictStr,
     ValidationError,
+    field_validator,
 )
 from pydantic.alias_generators import to_camel
 from pydantic_core import to_json
@@ -45,6 +50,8 @@ class Implementation(Model):
     name: str
     version: str
     title: str | None = None
+    icons: Sequence[Icon] | None = None
+    website_url: str | None = None
 
 
 class TextContent(Model):
@@ -173,6 +180,86 @@ class CompletionResult(Model):
         return self.content.text if isinstance(self.content, TextContent) else ""
 
 
+class Icon(Model):
+    """An image a host may show beside a declaration (2025-11-25 and later).
+
+    `src` is an `http:`, `https:` or `data:` URI. A `data:` URI carries the bytes in
+    every listing that names it, and the server icon rides in the `_meta` of every
+    result on 2026-07-28, so prefer a URL for anything but a small image. `sizes` holds
+    entries of the form `WxH`, or `any` for one that scales.
+    """
+
+    src: str
+    mime_type: str | None = None
+    sizes: list[str] | None = None
+    theme: Literal["dark", "light"] | None = None
+
+    @classmethod
+    def from_bytes(
+        cls,
+        data: bytes,
+        *,
+        mime_type: str,
+        sizes: list[str] | None = None,
+        theme: Literal["dark", "light"] | None = None,
+    ) -> Icon:
+        """Create an embedded icon from image bytes."""
+        encoded = b64encode(data).decode("ascii")
+        return cls(
+            src=f"data:{mime_type};base64,{encoded}", mime_type=mime_type, sizes=sizes, theme=theme
+        )
+
+    @classmethod
+    def from_file(
+        cls,
+        path: str | Path,
+        *,
+        mime_type: str | None = None,
+        sizes: list[str] | None = None,
+        theme: Literal["dark", "light"] | None = None,
+    ) -> Icon:
+        """Read an image file and embed it. Infer its MIME type from the filename."""
+        path = Path(path)
+        mime_type = mime_type or mimetypes.guess_type(str(path))[0] or "application/octet-stream"
+        return cls.from_bytes(path.read_bytes(), mime_type=mime_type, sizes=sizes, theme=theme)
+
+    @classmethod
+    def from_files(
+        cls,
+        light: str | Path,
+        dark: str | Path,
+        *,
+        mime_type: str | None = None,
+        sizes: list[str] | None = None,
+    ) -> tuple[Icon, Icon]:
+        """Read the light and dark variants of one icon."""
+        return (
+            cls.from_file(light, mime_type=mime_type, sizes=sizes, theme="light"),
+            cls.from_file(dark, mime_type=mime_type, sizes=sizes, theme="dark"),
+        )
+
+    @field_validator("src")
+    @classmethod
+    def served_scheme(cls, value: str) -> str:
+        """Allow the schemes a host fetches an image from, and refuse the rest.
+
+        A `javascript:` or `file:` source is a problem for whoever renders it, and
+        registration is the one place a declaration is checked.
+        """
+        if not value.startswith(("http://", "https://", "data:")):
+            raise ValueError("an icon src must be an http:, https: or data: URI")
+        return value
+
+    @field_validator("sizes")
+    @classmethod
+    def stated_sizes(cls, value: list[str] | None) -> list[str] | None:
+        """Each entry is `WxH`, or `any` for an image that scales."""
+        for size in value or ():
+            if size != "any" and not re.fullmatch(r"[1-9][0-9]*x[1-9][0-9]*", size):
+                raise ValueError(f"an icon size must be 'any' or 'WxH', not {size!r}")
+        return value
+
+
 class Hint(Enum):
     """Tool annotations, combined with | and negated with ~.
 
@@ -213,6 +300,7 @@ class ToolDef(Model):
     input_schema: dict[str, Any]
     output_schema: dict[str, Any] | None = None
     annotations: dict[str, Any] | None = None
+    icons: Sequence[Icon] | None = None
 
 
 class ListToolsResult(CacheableResult):
@@ -255,6 +343,7 @@ class ResourceDef(Model):
     description: str | None = None
     mime_type: str | None = None
     size: int | None = None
+    icons: Sequence[Icon] | None = None
 
 
 class ResourceTemplateDef(Model):
@@ -263,6 +352,7 @@ class ResourceTemplateDef(Model):
     title: str | None = None
     description: str | None = None
     mime_type: str | None = None
+    icons: Sequence[Icon] | None = None
 
 
 class ListResourcesResult(CacheableResult):
@@ -290,6 +380,7 @@ class PromptDef(Model):
     title: str | None = None
     description: str | None = None
     arguments: list[PromptArgumentDef] = Field(default_factory=list)
+    icons: Sequence[Icon] | None = None
 
 
 class ListPromptsResult(CacheableResult):

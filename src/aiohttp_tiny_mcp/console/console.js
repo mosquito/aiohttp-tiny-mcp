@@ -816,6 +816,7 @@ const page = {
   agentClose: document.getElementById("agent-close"),
   agentCopy: document.getElementById("agent-copy"),
   serverTitle: document.getElementById("server-title"),
+  serverIcon: document.getElementById("server-icon"),
   authOAuth: document.getElementById("auth-oauth"),
   authOAuthStatus: document.getElementById("auth-oauth-status"),
   authenticate: document.getElementById("authenticate"),
@@ -1788,6 +1789,30 @@ function rememberToolFields(name, fields) {
 }
 
 
+function iconView(icons) {
+  const offered = (Array.isArray(icons) ? icons : []).filter((icon) =>
+    typeof icon?.src === "string" && /^(https?:\/\/|data:image\/)/i.test(icon.src)
+  );
+  if (!offered.length) return null;
+  const picture = element("picture", "declaration-icon");
+  for (const theme of ["dark", "light"]) {
+    const icon = offered.find((one) => one.theme === theme);
+    if (!icon) continue;
+    const source = document.createElement("source");
+    source.media = `(prefers-color-scheme: ${theme})`;
+    source.srcset = icon.src;
+    picture.append(source);
+  }
+  const image = document.createElement("img");
+  image.alt = "";
+  image.referrerPolicy = "no-referrer";
+  image.onerror = () => picture.remove();
+  image.src = (offered.find((one) => !one.theme) || offered[0]).src;
+  picture.append(image);
+  return picture;
+}
+
+
 function show(items, title, into, describe, pick) {
   if (!items.length) return [];
   const buttons = [];
@@ -1797,6 +1822,8 @@ function show(items, title, into, describe, pick) {
     const button = element("button", "item");
     button.type = "button";
     const name = element("span", "name", describe.label(item));
+    const icon = iconView(item.icons);
+    if (icon) name.prepend(icon);
     (describe.tags ? describe.tags(item) : []).forEach((tag) => {
       name.append(element("span", `tag ${tag}`, tag));
     });
@@ -1965,33 +1992,6 @@ function plain(text) {
     .replace(/^\s*[-*+]\s+/, "");
 }
 
-
-function show(items, title, into, describe, pick) {
-  if (!items.length) return [];
-  const buttons = [];
-  const group = element("div", "group");
-  group.append(element("h3", null, title));
-  items.forEach((item) => {
-    const button = element("button", "item");
-    button.type = "button";
-    const name = element("span", "name", describe.label(item));
-    (describe.tags ? describe.tags(item) : []).forEach((tag) => {
-      name.append(element("span", `tag ${tag}`, tag));
-    });
-    button.append(name);
-    const note = describe.note(item);
-    if (note) button.append(element("span", "note", note));
-    button.onclick = () => {
-      page.catalogue.querySelectorAll(".item").forEach((other) => other.classList.remove("chosen"));
-      button.classList.add("chosen");
-      pick(item);
-    };
-    group.append(button);
-    buttons.push(button);
-  });
-  into.append(group);
-  return buttons;
-}
 
 function hints(tool) {
   const annotations = tool.annotations || {};
@@ -2551,9 +2551,13 @@ async function invoke() {
 }
 
 
-function setServerInstructions(text) {
+function setServerInstructions(text, icons) {
   serverInstructions = text || "";
   if (page.serverTitle) page.serverTitle.disabled = !serverInstructions;
+  if (page.serverIcon) {
+    const icon = iconView(icons);
+    page.serverIcon.replaceChildren(...(icon ? [icon] : []));
+  }
 }
 
 function showServerInstructions(clearFragment = true) {
@@ -2654,11 +2658,11 @@ async function connect() {
       onCompletion: completePerson,
     });
     const described = await client.initialize();
-    setServerInstructions(described.instructions);
+    const info = described.serverInfo || (described._meta || {})["io.modelcontextprotocol/serverInfo"] || {};
+    setServerInstructions(described.instructions, info.icons);
     await loadCatalogue();
     page.refresh.disabled = false;
-    const name = (described.serverInfo || (described._meta || {})["io.modelcontextprotocol/serverInfo"] || {}).name;
-    say(`${name || "connected"} · ${client.version}`, "on");
+    say(`${info.name || "connected"} · ${client.version}`, "on");
     page.connect.textContent = "Disconnect";
     if (!chosen) showServerInstructions(false);
     client.startNotifications();
@@ -2780,7 +2784,7 @@ function start() {
     try {
       if (client.rules.extensions) {
         const described = await client.initialize();
-        setServerInstructions(described.instructions);
+        setServerInstructions(described.instructions, (described._meta || {})["io.modelcontextprotocol/serverInfo"]?.icons);
       }
       await loadCatalogue();
     } catch (error) {

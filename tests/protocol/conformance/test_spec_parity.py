@@ -14,6 +14,9 @@ method the SDK adds before a revision publishes it arrives here as a failure.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+from types import MappingProxyType
+
 import pytest
 from mcp_types import _v2025_11_25 as v2025_11_25_types
 from mcp_types import _v2026_07_28 as v2026_07_28_types
@@ -38,20 +41,22 @@ ADAPTERS = AdapterSet.default().adapters
 
 #: Inbound methods this package does not decode, and why. Each one is a client-to-server
 #: method the source defines and no adapter maps to an `Operation`.
-NOT_DECODED: dict[str, str] = {
-    "notifications/cancelled": (
-        "the transport handles it before the adapter: server/stdio.py matches pre.method "
-        "and cancels the exchange"
-    ),
-    "notifications/roots/list_changed": (
-        "roots are deprecated and deliberately unsupported; paths belong in tool arguments "
-        "or server configuration"
-    ),
-    "notifications/progress": (
-        "server requests carry no progress token, so a conforming client has nothing "
-        "to report against"
-    ),
-}
+NOT_DECODED: Mapping[str, str] = MappingProxyType(
+    {
+        "notifications/cancelled": (
+            "the transport handles it before the adapter: server/stdio.py matches pre.method "
+            "and cancels the exchange"
+        ),
+        "notifications/roots/list_changed": (
+            "roots are deprecated and deliberately unsupported; paths belong in tool arguments "
+            "or server configuration"
+        ),
+        "notifications/progress": (
+            "server requests carry no progress token, so a conforming client has nothing "
+            "to report against"
+        ),
+    }
+)
 
 
 def inbound(version: str) -> set[str]:
@@ -140,10 +145,12 @@ def full_registry() -> Registry:
 
 #: The source ships a capability model per revision for these two only. The older three
 #: have the monolith model, which is a union across revisions and proves less.
-CAPABILITY_MODELS = {
-    "2025-11-25": v2025_11_25_types.ServerCapabilities,
-    "2026-07-28": v2026_07_28_types.ServerCapabilities,
-}
+CAPABILITY_MODELS = MappingProxyType(
+    {
+        "2025-11-25": v2025_11_25_types.ServerCapabilities,
+        "2026-07-28": v2026_07_28_types.ServerCapabilities,
+    }
+)
 
 
 @pytest.mark.parametrize("version", sorted(CAPABILITY_MODELS))

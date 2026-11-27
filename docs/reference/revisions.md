@@ -27,6 +27,7 @@ against a real implementation where it was not obvious.
 | `inputSchema` | full JSON Schema 2020-12 | restricted in practice; `$ref` poorly supported | same |
 | `outputSchema` | unrestricted; `structuredContent` may be any JSON | object-rooted; `structuredContent` must be an object | neither exists |
 | Display `title` on a tool, resource or prompt | yes | yes | no |
+| `icons` on a declaration, and `websiteUrl` on the server | yes | 2025-11-25 only | no |
 | Model completion (`ex.completion()`) | request carried in MRTR | pushed `sampling/createMessage` | same |
 | `resource_link` content | yes | yes | no |
 | Logging | per-request `_meta` key | `logging/setLevel`, kept for the session | same |

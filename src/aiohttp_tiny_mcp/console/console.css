@@ -74,6 +74,9 @@ body {
 .bar h1 > button:disabled { opacity: 1; }
 .bar h1 > button:hover:not(:disabled) { text-decoration: underline; }
 
+.declaration-icon { display: inline-block; width: 16px; height: 16px; margin-right: 6px; vertical-align: -3px; }
+.declaration-icon img { display: block; width: 100%; height: 100%; object-fit: contain; }
+
 .field { display: flex; align-items: center; gap: 6px; }
 .field.grow { flex: 1 1 12em; min-width: 0; }
 .field.grow > input { flex: 1 1 auto; min-width: 8em; }
@@ -151,6 +154,9 @@ button.quiet { color: var(--ink-soft); }
 
 .status.on { color: var(--good); }
 .status.off { color: var(--bad); }
+
+.credits { flex-shrink: 0; padding: 3px 10px; text-align: right; font-size: 10px; line-height: 1.3; color: var(--ink-faint); }
+.credits a { color: inherit; }
 
 
 .layout {

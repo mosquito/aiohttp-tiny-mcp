@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import pytest
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
-from aiohttp_tiny_mcp import Client, MemoryHub, MemorySessionStore, Registry
+from aiohttp_tiny_mcp import Client, Icon, MemoryHub, MemorySessionStore, Registry
 from aiohttp_tiny_mcp.protocol.selection import AdapterSet
 
 pytestmark = pytest.mark.asyncio
@@ -205,3 +205,46 @@ async def test_a_prompt_name_is_not_constrained():
     registry = fresh()
     registry.prompt(greet, name="greet/user")
     assert "greet/user" in registry.prompts
+
+
+async def test_a_declared_icon_reaches_the_declaration():
+    registry = fresh()
+    icon = Icon(src="https://example.test/i.png", sizes=["48x48", "any"])
+    registry.tool(add, icons=[icon])
+    registry.resource("config://app", config, icons=[icon])
+    registry.prompt(greet, icons=[icon])
+
+    assert registry.tools["add"].icons == (icon,)
+    assert registry.resources_fixed["config://app"].definition.icons == (icon,)
+    assert registry.prompts["greet"].definition.icons == (icon,)
+
+
+@pytest.mark.parametrize(
+    ("icon", "fault"),
+    [
+        ({"sizes": ["48x48"]}, "src"),
+        ({"src": "javascript:alert(1)"}, "http:, https: or data:"),
+        ({"src": "file:///etc/passwd"}, "http:, https: or data:"),
+        ({"src": "https://example.test/i.png", "sizes": ["48"]}, "'any' or 'WxH'"),
+        ({"src": "https://example.test/i.png", "theme": "neon"}, "theme"),
+    ],
+)
+async def test_a_malformed_icon_is_refused_at_registration(icon, fault):
+    """A declaration is checked once, here, not on every listing it reaches."""
+    registry = fresh()
+    with pytest.raises(ValidationError, match=fault):
+        registry.tool(add, icons=[icon])
+    assert not registry.tools
+
+
+async def test_the_server_icons_and_website_reach_the_server_info():
+    registry = Registry(
+        "plain",
+        "1.0",
+        hub=MemoryHub(),
+        session_store=MemorySessionStore(),
+        icons=[Icon(src="https://example.test/i.png")],
+        website_url="https://example.test",
+    )
+    assert registry.info.icons[0].src == "https://example.test/i.png"
+    assert registry.info.website_url == "https://example.test"

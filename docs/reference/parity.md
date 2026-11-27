@@ -18,6 +18,7 @@ This page is that claim, stated precisely.
 | **Sessions** | by handle | by `Mcp-Session-Id` | same | same | same |
 | Tool hints (`annotations`) | yes | yes | yes | yes | no |
 | Display titles | yes | yes | yes | no | no |
+| Icons and `websiteUrl` | yes | yes | no | no | no |
 | Cache hints on results | per resource and per method | no | no | no | no |
 | Batching | no | no | no | yes | no |
 | Header mirroring | yes | no | no | no | no |
@@ -49,6 +50,12 @@ composition or `$ref` is simplified where that is lossless, and hidden where it
 is not. Declaring `min_revision` says so explicitly; the rest is decided in one
 place, by the adapter.
 
+**Icons.** A tool, a resource, a resource template, a prompt and the server info
+carry `icons` on `2026-07-28` and `2025-11-25`, and the server info carries
+`websiteUrl` with them. The three older revisions have no field for either, so the
+adapter drops them. A resource link has no icon here yet. The bundled console
+shows server and catalogue icons and selects the variant for its colour theme.
+
 **Cache hints.** `ttlMs` and `cacheScope` exist only on `2026-07-28`. A resource
 declares them with `cache_ttl` and `cache_scope`, and
 `Registry(cache_hints={method: CacheHint(...)})` states a default per cacheable
@@ -61,6 +68,26 @@ runs through a `resources/read` route. Native extension capabilities and custom
 JSON-RPC methods remain unavailable on these revisions. See [Extension compatibility through resources](../guide/extension-compatibility.md).
 
 ## Where this package is stricter
+
+### Upgrading existing declarations
+
+Registration now rejects invalid tool names and resource templates instead of
+publishing declarations a client cannot use. Before upgrading:
+
+- Give tools ASCII names of 1–128 letters, digits, `.`, `_` or `-`. Use
+  `@registry.tool(name="search")` if the Python function has a Unicode name.
+- Replace malformed, repeated or adjacent template variables with distinct
+  `{name}` variables separated by literal text. RFC 6570 operators are not supported.
+  A URI may have at most 8192 characters and a template at most 256 variables.
+- For HTTP+SSE, move connections and transactions released by middleware into
+  [handler-scoped providers](../guide/dependencies.md#an-async-generator). The
+  POST now returns `202` before the MCP handler runs; its middleware scope has ended.
+- Replace imports of `access_log.TOKEN_QUERY_FILTER` with
+  `access_log.install_token_filter()`. This keeps one filter that covers the
+  credential names declared by all configured policies.
+
+The new completion API and icon presets are additions; they do not replace a
+released sampling API or add roots support.
 
 **Tool names.** The specification's rule is a character set and a length, and
 this package refuses a name that breaks it at registration. The official SDK

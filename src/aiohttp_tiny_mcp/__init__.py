@@ -23,6 +23,7 @@ from .client.loopback import LoopbackCallback
 from .client.oauth import AuthorizationRequired, OAuth, OAuthError, RegistrationRequired
 from .client.stdio import StdioClient
 from .extensions import Extension
+from .icons import Icons
 from .protocol.core import (
     Answer,
     AnswerAction,
@@ -43,6 +44,7 @@ from .protocol.models import (
     EmbeddedResource,
     GetPromptResult,
     Hint,
+    Icon,
     ImageContent,
     MethodFilter,
     PromptMessage,
@@ -97,6 +99,8 @@ __all__ = [
     "GetPromptResult",
     "Header",
     "Hint",
+    "Icon",
+    "Icons",
     "Hub",
     "ImageContent",
     "MemoryHub",
