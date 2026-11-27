@@ -30,13 +30,10 @@ class Watching:
         self.session = session
         self.last: tuple[dict[str, Any], dict[str, str]] | None = None
 
-    def post(self, url: str, *, json: Any = None, headers: Any = None, **rest: Any):
-        if isinstance(json, dict) and json.get("method"):
+    def request(self, method: str, url: str, *, json: Any = None, headers: Any = None, **rest: Any):
+        if method == "POST" and isinstance(json, dict) and json.get("method"):
             self.last = (json, dict(headers or {}))
-        return self.session.post(url, json=json, headers=headers, **rest)
-
-    def get(self, *args: Any, **kw: Any):
-        return self.session.get(*args, **kw)
+        return self.session.request(method, url, json=json, headers=headers, **rest)
 
 
 async def record(url: str, adapter: Adapter, operation: Callable[[Client], Awaitable[Any]]) -> Sent:
