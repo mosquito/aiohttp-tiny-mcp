@@ -284,6 +284,12 @@ Concurrent callers of the same OAuth object wait for one refresh operation.
 An MCP request gets at most one retry with a refreshed token. HTTP timeouts and
 ambiguous network failures do not cause automatic replay of MCP operations.
 
+A rejected token does not repeat discovery. The address of the protected
+resource metadata comes from the server's own `WWW-Authenticate` challenge, so
+the client reads it again only where that challenge changed, which is the only
+case that can name another document. A refresh needs the token endpoint and the
+client registration, and both are already known.
+
 Before a refresh request, the client saves a record without usable tokens.
 This prevents automatic reuse of a refresh token if the server rotates it but
 the response is lost. After success, the client saves the replacement before

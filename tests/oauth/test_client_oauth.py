@@ -614,3 +614,40 @@ async def test_unknown_expiry_does_not_decode_token(authority):
     async with oauth(authority) as auth:
         assert await auth.token() == authority.current
     assert len(token_calls(authority)) == 1
+
+
+def metadata_calls(server):
+    return [entry for entry in server.calls if entry[0] in {"metadata", "resource_metadata"}]
+
+
+async def test_a_rejection_does_not_re_read_an_unchanged_challenge(authority):
+    """A refresh needs nothing discovery supplies, so repeating it only adds requests.
+
+    The metadata address comes from the server's own challenge, so a server that
+    rejects every token could otherwise make the client fetch a document of its choice
+    on every request.
+    """
+    async with oauth(authority) as auth:
+        await auth.login(authorize=authority.browser)
+        authority.reject = True
+        before = len(metadata_calls(authority))
+        async with Client(authority.resource, ADAPTER, auth=auth) as client:
+            with pytest.raises(AuthorizationRequired):
+                await client.initialize()
+        assert metadata_calls(authority)[before:] == []
+    assert len(token_calls(authority)) == 2
+
+
+async def test_a_changed_challenge_is_read_again(authority):
+    """A server that names something new is believed once, and only once."""
+    async with oauth(authority) as auth:
+        await auth.login(authorize=authority.browser)
+        authority.reject = True
+        authority.challenge_scope = "read write"
+        before = len(metadata_calls(authority))
+        async with Client(authority.resource, ADAPTER, auth=auth) as client:
+            with pytest.raises(AuthorizationRequired):
+                await client.initialize()
+        read = [kind for kind, _, _ in metadata_calls(authority)[before:]]
+        assert "resource_metadata" in read
+        assert read.count("resource_metadata") == 1

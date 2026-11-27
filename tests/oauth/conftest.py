@@ -119,6 +119,7 @@ async def authority():
         redirect=False,
         return_refresh=True,
         challenge=True,
+        challenge_scope="read",
         oidc=False,
         issuer_response=True,
     )
@@ -208,7 +209,8 @@ async def authority():
         challenge = (
             {
                 "WWW-Authenticate": (
-                    f'Bearer resource_metadata="{state.origin}/metadata", scope="read"'
+                    f'Bearer resource_metadata="{state.origin}/metadata", '
+                    f'scope="{state.challenge_scope}"'
                 )
             }
             if state.challenge
