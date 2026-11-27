@@ -24,6 +24,7 @@ from aiohttp_tiny_mcp.protocol.models import (
     ListParams,
     ListPromptsResult,
     ListResourcesResult,
+    ListResourceTemplatesResult,
     ListToolsResult,
     MethodFilter,
     Params,
@@ -31,6 +32,7 @@ from aiohttp_tiny_mcp.protocol.models import (
     ReadResourceParams,
     ReadResourceResult,
     ResourceDef,
+    ResourceTemplateDef,
     SetLevelParams,
     SubscribeParams,
     ToolDef,
@@ -356,6 +358,17 @@ class BaseClient(ABC):
         found: list[ResourceDef] = []
         async for result in self.pages(Operation.LIST_RESOURCES):
             found += ListResourcesResult.model_validate(result).resources
+        return found
+
+    async def list_resource_templates(self) -> list[ResourceTemplateDef]:
+        """The address templates a server offers, from every page of the listing.
+
+        A template names its variables in RFC 6570 syntax. Fill them in, then
+        read the address with `read_resource`.
+        """
+        found: list[ResourceTemplateDef] = []
+        async for result in self.pages(Operation.LIST_RESOURCE_TEMPLATES):
+            found += ListResourceTemplatesResult.model_validate(result).resource_templates
         return found
 
     async def read_resource(self, uri: str) -> ReadResourceResult:

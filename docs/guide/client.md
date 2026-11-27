@@ -45,7 +45,8 @@ assert [tool.name for tool in tools] == ["add"]
 assert result.structured_content == {"total": 5}
 ```
 
-`list_tools`, `list_resources` and `list_prompts` read every page: a server
+`list_tools`, `list_resources`, `list_resource_templates` and `list_prompts`
+read every page: a server
 answers a listing in chunks of its own choosing, and these follow `nextCursor`
 until it stops. Use `client.pages(...)` where the pages themselves matter -- a
 listing large enough to show as it arrives.

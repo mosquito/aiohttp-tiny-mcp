@@ -84,6 +84,18 @@ async def test_resources(real_server_url, adapter):
 
 
 @pytest.mark.parametrize("adapter", ADAPTERS, ids=lambda a: a.version)
+async def test_resource_templates(real_server_url, adapter):
+    """Every revision serves the template listing, and the helper reads every page."""
+    async with Client(real_server_url, adapter) as client:
+        await client.initialize()
+        templates = await client.list_resource_templates()
+
+    found = {entry.uri_template: entry for entry in templates}
+    assert "res://items/{id}" in found
+    assert found["res://items/{id}"].name == "item"
+
+
+@pytest.mark.parametrize("adapter", ADAPTERS, ids=lambda a: a.version)
 async def test_prompts(real_server_url, adapter):
     async with Client(real_server_url, adapter) as client:
         await client.initialize()

@@ -84,9 +84,11 @@ url = await serve(registry)
 async with Client(url, AdapterSet.default().by_version["2026-07-28"]) as client:
     await client.initialize()
     listed = await client.list_resources()
+    templates = await client.list_resource_templates()
     read = await client.read_resource("notebook://entries/42")
 
 assert {resource.uri for resource in listed} == {"config://app"}
+assert {entry.uri_template for entry in templates} == {"notebook://entries/{id}"}
 assert read.contents[0].text == "entry 42"
 ```
 
