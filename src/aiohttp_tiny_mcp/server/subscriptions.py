@@ -9,17 +9,15 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
 from types import MappingProxyType
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from aiohttp_tiny_mcp.protocol.models import EmptyResult, ListenParams, Meta, MethodFilter
 from aiohttp_tiny_mcp.storage import hub as hubs
 from aiohttp_tiny_mcp.storage.sessions import SUBSCRIPTIONS_KEY, Session
 
+from .exchange import Exchange
 from .resource_auth import allowed_resource
 from .resource_tools import resource_capabilities, resource_modes
-
-if TYPE_CHECKING:
-    from .exchange import Exchange
 
 SUBSCRIPTION_ID = "io.modelcontextprotocol/subscriptionId"
 LIST_CHANGES = {

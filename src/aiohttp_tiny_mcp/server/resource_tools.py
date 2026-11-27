@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any
 from aiohttp import web
 from pydantic import BaseModel, ConfigDict, Field
 
+from aiohttp_tiny_mcp.protocol.adapter import Adapter, RequestLike
 from aiohttp_tiny_mcp.protocol.core import Failure, Outcome, Value
 from aiohttp_tiny_mcp.protocol.models import (
     CallToolResult,
@@ -20,8 +21,6 @@ from .exchange import Exchange
 from .specs import ToolSpec
 
 if TYPE_CHECKING:
-    from aiohttp_tiny_mcp.protocol.adapter import Adapter, RequestLike
-
     from .registry import Registry
 
 RESOURCE_TOOL_NAMES = frozenset({"mcp_resources_list", "mcp_resources_read"})
