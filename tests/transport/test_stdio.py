@@ -11,9 +11,12 @@ from collections.abc import Mapping
 from typing import Any
 
 import pytest
+from pydantic import BaseModel
 
+from aiohttp_tiny_mcp import Exchange, Registry
 from aiohttp_tiny_mcp.protocol.selection import AdapterSet
 from aiohttp_tiny_mcp.server.stdio import serve_stdio, stdin_reader
+from aiohttp_tiny_mcp.testing import connect
 
 pytestmark = [pytest.mark.asyncio, pytest.mark.timeout(10)]
 
@@ -24,6 +27,38 @@ def feed(*messages: dict[str, Any]) -> asyncio.StreamReader:
         reader.feed_data((json.dumps(msg) + "\n").encode())
     reader.feed_eof()
     return reader
+
+
+class Nothing(BaseModel):
+    pass
+
+
+@pytest.mark.parametrize("version", AdapterSet.default().versions)
+async def test_a_handler_uses_the_revision_the_client_requested(version):
+    registry = Registry("revision", "1.0")
+
+    @registry.tool
+    async def revision(args: Nothing, ex: Exchange) -> str:
+        """Report the adapter that serves this call."""
+        return ex.adapter.version
+
+    async with connect(registry, adapter=version) as client:
+        answered = await client.call_tool("revision", {})
+    assert answered.content[0].text == version
+
+
+async def test_a_malformed_revision_gets_a_protocol_error():
+    outputs = []
+    reader = feed(
+        {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {"protocolVersion": ["2025-11-25"]},
+        }
+    )
+    await serve_stdio(Registry("revision", "1.0"), reader, outputs.append)
+    assert outputs[0]["error"]["code"] == -32602
 
 
 async def test_initialize_and_call_tool(registry):

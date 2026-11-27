@@ -55,10 +55,13 @@ assert {version: result.structured_content for version, result in results.items(
     "2026-07-28": {"total": 5},
     "2025-11-25": {"total": 5},
     "2025-06-18": {"total": 5},
-    "2025-03-26": {"total": 5},
-    "2024-11-05": {"total": 5},
+    "2025-03-26": None,
+    "2024-11-05": None,
 }
 ```
+
+The two oldest revisions return structured output as text. They have no
+`structuredContent` field.
 
 The helpers are async context managers. They close streams, HTTP clients, and
 temporary servers when the block exits. Use a production Client and a deployed

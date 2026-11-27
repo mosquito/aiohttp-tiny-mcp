@@ -122,7 +122,11 @@ async def serve_stdio(
                 continue
 
             try:
-                selected = adapter or adapters.select(pre)
+                selected = (
+                    adapters.select(pre)
+                    if pre.method == "initialize"
+                    else adapter or adapters.select(pre)
+                )
                 calls = selected.decode(pre, registry)
             except Rejected as e:
                 fallback = adapters.fallback()

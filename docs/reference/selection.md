@@ -25,8 +25,9 @@ Executed once per POST.
 3. **Body states a version** (`_meta`) -- select the adapter that claims it, or
    refuse with the supported list and what was requested.
 4. **Header states a version** -- the same, applied to `MCP-Protocol-Version`.
-5. **The method is `initialize`** -- select the stable revision, which reads what
-   the client asked for and negotiates down inside its own handshake.
+5. **The method is `initialize`** -- select the supported handshake revision
+   requested in `params.protocolVersion`. For an unknown or malformed value,
+   select the stable revision to negotiate a fallback or report the error.
 6. **Nothing states anything** -- `2025-03-26`, the revision that predates the
    header. Its absence is precisely what implies it.
 
