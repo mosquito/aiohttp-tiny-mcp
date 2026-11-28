@@ -53,6 +53,10 @@ class Entry(BaseModel):
     name: str
 
 
+class File(Entry):
+    path: str
+
+
 async def described_resource(args: Nothing) -> str:
     """A resource with something to show beside its address."""
     return "alpha content"
@@ -290,6 +294,42 @@ async def test_resource_interface_modes(version: str, query: str, native: bool, 
         else:
             with pytest.raises(ClientError):
                 await client.call_tool("mcp_resources_read", {"uri": "file://alpha"})
+
+
+@pytest.mark.parametrize("version", VERSIONS)
+async def test_reserved_path_reads_through_both_interfaces(version: str):
+    registry = resource_registry()
+    template = "docker://containers/{name}/files/{+path}"
+
+    @registry.resource(template)
+    async def file(args: File) -> str:
+        return f"{args.name}: {args.path}"
+
+    async with resource_client(registry, "resources=tool&resources=native", version) as (
+        client,
+        _,
+    ):
+        assert template in {item.uri_template for item in await client.list_resource_templates()}
+        for path, expected in (
+            ("tmp/screenshots/frame.png", "tmp/screenshots/frame.png"),
+            ("/tmp/screenshots/frame.png", "/tmp/screenshots/frame.png"),
+            ("tmp%2Fscreenshots/caf%C3%A9%20+%2520.png", "tmp/screenshots/café +%20.png"),
+            ("", ""),
+        ):
+            uri = f"docker://containers/cache/files/{path}"
+            native = (await client.read_resource(uri)).contents[0]
+            assert native.uri == uri
+            assert native.text == f"cache: {expected}"
+            tool = tool_data(await client.call_tool("mcp_resources_read", {"uri": uri}))
+            assert tool["contents"][0]["text"] == native.text
+
+        for uri in ("docker://containers/my/cache/files/frame.png", "file://entries/a/b"):
+            with pytest.raises(ClientError):
+                await client.read_resource(uri)
+        encoded = await client.read_resource("file://entries/a%2Fb")
+        assert encoded.contents[0].text == "entry a%2Fb"
+        with pytest.raises(ClientError):
+            await client.read_resource("docker://containers/cache/files/%FF")
 
 
 @pytest.mark.parametrize("version", VERSIONS)

@@ -172,11 +172,12 @@ class ResourceSpec(Model):
     mime_type: str | None = None
     cache_ttl: int | float | None = None
     cache_scope: Literal["public", "private"] | None = None
+    reserved_variable: str | None = None
     legacy_uri: str | None = None
     legacy_pattern: Any = None
     legacy_only: bool = False
 
-    VAR: ClassVar[re.Pattern] = re.compile(r"\{([A-Za-z_][A-Za-z0-9_]*)\}")
+    VAR: ClassVar[re.Pattern] = re.compile(r"\{(\+?)([A-Za-z_][A-Za-z0-9_]*)\}")
 
     @classmethod
     def build(
@@ -219,9 +220,14 @@ class ResourceSpec(Model):
                 ),
             )
         parts, last = [], 0
+        reserved_variable = None
         for m in cls.VAR.finditer(uri):
             parts.append(re.escape(uri[last : m.start()]))
-            parts.append(f"(?P<{m.group(1)}>[^/]+)")
+            operator, variable = m.groups()
+            if operator:
+                reserved_variable = variable
+            pattern = ".*" if operator else "[^/]+"
+            parts.append(f"(?P<{variable}>{pattern})")
             last = m.end()
         parts.append(re.escape(uri[last:]))
         return cls(
@@ -231,6 +237,7 @@ class ResourceSpec(Model):
             cache_ttl=cache_ttl,
             cache_scope=cache_scope,
             pattern=re.compile("^" + "".join(parts) + "$"),
+            reserved_variable=reserved_variable,
             template=ResourceTemplateDef(
                 uri_template=uri,
                 name=name,

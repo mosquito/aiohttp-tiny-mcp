@@ -43,6 +43,7 @@ SERVED_URIS = (
     "config://app",
     "db://users/{id}",
     "files://{path}",
+    "files://{+path}",
     "chat://channels/{channel}/messages/{after}",
     "skill://{name}/SKILL.md",
     "mcp-extensions://example/echo?params={params}",
@@ -60,7 +61,7 @@ STRUCTURAL_FAULTS = (
 #: The SDK accepts these and this package does not, on purpose. An operator is not
 #: implemented here, and a variable becomes a field of a Pydantic model, so it is a
 #: Python name.
-NARROWER = ("x://{+path}", "x://{#frag}", "x://{1id}")
+NARROWER = ("x://{#frag}", "x://{1id}")
 
 
 def test_the_tool_name_rule_agrees_with_the_sdk():

@@ -19,8 +19,8 @@ TOOL_NAME: re.Pattern = re.compile(r"[A-Za-z0-9._-]{1,128}")
 VARIABLE_NAME: re.Pattern = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 """A template variable becomes a field of a Pydantic model, so it is a Python name."""
 
-RFC6570_OPERATORS = "+#./;?&=,!@|"
-"""Expression operators of RFC 6570. This package implements none of them."""
+RFC6570_OPERATORS = "#./;?&=,!@|"
+"""Unsupported expression operators in RFC 6570."""
 
 MAX_URI_LENGTH = 8192
 """The longest URI a template may have. The same limit a host applies."""
@@ -51,16 +51,10 @@ def checked_tool_name(name: str) -> str:
 
 @lru_cache
 def template_variables(uri: str) -> tuple[str, ...]:
-    """Return the variable names of a resource URI, in order, or refuse a malformed one.
+    """Validate the URI and return the variable names in template order.
 
-    A brace that closes nothing, a brace that is never closed, a name this package does
-    not accept, a repeated name, and two variables with no literal between them are all
-    faults. Each one used to register silently: a URI that looks like a template became a
-    fixed resource at its literal address, which no request can reach, or a repeated name
-    reached the regular expression engine and raised there.
-
-    Only a simple `{name}` variable is supported, and it matches one path segment. An
-    RFC 6570 operator is named in the error, because it reads like a variable and is not.
+    A simple variable matches one segment. A reserved variable can span segments.
+    More than one reserved variable makes the segment boundaries ambiguous.
     """
     if not uri:
         raise ValueError("a resource URI must not be empty")
@@ -68,6 +62,7 @@ def template_variables(uri: str) -> tuple[str, ...]:
         raise ValueError(f"a resource URI must be at most {MAX_URI_LENGTH} characters")
     names: list[str] = []
     index, after_previous = 0, -1
+    reserved = False
     while index < len(uri):
         if uri[index] == "}":
             raise ValueError(f"{uri}: the '}}' at {index} closes nothing")
@@ -78,12 +73,13 @@ def template_variables(uri: str) -> tuple[str, ...]:
         if end < 0:
             raise ValueError(f"{uri}: the '{{' at {index} is never closed")
         name = uri[index + 1 : end]
-        if name[:1] and name[0] in RFC6570_OPERATORS:
+        if name and name[0] in RFC6570_OPERATORS:
             raise ValueError(
                 f"{uri}: {{{name}}} uses the RFC 6570 operator {name[0]!r}, which this "
-                f"package does not implement. Use a simple {{name}} variable, which "
-                f"matches one path segment."
+                f"package does not implement. Use {{name}} or {{+name}}."
             )
+        is_reserved = name.startswith("+")
+        name = name.removeprefix("+")
         if not VARIABLE_NAME.fullmatch(name):
             raise ValueError(
                 f"{uri}: {name!r} is not a variable name. Start with a letter or '_', "
@@ -96,6 +92,10 @@ def template_variables(uri: str) -> tuple[str, ...]:
                 f"{uri}: the variables {names[-1]!r} and {name!r} have no literal text "
                 f"between them, so no address can be divided between them"
             )
+        if is_reserved:
+            if reserved:
+                raise ValueError(f"{uri}: a template can have only one reserved variable")
+            reserved = True
         names.append(name)
         if len(names) > MAX_VARIABLES:
             raise ValueError(f"{uri}: a template may have at most {MAX_VARIABLES} variables")

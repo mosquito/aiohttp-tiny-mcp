@@ -18,6 +18,10 @@ class File(BaseModel):
     name: str
 
 
+class FilePath(BaseModel):
+    path: str
+
+
 class Lookup(BaseModel):
     model_config = ConfigDict(extra="forbid")
     value: int
@@ -155,6 +159,34 @@ async def test_method_resource_validation_preserves_typed_arguments():
             assert error.value.code == -32602
 
 
+@pytest.mark.parametrize("version", ["2025-11-25", "2026-07-28"])
+async def test_reserved_path_in_extension_resource_links(version):
+    extension = Extension("example.org/live")
+    canonical = "data://files/"
+
+    @extension.resource(canonical + "{+path}")
+    async def file(args: FilePath):
+        return args.path
+
+    @extension.method("files/get")
+    async def link(args: File):
+        return {"uri": canonical + args.name}
+
+    registry = Registry("files", "1")
+    registry.extension(extension)
+    path = "tmp/screenshots/a%20b.png"
+    async with connect(registry, adapter=version) as client:
+        if version == "2026-07-28":
+            result = await client.request_method("files/get", {"name": path})
+            assert result["uri"] == canonical + path
+        else:
+            resource = await client.read_resource(request_uri("files/get", {"name": path}))
+            result = json.loads(resource.contents[0].text)
+            assert result["uri"] == PREFIX + "files/" + path
+        contents = (await client.read_resource(result["uri"])).contents
+        assert contents[0].text == "tmp/screenshots/a b.png"
+
+
 def test_method_route_conflicts_and_template_variables():
     extension = Extension("example.org/live")
 
@@ -171,6 +203,8 @@ def test_method_route_conflicts_and_template_variables():
     assert not registry.resources_templated
     with pytest.raises(ValueError, match="same template variables"):
         extension.resource("data://{name}", read, legacy_path="{other}")
+    with pytest.raises(ValueError, match="same template variables and operators"):
+        extension.resource("data://{+name}", read, legacy_path="{name}")
 
 
 class Job(BaseModel):
