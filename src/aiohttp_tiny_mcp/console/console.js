@@ -2079,6 +2079,20 @@ function rememberTool(name) {
   history.replaceState(history.state, "", url);
 }
 
+const TEMPLATE_VARIABLE = /\{(\+?)([^}]+)\}/g;
+
+function expandResourceTemplate(template, values) {
+  return template.replace(TEMPLATE_VARIABLE, (whole, operator, name) => {
+    const value = values[name];
+    if (value === undefined) return whole;
+    if (!operator) return encodeURIComponent(value);
+    return value.replace(
+      /%[0-9A-Fa-f]{2}|[^A-Za-z0-9._~:/?#[\]@!$&'()*+,;=-]/gu,
+      (part) => part.length === 3 ? part : encodeURIComponent(part)
+    );
+  });
+}
+
 function choose(what) {
   chosen = what;
   rememberTool(what.kind === "tool" ? what.item.name : null);
@@ -2140,7 +2154,7 @@ function choose(what) {
   } else {
     page.subject.textContent = what.item.uriTemplate;
     prose(what.item.description, page.about);
-    const variables = [...what.item.uriTemplate.matchAll(/\{([^}]+)\}/g)].map((one) => one[1]);
+    const variables = [...what.item.uriTemplate.matchAll(TEMPLATE_VARIABLE)].map((one) => one[2]);
     const schema = {
       type: "object",
       properties: Object.fromEntries(variables.map((name) => [name, { type: "string" }])),
@@ -2538,9 +2552,7 @@ async function invoke() {
       const uri =
         chosen.kind === "resource"
           ? chosen.item.uri
-          : chosen.item.uriTemplate.replace(/\{([^}]+)\}/g, (whole, name) =>
-              values[name] === undefined ? whole : encodeURIComponent(values[name])
-            );
+          : expandResourceTemplate(chosen.item.uriTemplate, values);
       result = await client.readResource(uri);
       reportContents(result);
     }

@@ -99,7 +99,7 @@ def map_resource_uris(value: Any, resources: list[ResourceSpec], *, legacy: bool
                     item = target
                     break
                 if pattern is not None and (match := pattern.fullmatch(item)):
-                    item = ResourceSpec.VAR.sub(lambda m: match[m[1]], target)
+                    item = ResourceSpec.VAR.sub(lambda m: match[m[2]], target)
                     break
             result[key] = item
         else:
@@ -201,7 +201,7 @@ class Extension:
             spec.legacy_uri = f"mcp-extensions://{self.name}/{path}"
             alias = ResourceSpec.build(spec.legacy_uri, fn)
             if set(ResourceSpec.VAR.findall(uri)) != set(ResourceSpec.VAR.findall(path)):
-                raise ValueError("legacy_path must use the same template variables as the URI")
+                raise ValueError("legacy_path must use the same template variables and operators")
             spec.legacy_pattern = alias.pattern
             self.resources[uri] = spec
             return fn

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
 from typing import Any
+from urllib.parse import unquote
 
 from aiohttp_tiny_mcp.auth import Authentication, Principal, Query
 from aiohttp_tiny_mcp.extensions import Extension, ExtensionSpec
@@ -358,5 +359,11 @@ class Registry:
             if m is None and spec.legacy_pattern is not None:
                 m = spec.legacy_pattern.match(uri)
             if m:
-                return spec, m.groupdict()
+                variables = m.groupdict()
+                if (name := spec.reserved_variable) is not None:
+                    try:
+                        variables[name] = unquote(variables[name], errors="strict")
+                    except UnicodeDecodeError:
+                        return None
+                return spec, variables
         return None

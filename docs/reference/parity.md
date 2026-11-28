@@ -95,10 +95,9 @@ therefore does not start here, which is deliberate: every comparable mistake in
 a declaration also raises at registration. See
 [Names and addresses](../concepts.md#names-and-addresses).
 
-**Resource templates.** Only a simple `{name}` variable is supported, matching
-one path segment. An RFC 6570 operator such as `{+path}`, a repeated variable
-and two adjacent variables are refused, where the SDK implements more of
-RFC 6570.
+**Resource templates.** A simple `{name}` variable matches one path segment.
+One `{+path}` variable can span path segments. Other RFC 6570 operators,
+repeated variables, and adjacent variables are refused at registration.
 
 ## Deliberate omissions
 

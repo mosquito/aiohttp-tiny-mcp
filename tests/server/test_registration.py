@@ -146,7 +146,7 @@ async def test_a_duplicate_is_still_refused():
         ("notebook://entries/{id", "is never closed"),
         ("x://a}b", "closes nothing"),
         ("x://{1id}", "is not a variable name"),
-        ("x://{+path}", "RFC 6570 operator"),
+        ("x://{#frag}", "RFC 6570 operator"),
         ("x://{}", "is not a variable name"),
         ("", "must not be empty"),
         ("x://a/{id}/b/{id}", "appears more than once"),
@@ -171,6 +171,7 @@ async def test_a_malformed_resource_uri_is_refused_at_registration(uri, fault):
     [
         "config://app",
         "file://docs/{name}",
+        "file://docs/{+path}",
         "x://{a}-{b}",
         "file://Stra\u00dfe/{name}",
         "mcp-extensions://ext/method?params={params}",

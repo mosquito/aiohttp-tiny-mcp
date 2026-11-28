@@ -57,10 +57,9 @@ that names it, so prefer a URL for larger assets. Use `Icons.MAGNIFYING_GLASS` a
 [built-in presets](guide/icons.md) for ready light/dark pairs, or load a custom
 image with `Icon.from_file()` or `Icon.from_bytes()`.
 
-A resource URI is either a fixed address or a template with `{name}`
-variables, each matching one path segment. Registration refuses a malformed
-template, because the alternative is an address no request can reach. See
-[Resources](guide/resources.md).
+A resource URI is a fixed address or a template. A `{name}` variable matches
+one path segment, and `{+path}` can span segments. Registration refuses malformed
+templates. See [Resources](guide/resources.md).
 
 ## MCP and this library
 

@@ -28,6 +28,10 @@ class ResourceEntry(BaseModel):
     name: str
 
 
+class ResourceFile(ResourceEntry):
+    path: str
+
+
 @pytest.fixture
 def console_app() -> Callable[..., web.Application]:
     def create_app(token: str | None = None) -> web.Application:
@@ -104,6 +108,10 @@ async def resource_server(context: BrowserContext) -> AsyncIterator[BaseTestServ
     @registry.resource("file://entries/{name}")
     async def entry(args: ResourceEntry) -> str:
         return f"entry {args.name}"
+
+    @registry.resource("docker://containers/{name}/files/{+path}")
+    async def file(args: ResourceFile) -> str:
+        return f"{args.name}: {args.path}"
 
     app = Endpoint(registry).app()
     Console().setup(app)

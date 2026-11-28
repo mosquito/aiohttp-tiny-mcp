@@ -84,7 +84,7 @@ async def test_catalogue_and_refresh_follow_server_capabilities(
 ) -> None:
     page, requests = await open_console(context, resource_server, query, version)
     await expect(page.locator("#catalogue .item")).to_have_count(
-        (2 if native else 0) + (2 if tools else 0)
+        (3 if native else 0) + (2 if tools else 0)
     )
     method = "resources/templates/list" if native else "tools/list"
     async with page.expect_response(
@@ -95,7 +95,7 @@ async def test_catalogue_and_refresh_follow_server_capabilities(
     ):
         await page.locator("#refresh").click()
     await expect(page.locator("#catalogue .item")).to_have_count(
-        (2 if native else 0) + (2 if tools else 0)
+        (3 if native else 0) + (2 if tools else 0)
     )
     await expect(page.locator("#status")).to_have_class("status on")
     if tools:
@@ -114,7 +114,7 @@ async def test_reconnect_to_tool_mode_clears_native_catalogue_and_subscriptions(
     context: BrowserContext, resource_server: BaseTestServer, version: str
 ) -> None:
     page, requests = await open_console(context, resource_server, "", version)
-    await expect(page.locator("#catalogue .item")).to_have_count(2)
+    await expect(page.locator("#catalogue .item")).to_have_count(3)
     await page.locator("#catalogue .item").filter(has_text="file://alpha").click()
     await page.locator("#invoke").click()
     await expect(page.locator("#outcome")).to_contain_text("alpha content")
@@ -130,3 +130,17 @@ async def test_reconnect_to_tool_mode_clears_native_catalogue_and_subscriptions(
     await expect(page.locator("#subject")).to_have_text("Nothing selected")
     await call_resource_tools(page)
     assert_no_native_resources(requests)
+
+
+async def test_read_a_reserved_path(context: BrowserContext, resource_server: BaseTestServer):
+    page, requests = await open_console(context, resource_server, "", "2026-07-28")
+    template = "docker://containers/{name}/files/{+path}"
+    await page.locator("#catalogue .item").filter(has_text=template).click()
+    await page.locator('#arguments [data-name="name"]').fill("my cache")
+    await page.locator('#arguments [data-name="path"]').fill("tmp/café +%2520?[].png")
+    await page.locator("#invoke").click()
+    await expect(page.locator("#outcome")).to_contain_text("my%20cache: tmp/café +%20?[].png")
+    reads = [item for item in requests_sent(requests) if item["method"] == "resources/read"]
+    assert [item["params"]["uri"] for item in reads] == [
+        "docker://containers/my%20cache/files/tmp/caf%C3%A9%20+%2520?[].png"
+    ]

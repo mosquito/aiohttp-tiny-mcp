@@ -59,7 +59,18 @@ async def entry(args: Entry) -> str:
     return f"entry {args.id}"
 ```
 
-A variable matches one path segment: `{id}` does not span a `/`.
+A simple variable such as `{id}` matches one URI segment. To read a nested file,
+register a template such as `docker://containers/{name}/files/{+path}` and read
+`docker://containers/cache/files/tmp/screenshots/frame.png`. The handler gets
+`name="cache"` and `path="tmp/screenshots/frame.png"`.
+
+The console expands `{+path}` according to
+[RFC 6570](https://www.rfc-editor.org/rfc/rfc6570.html#section-3.2.3). It keeps
+reserved characters such as `/` and existing percent escapes. It encodes other
+characters, such as spaces, as UTF-8 percent escapes. The server decodes
+the reserved variable once. For example, `tmp/a%20b.png` yields
+`tmp/a b.png`, and `tmp/a%2520b.png` yields `tmp/a%20b.png`.
+Simple variables keep percent escapes in the value passed to the handler.
 
 A variable name starts with a letter or `_`, and continues with letters, digits
 or `_`. Registration refuses a URI that breaks the form: an unclosed or
@@ -68,8 +79,9 @@ with no literal text between them. The last one has no single answer when an
 address is divided, and the others are typos that would otherwise register a
 fixed resource at an address no request can reach.
 
-A URI is limited to 8192 characters and a template to 256 variables. RFC 6570
-operators such as `{+path}` are not supported; use simple `{name}` variables.
+A URI can have up to 8192 characters and a template up to 256 variables.
+A template can have one reserved variable. Two reserved variables make the
+boundary between their values ambiguous. Use one variable per expression.
 
 Fixed resources appear in `resources/list`. Templates appear in
 `resources/templates/list`, because a client cannot enumerate them -- it has to
