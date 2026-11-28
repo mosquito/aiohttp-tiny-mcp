@@ -6,20 +6,24 @@ from .auth import (
     Authentication,
     Authorization,
     BasicAuth,
+    Header,
     Principal,
+    Query,
+    Source,
     StaticBasicAuth,
     StaticVerifier,
     TokenVerifier,
     Unauthorized,
     principal_from_claims,
 )
-from .client.base import ClientError, Elicitor
+from .client.base import ClientError, CompletionProvider, Elicitor
 from .client.callback import OAuthCallback
 from .client.http import Client
 from .client.loopback import LoopbackCallback
 from .client.oauth import AuthorizationRequired, OAuth, OAuthError, RegistrationRequired
 from .client.stdio import StdioClient
 from .extensions import Extension
+from .icons import Icons
 from .protocol.core import (
     Answer,
     AnswerAction,
@@ -34,9 +38,13 @@ from .protocol.models import (
     BlobResourceContents,
     CallToolResult,
     Completion,
+    CompletionMessage,
+    CompletionRequest,
+    CompletionResult,
     EmbeddedResource,
     GetPromptResult,
     Hint,
+    Icon,
     ImageContent,
     MethodFilter,
     PromptMessage,
@@ -45,6 +53,7 @@ from .protocol.models import (
     TextResourceContents,
 )
 from .protocol.selection import AdapterSet
+from .server.caching import Cache, CacheHint
 from .server.exchange import Exchange
 from .server.http import Endpoint
 from .server.registry import Registry
@@ -71,18 +80,27 @@ __all__ = [
     "Authorization",
     "BasicAuth",
     "BlobResourceContents",
+    "Cache",
+    "CacheHint",
     "CallToolResult",
     "Client",
     "ClientError",
-    "Elicitor",
     "Completion",
+    "CompletionMessage",
+    "CompletionProvider",
+    "CompletionRequest",
+    "CompletionResult",
+    "Elicitor",
     "EmbeddedResource",
     "Endpoint",
     "SSEResponse",
     "Exchange",
     "Extension",
     "GetPromptResult",
+    "Header",
     "Hint",
+    "Icon",
+    "Icons",
     "Hub",
     "ImageContent",
     "MemoryHub",
@@ -92,6 +110,8 @@ __all__ = [
     "namespace",
     "PromptMessage",
     "Principal",
+    "Query",
+    "Source",
     "Registry",
     "SseEndpoint",
     "RequestStates",

@@ -159,6 +159,7 @@ class MemorySessionStore(SessionStore):
 PROTOCOL_VERSION_KEY = "protocolVersion"
 CAPABILITIES_KEY = "capabilities"
 LOG_LEVEL_KEY = "logLevel"
+
 DATA_KEY = "data"
 SUBSCRIPTIONS_KEY = "subscriptions"
 SAVE_ATTEMPTS = 16
@@ -246,6 +247,15 @@ class Session:
         opens a session.
         """
         await self.write_value(PROTOCOL_VERSION_KEY, version)
+
+    async def remember_capabilities(self, capabilities: Mapping[str, Any]) -> None:
+        """Store what this client declared at the handshake.
+
+        A later request carries no capabilities, and the server reads them to decide
+        whether it may ask the client something. Written where a handshake happens on a
+        transport that opens the session before the handshake -- see server.sse.
+        """
+        await self.write_value(CAPABILITIES_KEY, dict(capabilities))
 
     async def set_log_level(self, level: str) -> None:
         """Persist the requested log severity."""

@@ -71,6 +71,13 @@ class AdapterSet:
         if pre.header_version is not None:
             return self.resolve_version(pre.header_version)
         if pre.method == "initialize":
+            requested = (
+                self.by_version.get(pre.initialize_version)
+                if isinstance(pre.initialize_version, str)
+                else None
+            )
+            if requested is not None and requested.has_handshake:
+                return requested
             return self.by_version.get(STABLE_REVISION, self.fallback())
         if session_version is not None:
             return self.resolve_version(session_version)

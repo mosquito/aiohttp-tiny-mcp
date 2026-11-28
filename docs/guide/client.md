@@ -1,7 +1,7 @@
 # The client
 
 `Client` speaks one revision -- whichever adapter it is given -- and the calling
-code is the same for all of them. `StdioClient` is the same class over a
+code is the same for all of them. `StdioClient` offers the same MCP calls over a
 subprocess's standard streams.
 
 For protected HTTP servers, use [Client OAuth](client-oauth.md) for browser login
@@ -45,7 +45,8 @@ assert [tool.name for tool in tools] == ["add"]
 assert result.structured_content == {"total": 5}
 ```
 
-`list_tools`, `list_resources` and `list_prompts` read every page: a server
+`list_tools`, `list_resources`, `list_resource_templates` and `list_prompts`
+read every page: a server
 answers a listing in chunks of its own choosing, and these follow `nextCursor`
 until it stops. Use `client.pages(...)` where the pages themselves matter -- a
 listing large enough to show as it arrives.
@@ -150,6 +151,15 @@ async def answer(request):
     return elicit_accept({})
 
 
+async def complete(request):
+    """Answer `sampling/createMessage` with a completion. Also declares the capability."""
+    return {
+        "role": "assistant",
+        "content": {"type": "text", "text": "a completion"},
+        "model": "example-model",
+    }
+
+
 async def note(frame):
     """Every notification the server sends, progress and logging included."""
     notifications.append(frame["method"])
@@ -161,14 +171,16 @@ client = Client(
     AdapterSet.default().by_version["2025-11-25"],
     client_info=Implementation(name="my-agent", version="2.0"),
     on_ask=answer,
+    on_completion=complete,
     on_notification=note,
     log_level="info",
 )
 ```
 
-`on_ask` is the only one that changes what the server does: a server puts a
-question only to a client that declared it can answer, and passing `on_ask` is
-that declaration. See [Asking the user](asking.md#the-clients-side).
+`on_ask` handles user questions. How the client declares elicitation depends
+on the revision. See [Asking the user](asking.md#the-clients-side).
+`on_completion` handles model requests and declares the sampling capability.
+See [Model completions](asking.md#completions-asking-the-clients-model).
 
 ## Calls
 
@@ -276,6 +288,14 @@ async with Client(url, AdapterSet.default().by_version["2026-07-28"]) as client:
     with pytest.raises(ClientError):
         await client.call_tool("absent", {})
 ```
+
+A reply that is not JSON at all raises `ClientError` too, naming the HTTP
+status, the address and the start of the body: `404 Not Found from
+https://example.test/mcp is not an MCP reply: Not Found`. That is what a
+mistyped address, a proxy error page and a gateway timeout look like, and
+`error.data["status"]` carries the status for a caller that branches on it. The
+address is named without its query, because a query may carry a credential and
+an exception message travels into logs.
 
 ## Over stdio
 

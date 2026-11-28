@@ -76,6 +76,10 @@ class RegistryProtocol(Protocol):
     def completer(self) -> Bound | None: ...
     @property
     def extensions(self) -> Mapping[str, ExtensionSpec]: ...
+    @property
+    # The value is a `server.caching.CacheHint`, which this module cannot name: that
+    # module reads the result models of 2026-07-28, which read this one.
+    def cache_hints(self) -> Mapping[str, Any]: ...
     def match_resource(self, uri: str) -> tuple[ResourceSpec, dict[str, str]] | None: ...
 
 
@@ -359,6 +363,9 @@ class Adapter(ABC):
     can_push_ask: ClassVar[bool] = False
     #: Pre-elicitation fallback: exchange questions and answers through tool calls.
     asks_in_arguments: ClassVar[bool] = False
+    #: Push any server request on the active stream, not only a question. Elicitation
+    #: arrived in 2025-06-18; sampling predates it, so the two flags differ.
+    can_push_request: ClassVar[bool] = False
     #: Whether a progress notification may carry a human-readable `message`.
     #: It arrived in 2025-03-26.
     progress_message: ClassVar[bool] = True

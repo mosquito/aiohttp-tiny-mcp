@@ -1,0 +1,7 @@
+Bundled artwork: Google Material Symbols, Rounded Fill
+Upstream: https://github.com/google/material-design-icons
+License: Apache License, Version 2.0. See LICENSE.
+
+The artwork was rasterized, resized, and quantized to create PNG variants
+for light and dark themes. See data/icons/SOURCE.json for exact upstream paths
+and the source revision.

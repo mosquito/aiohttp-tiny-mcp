@@ -73,7 +73,7 @@ async def provider():
 
 
 @pytest.fixture
-async def protected(provider, unused_tcp_port):
+async def protected(provider, unused_tcp_port, request):
     upstream, calls, tokens, profile = provider
     origin = f"http://127.0.0.1:{unused_tcp_port}"
     server = OAuthServer(
@@ -87,7 +87,8 @@ async def protected(provider, unused_tcp_port):
         ],
         scopes=["read"],
     )
-    registry = Registry("private", "1", auth=server.resource(required_scopes=["read"]))
+    policy = server.resource(required_scopes=["read"], **getattr(request, "param", {}))
+    registry = Registry("private", "1", auth=policy)
 
     @registry.tool()
     async def who(args: Nothing, principal: Principal) -> str:
@@ -119,6 +120,7 @@ async def authority():
         redirect=False,
         return_refresh=True,
         challenge=True,
+        challenge_scope="read",
         oidc=False,
         issuer_response=True,
     )
@@ -208,7 +210,8 @@ async def authority():
         challenge = (
             {
                 "WWW-Authenticate": (
-                    f'Bearer resource_metadata="{state.origin}/metadata", scope="read"'
+                    f'Bearer resource_metadata="{state.origin}/metadata", '
+                    f'scope="{state.challenge_scope}"'
                 )
             }
             if state.challenge

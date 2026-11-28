@@ -53,6 +53,15 @@ class Adapter2025_03_26(Adapter2025_06_18):  # noqa: N801 -- revision date, grep
     can_push_ask: ClassVar[bool] = False
     asks_in_arguments: ClassVar[bool] = True
 
+    def describe_server(self, registry: Any, call: Call) -> Any:
+        """Drop the display title of the server, which arrived with 2025-06-18.
+
+        The icons and the website are already dropped one revision above.
+        """
+        described = super().describe_server(registry, call)
+        info = described.server_info.model_copy(update={"title": None})
+        return described.model_copy(update={"server_info": info})
+
     def describe_resource(self, spec: Any) -> Any:
         definition = super().describe_resource(spec)
         return None if definition is None else definition.model_copy(update={"title": None})

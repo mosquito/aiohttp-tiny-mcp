@@ -32,9 +32,6 @@ endpoint.setup(web.Application(), "/mcp")  # the same routes, added for you
 alone = endpoint.app("/mcp")  # ...on an application of its own
 ```
 
-Every one of these logs the paths it registers at `DEBUG` on the
-`aiohttp_tiny_mcp` logger, including the ones you did not name yourself.
-
 `POST` carries every request. `GET` opens the stream on which the revisions
 before `2026-07-28` read their notifications; `2026-07-28` reads the same events
 through `subscriptions/listen` and is told so with a `405`.
@@ -79,9 +76,13 @@ endpoint.setup(app, "/mcp")
 runner = web.AppRunner(app)
 ```
 
-A logging filter replaces every `token` query value with `[REDACTED]` in request
-lines and logged URL headers, including `Referer`. Text and structured fields
-are both masked. Repeated and percent-encoded parameter names are recognized.
+A logging filter replaces query values for `token`, `access_token`, `secret`,
+and `jwt` with `[REDACTED]` in request lines and logged URL headers, including
+`Referer`. It also masks names from `Query` objects in a registered policy's
+`sources`. See [custom credential sources](../guide/auth.md#custom-credential-sources)
+to register additional names. Text and
+structured fields are both masked. Repeated and percent-encoded parameter names
+are recognized.
 The filter preserves the original request, log format, handlers, and logger class.
 It also covers refusals before an MCP handler runs.
 
@@ -137,21 +138,18 @@ same argument.
 
 ### Resuming a stream
 
-`2025-03-26` through `2025-11-25` let a server number its SSE events and a
-client that lost the connection ask, with `Last-Event-ID`, for what followed.
-The `GET` stream does this. Each event carries the id the hub gave it, so the
-replay is a poll from that exact id and works on whichever worker takes the
+`2025-03-26` through `2025-11-25` allow optional SSE replay with
+`Last-Event-ID`. The endpoint replays events on the `GET` notification stream.
+Each event carries its hub id, so replay works on whichever worker takes the
 reconnect. An id the hub never issued is ignored and the stream starts from
-now. How far back a replay can reach is the hub's retention: `MemoryHub(keep=)`
-counts events, the storage backends keep theirs until they expire.
+now. Replay depends on the hub's [event retention](stores.md#event-retention).
 
 The bundled client remembers the latest id in `client.last_event_id` and passes
 one back with `stream_notifications(last_event_id=...)`.
 
-The stream a `POST` opens for one request carries no ids and cannot resume.
-Retrying the request can execute the handler again. Applications must make
-retries safe when handlers have side effects. `2026-07-28` has no `GET` stream;
-it returns `405` and ignores `Last-Event-ID`.
+On `2026-07-28`, closing a request's SSE response cancels the request.
+Retrying starts a new call and can repeat side effects. See
+[Streamable HTTP cancellation](https://modelcontextprotocol.io/specification/2026-07-28/basic/transports/streamable-http#cancellation).
 
 The class is exported, and takes events the way `WebSocketResponse` takes
 messages, so an application can use it for its own streams:
@@ -232,8 +230,8 @@ policies through `Registry(auth=...)`. No authentication middleware is required.
 For streaming responses, disable proxy buffering and allow connections to stay
 open while a tool runs or waits for a user's answer. The endpoint sets
 `X-Accel-Buffering: no` on its SSE responses; ensure your proxy configuration
-honors it. Set idle timeouts with `ask_timeout_seconds` and long-lived
-notification streams in mind.
+honors it. Set idle timeouts with `ask_timeout_seconds`,
+`completion_timeout_seconds`, and long-lived notification streams in mind.
 
 Shared backends allow new requests to reach any worker. An existing HTTP stream
 stays on the worker that accepted it and is lost if that worker stops.
@@ -285,8 +283,7 @@ from the URL it is given:
 https://example.com/mcp?mcp=2025-06-18
 ```
 
-The query wins over anything in the body or the headers, deliberately: it
-states what the deployment intends this client to speak.
+See [how the pin is applied](../reference/selection.md#the-mcp-pin).
 
 ## stdio
 
@@ -309,6 +306,17 @@ if __name__ == "__main__":
 
 It reads until its input closes, so there is nothing to stop and no port to
 choose. The host that launched it owns its lifetime.
+
+Use `run_stdio(registry, resources="tool")` for clients that read data through
+[resource tools](../guide/resources.md#access-through-tools). For clients with
+native resources but no native prompts, use `run_stdio(registry, prompts="resource")`
+to add [prompt addresses](../guide/prompts.md#clients-without-native-prompts)
+to the native resource catalogue. `serve_stdio()` accepts the same keywords.
+Omit either keyword, or pass `None` or `"native"`, for its native mode.
+
+The tool catalogue includes prompt addresses. With `resources="tool"`, use
+that catalogue to find and read prompts. `Registry(resource_tools=False)`
+disables both compatibility modes.
 
 It is not a reduced transport. Subscriptions, questions, logging, progress and
 cancellation all work there. Two things follow from having one channel instead
@@ -362,6 +370,23 @@ when both transports share one protected resource.
 Nothing pins that POST to the worker holding the stream, so the reply is
 published to the hub under a topic named for the connection and written out by
 whichever worker holds it. A handler cannot tell which worker it is running on.
+
+Each POST is answered `202` before its handler runs, and the handler's own
+reply follows on the stream. The wait would otherwise be a deadlock: a client
+of this transport posts one message at a time, including the answer to a
+question a handler asked, so a handler that waits for that answer would wait
+for a message the client cannot send until the first POST has been answered.
+The consequence is that replies arrive in completion order, as they do for a
+batch, and are matched by `id`.
+
+**Handler lifetime.** The `202` also ends the POST middleware scope. Middleware
+may set identity or other request data before calling the endpoint, but resources
+it releases after `await handler(request)` are no longer alive when an MCP
+handler uses them. Move transactions and borrowed connections into
+[async-generator providers](../guide/dependencies.md#an-async-generator).
+Those providers stay open for the handler and close on return, error or cancellation.
+Application-wide pools may remain in `app.cleanup_ctx` and be supplied through an
+application key. The endpoint cancels remaining background work on shutdown.
 
 The transport is not the revision. It was defined by `2024-11-05`, and that is
 what a client is assumed to speak here before it has said otherwise, but the

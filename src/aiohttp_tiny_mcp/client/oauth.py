@@ -143,6 +143,9 @@ class OAuth:
         self.resource: str | None = None
         self.server: dict[str, Any] = {}
         self.challenge: dict[str, str] = {}
+        #: The challenge that the current metadata was read for. A rejection repeats
+        #: discovery only where the server says something new.
+        self.discovered: dict[str, str] = {}
         self.scope: set[str] = set(self.requested or ())
         self.record: Credentials | None = None
         self.loaded = False
@@ -317,6 +320,7 @@ class OAuth:
         self.server = server
         self.issuer = selected
         self.resource = str(resource_url)
+        self.discovered = dict(self.challenge)
         if not self.scope:
             self.scope.update(
                 self.requested
@@ -622,7 +626,10 @@ class OAuth:
             skew = min(30, tokens.get("expires_in", 300) / 10)
             if access != rejected and (expires is None or expires > time.time() + skew):
                 return access
-            if access == rejected:
+            # A rejection is usually an expired token, and a refresh needs nothing that
+            # discovery would supply. Read the metadata again only where the server's
+            # challenge changed, which is the only case that can name another document.
+            if access == rejected and self.challenge != self.discovered:
                 await self.discover(force=True)
             refresh = tokens.get("refresh_token")
             if not refresh:

@@ -49,6 +49,11 @@ class OldClient:
         async with self.http.post(f"{self.base}{self.post_to}", json=envelope) as response:
             assert response.status == 202, await response.text()
 
+    async def raw(self, envelope: dict) -> None:
+        """Post an envelope as it is, which is how an answer to a question is sent."""
+        async with self.http.post(f"{self.base}{self.post_to}", json=envelope) as response:
+            assert response.status == 202, await response.text()
+
     async def call(self, method: str, params: dict, request_id: int = 1) -> dict:
         await self.send(method, params, request_id)
         while True:

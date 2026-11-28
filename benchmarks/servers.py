@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import socket
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -91,14 +92,16 @@ async def aiohttp_floor() -> AsyncIterator[str]:
 @asynccontextmanager
 async def listening(app: web.Application) -> AsyncIterator[str]:
     runner = web.AppRunner(app, access_log=None)
-    await runner.setup()
-    site = web.TCPSite(runner, "127.0.0.1", 0)
-    await site.start()
-    host, port = runner.addresses[0]
-    try:
-        yield f"http://{host}:{port}/mcp"
-    finally:
-        await runner.cleanup()
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        sock.bind(("127.0.0.1", 0))
+        host, port = sock.getsockname()
+        await runner.setup()
+        try:
+            await web.SockSite(runner, sock).start()
+            yield f"http://{host}:{port}/mcp"
+        finally:
+            await runner.cleanup()
 
 
 def sdk_app(*, stateless: bool):
@@ -160,6 +163,8 @@ async def on_uvicorn(app) -> AsyncIterator[str]:
     quiet()
     config = uvicorn.Config(app, host="127.0.0.1", port=0, log_level="error", access_log=False)
     sock = config.bind_socket()
+    # Use the same TCP option as the aiohttp listener.
+    sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
     port = sock.getsockname()[1]
     server = uvicorn.Server(config)
     task = asyncio.create_task(server.serve(sockets=[sock]))

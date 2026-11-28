@@ -8,6 +8,8 @@ from a dictionary would make every example that uses it worthless.
 
 from __future__ import annotations
 
+import json
+
 import pytest
 from pydantic import BaseModel
 
@@ -93,7 +95,10 @@ async def test_every_revision_answers():
         "2025-03-26",
         "2024-11-05",
     }
-    assert all(got.structured_content == {"result": 5} for got in seen.values())
+    for version, got in seen.items():
+        expected = {"result": 5} if version >= "2025-06-18" else None
+        assert got.structured_content == expected
+        assert json.loads(got.content[0].text) == {"result": 5}
 
 
 async def test_a_revision_is_not_flattened_into_the_newest():

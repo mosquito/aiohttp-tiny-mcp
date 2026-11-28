@@ -3,12 +3,26 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping
+import mimetypes
+import re
+from base64 import b64encode
+from collections.abc import Mapping, Sequence
 from enum import Enum
+from math import isfinite
+from pathlib import Path
 from types import MappingProxyType
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, StrictStr
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StrictBool,
+    StrictInt,
+    StrictStr,
+    ValidationError,
+    field_validator,
+)
 from pydantic.alias_generators import to_camel
 from pydantic_core import to_json
 
@@ -36,6 +50,8 @@ class Implementation(Model):
     name: str
     version: str
     title: str | None = None
+    icons: Sequence[Icon] | None = None
+    website_url: str | None = None
 
 
 class TextContent(Model):
@@ -95,11 +111,153 @@ class ResultModel(Model):
     meta: Meta | None = Field(default=None, alias="_meta")
 
 
+def cache_ttl_milliseconds(seconds: int | float) -> int:
+    """Convert a server TTL in seconds to whole wire milliseconds."""
+    milliseconds = seconds * 1000
+    if seconds < 0 or (isinstance(milliseconds, float) and not isfinite(milliseconds)):
+        raise ValueError("cache TTL must be finite and non-negative")
+    return int(milliseconds)
+
+
 class CacheableResult(ResultModel):
     """2026-07-28 freshness hints (SEP-2549), omitted on older revisions."""
 
     ttl_ms: int | None = None
     cache_scope: Literal["private", "public"] | None = None
+
+
+class CompletionMessage(Model):
+    """One turn of the conversation a server sends to be completed."""
+
+    role: Literal["user", "assistant"]
+    content: TextContent | ImageContent | AudioContent
+
+
+class CompletionRequest(Model):
+    """A conversation and options for a client model completion."""
+
+    messages: Sequence[CompletionMessage | Mapping[str, Any]]
+    max_tokens: int
+    system_prompt: str | None = None
+    model_preferences: Mapping[str, Any] | None = None
+    include_context: Literal["none", "thisServer", "allServers"] | None = None
+    temperature: float | None = None
+    stop_sequences: Sequence[str] | None = None
+    metadata: Mapping[str, Any] | None = None
+
+    def as_input(self) -> dict[str, Any]:
+        """Build the server request envelope."""
+        return {"method": "sampling/createMessage", "params": self.wire()}
+
+
+class CompletionResult(Model):
+    """The model-generated message returned to the handler.
+
+    `model` names what produced it, which is the client's choice rather than the
+    server's: a server states preferences and the client decides.
+    """
+
+    role: Literal["user", "assistant"]
+    content: TextContent | ImageContent | AudioContent
+    model: str
+    stop_reason: str | None = None
+
+    @classmethod
+    def from_reply(cls, reply: Mapping[str, Any]) -> CompletionResult:
+        """Parse a client reply. Raise ValueError if it contains no completion."""
+        if not reply:
+            raise ValueError("the client sent no answer to sampling/createMessage")
+        if "code" in reply and "message" in reply:
+            raise ValueError(f"the client refused the completion: {reply['message']}")
+        try:
+            return cls.model_validate(dict(reply))
+        except ValidationError as error:
+            raise ValueError(f"the client answered sampling/createMessage with: {error}") from None
+
+    @property
+    def text(self) -> str:
+        """The text of a text completion, or an empty string for another kind."""
+        return self.content.text if isinstance(self.content, TextContent) else ""
+
+
+class Icon(Model):
+    """An image a host may show beside a declaration (2025-11-25 and later).
+
+    `src` is an `http:`, `https:` or `data:` URI. A `data:` URI carries the bytes in
+    every listing that names it, and the server icon rides in the `_meta` of every
+    result on 2026-07-28, so prefer a URL for anything but a small image. `sizes` holds
+    entries of the form `WxH`, or `any` for one that scales.
+    """
+
+    src: str
+    mime_type: str | None = None
+    sizes: list[str] | None = None
+    theme: Literal["dark", "light"] | None = None
+
+    @classmethod
+    def from_bytes(
+        cls,
+        data: bytes,
+        *,
+        mime_type: str,
+        sizes: list[str] | None = None,
+        theme: Literal["dark", "light"] | None = None,
+    ) -> Icon:
+        """Create an embedded icon from image bytes."""
+        encoded = b64encode(data).decode("ascii")
+        return cls(
+            src=f"data:{mime_type};base64,{encoded}", mime_type=mime_type, sizes=sizes, theme=theme
+        )
+
+    @classmethod
+    def from_file(
+        cls,
+        path: str | Path,
+        *,
+        mime_type: str | None = None,
+        sizes: list[str] | None = None,
+        theme: Literal["dark", "light"] | None = None,
+    ) -> Icon:
+        """Read an image file and embed it. Infer its MIME type from the filename."""
+        path = Path(path)
+        mime_type = mime_type or mimetypes.guess_type(str(path))[0] or "application/octet-stream"
+        return cls.from_bytes(path.read_bytes(), mime_type=mime_type, sizes=sizes, theme=theme)
+
+    @classmethod
+    def from_files(
+        cls,
+        light: str | Path,
+        dark: str | Path,
+        *,
+        mime_type: str | None = None,
+        sizes: list[str] | None = None,
+    ) -> tuple[Icon, Icon]:
+        """Read the light and dark variants of one icon."""
+        return (
+            cls.from_file(light, mime_type=mime_type, sizes=sizes, theme="light"),
+            cls.from_file(dark, mime_type=mime_type, sizes=sizes, theme="dark"),
+        )
+
+    @field_validator("src")
+    @classmethod
+    def served_scheme(cls, value: str) -> str:
+        """Allow the schemes a host fetches an image from, and refuse the rest.
+
+        A `javascript:` or `file:` source is a problem for whoever renders it, and
+        registration is the one place a declaration is checked.
+        """
+        if not value.startswith(("http://", "https://", "data:")):
+            raise ValueError("an icon src must be an http:, https: or data: URI")
+        return value
+
+    @field_validator("sizes")
+    @classmethod
+    def stated_sizes(cls, value: list[str] | None) -> list[str] | None:
+        """Each entry is `WxH`, or `any` for an image that scales."""
+        for size in value or ():
+            if size != "any" and not re.fullmatch(r"[1-9][0-9]*x[1-9][0-9]*", size):
+                raise ValueError(f"an icon size must be 'any' or 'WxH', not {size!r}")
+        return value
 
 
 class Hint(Enum):
@@ -142,6 +300,7 @@ class ToolDef(Model):
     input_schema: dict[str, Any]
     output_schema: dict[str, Any] | None = None
     annotations: dict[str, Any] | None = None
+    icons: Sequence[Icon] | None = None
 
 
 class ListToolsResult(CacheableResult):
@@ -184,6 +343,7 @@ class ResourceDef(Model):
     description: str | None = None
     mime_type: str | None = None
     size: int | None = None
+    icons: Sequence[Icon] | None = None
 
 
 class ResourceTemplateDef(Model):
@@ -192,6 +352,7 @@ class ResourceTemplateDef(Model):
     title: str | None = None
     description: str | None = None
     mime_type: str | None = None
+    icons: Sequence[Icon] | None = None
 
 
 class ListResourcesResult(CacheableResult):
@@ -219,6 +380,7 @@ class PromptDef(Model):
     title: str | None = None
     description: str | None = None
     arguments: list[PromptArgumentDef] = Field(default_factory=list)
+    icons: Sequence[Icon] | None = None
 
 
 class ListPromptsResult(CacheableResult):

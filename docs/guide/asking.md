@@ -58,7 +58,7 @@ for adapter in AdapterSet.default().adapters:
     assert result.content[0].text == "deployed web", adapter.version
 ```
 
-Four revisions, three mechanisms, one handler and one caller.
+Five revisions, three mechanisms, one handler and one caller.
 
 ## What actually happens
 
@@ -72,7 +72,7 @@ and `ask` returns immediately for anything already answered.
 answers with a plain JSON-RPC response, sent on its own. The call stays open in
 between.
 
-`2025-03-26` -- **the tool call.** This revision predates elicitation entirely.
+`2025-03-26` and `2024-11-05` -- **the tool call.** Both predate elicitation.
 The first call returns an ordinary result whose text says what is needed, and
 the answers come back as two extra tool arguments. See
 [Asking where the protocol cannot](../reference/revisions.md#asking-where-the-protocol-cannot).
@@ -186,8 +186,8 @@ answered.
 
 ## Where nobody can answer
 
-A client that cannot be asked is not a client to hang. Give `ask` a default and
-it is used instead of waiting.
+`ex.ask(default=...)` uses the default if the revision requires clients to
+declare elicitation and the client omits it.
 
 <!-- name: async test_asking_default; fixtures: serve -->
 ```python
@@ -211,8 +211,7 @@ async def careful(args: Nothing, ex: Exchange) -> str:
 
 
 url = await serve(registry)
-# No `on_ask`, so this client never declares that it can answer, and a pushed
-# question would wait for nobody.
+# This client has no handler for pushed questions.
 async with Client(url, AdapterSet.default().by_version["2025-11-25"]) as client:
     await client.initialize()
     result = await client.call_tool("careful", {})
@@ -220,9 +219,9 @@ async with Client(url, AdapterSet.default().by_version["2025-11-25"]) as client:
 assert result.content[0].text == "defaulted to decline"
 ```
 
-Without a default, a handler that asks a client which cannot answer gets an
-error naming the missing capability -- `-32021`, with
-`data.requiredCapabilities`. That is the spec's answer, not this package's.
+Without a default, a missing elicitation capability produces an error with
+`data.requiredCapabilities`. The code is `-32021` on `2026-07-28` and
+`-32603` on the two revisions that push questions.
 
 ## Several questions
 
@@ -332,12 +331,13 @@ guarantees.
 
 ## The client's side
 
-Passing `on_ask` does two things: it answers questions, and it is what makes
-the client declare that it can be asked. A server puts a question only to a
-client that said so.
+Pass `on_ask` to answer questions automatically. On `2025-11-25` and
+`2025-06-18`, the callback also enables the elicitation capability.
 
-Without it, a question on `2026-07-28` or `2025-03-26` comes back to the caller
-as a plain dictionary, to answer by calling again:
+On `2026-07-28`, the client declares elicitation automatically. On the two
+oldest revisions, tools can ask through their arguments. On these three
+revisions, `call_tool()` returns a plain dict if it has no callback to answer
+the question. Pass the answers into the next call.
 
 <!-- name: async test_asking_manual; fixtures: serve -->
 ```python
@@ -375,5 +375,102 @@ async with Client(url, adapter) as client:
 assert done.content[0].text == "went ahead"
 ```
 
-On a revision that pushes the question there is no such option: only `on_ask`
-can answer, and a client without one correctly says it cannot.
+## Completions: asking the client's model
+
+A question goes to a person. `ex.completion` goes to the client's model, which is
+the other thing a server may ask for:
+
+<!-- name: async test_asking_completion; fixtures: serve -->
+```python
+from pydantic import BaseModel
+
+from aiohttp_tiny_mcp import Client, Exchange, Registry, CompletionMessage, TextContent
+from aiohttp_tiny_mcp.protocol.selection import AdapterSet
+
+registry = Registry("writer", "1.0")
+
+
+class Topic(BaseModel):
+    about: str
+
+
+@registry.tool
+async def headline(args: Topic, ex: Exchange) -> str:
+    """Have the client's model write a headline."""
+    answered = await ex.completion(
+        messages=[
+            CompletionMessage(
+                role="user", content=TextContent(text=f"A headline about {args.about}")
+            )
+        ],
+        max_tokens=32,
+        system_prompt="Answer with one line.",
+    )
+    return answered.text
+
+
+async def complete(request):
+    """A client answers with a completion, in the shape the specification states."""
+    return {
+        "role": "assistant",
+        "content": {"type": "text", "text": "Trees, mostly"},
+        "model": "example-model",
+    }
+
+
+url = await serve(registry)
+async with Client(url, AdapterSet.default().adapters[0], on_completion=complete) as client:
+    await client.initialize()
+    written = await client.call_tool("headline", {"about": "trees"})
+
+assert written.content[0].text == "Trees, mostly"
+```
+
+`max_tokens` is required by the specification. `system_prompt`,
+`model_preferences`, `include_context`, `temperature`, `stop_sequences` and
+`metadata` are optional and passed through. The client chooses the model, so
+preferences are a request and not an instruction; the answer says which model
+replied.
+
+The result is a `CompletionResult`: `role`, `content`, `model`, an optional
+`stop_reason`, and `.text` for the common case of a text completion. A client
+that refuses, or answers something that is not a completion, fails the call —
+a completion that did not happen is not an empty completion.
+
+Model completions reach every revision: pushed on the call's stream where there is
+one, and carried in the result on `2026-07-28`. The adapter chooses the channel;
+the handler calls `ex.completion()` on every revision. Its keyword arguments
+build a `CompletionRequest`. On `2026-07-28`, the handler
+restarts with the answer, so code before the call may run again.
+
+`ex.completion()` reuses an answer the call already carries. `ex.completed(key)` lets
+the handler inspect that completion without making a request:
+
+<!-- name: test_asking_completion_guard -->
+```python
+async def careful(args, ex):
+    """Request one completion, even where the handler restarts."""
+    answered = ex.completed() or await ex.completion(
+        messages=[{"role": "user", "content": {"type": "text", "text": "once"}}], max_tokens=16
+    )
+    return answered.text
+```
+
+A handler that requests more than one completion passes `key=` to keep the answers apart.
+`Registry(completion_timeout_seconds=...)` bounds each pushed completion wait,
+separately from `ask_timeout_seconds`. The default is five minutes. On
+`2026-07-28`, MRTR returns the request immediately; the client controls how
+long it takes to submit the answer. The pushed-wait timeout does not apply.
+`request_state_ttl_seconds` limits stored handler state only when the handler
+supplies state. It is not a deadline for a stateless completion request.
+
+A client declares `sampling` only when it has an `on_completion` callback, so a
+server refuses the call with `requiredCapabilities: {"sampling": {}}` rather
+than waiting for an answer nobody can give. In the bundled console, select
+**Can answer for a model** before connecting to enter the completion yourself.
+The dialog shows the completion request and replies as `console-operator`.
+See [The console](console.md#questions) and the `summarize` tool in
+`examples/demo.py` for a runnable example.
+
+`sampling.tools`, where a model may call tools during the completion, is not
+implemented here.

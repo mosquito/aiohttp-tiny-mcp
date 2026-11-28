@@ -12,7 +12,7 @@ import sys
 from collections.abc import Callable, Mapping
 from contextlib import suppress
 from dataclasses import replace
-from typing import Any
+from typing import Any, Literal
 
 from aiohttp_tiny_mcp.protocol.adapter import Adapter
 from aiohttp_tiny_mcp.protocol.core import (
@@ -36,10 +36,22 @@ Writer = Callable[[Mapping[str, Any]], Any]
 
 
 class StdioRequest:
-    """Request app access for AppKey-based dependency injection."""
+    """Connection settings and app state for dependency injection."""
 
-    def __init__(self, app_state: dict[Any, Any] | None = None) -> None:
+    def __init__(
+        self,
+        app_state: dict[Any, Any] | None = None,
+        *,
+        resources: Literal["native", "tool"] | None = None,
+        prompts: Literal["native", "resource"] | None = None,
+    ) -> None:
+        if resources not in (None, "native", "tool"):
+            raise ValueError("resources must be native or tool")
+        if prompts not in (None, "native", "resource"):
+            raise ValueError("prompts must be native or resource")
         self.app: dict[Any, Any] = app_state if app_state is not None else {}
+        self.resource_modes = frozenset({resources or "native"})
+        self.prompts_as_resources = prompts == "resource"
 
 
 async def serve_stdio(
@@ -49,11 +61,13 @@ async def serve_stdio(
     *,
     adapters: AdapterSet | None = None,
     app_state: dict[Any, Any] | None = None,
+    resources: Literal["native", "tool"] | None = None,
+    prompts: Literal["native", "resource"] | None = None,
 ) -> None:
     """Serve an injectable reader/writer pair, without requiring process stdin/stdout."""
     adapters = adapters or AdapterSet.default()
     dispatcher = Dispatcher(registry)
-    request = StdioRequest(app_state)
+    request = StdioRequest(app_state, resources=resources, prompts=prompts)
     adapter: Adapter | None = None
     active: dict[str | int, tuple[Exchange, asyncio.Task[None]]] = {}
     declared: dict[str, Any] = {}
@@ -122,7 +136,11 @@ async def serve_stdio(
                 continue
 
             try:
-                selected = adapter or adapters.select(pre)
+                selected = (
+                    adapters.select(pre)
+                    if pre.method == "initialize"
+                    else adapter or adapters.select(pre)
+                )
                 calls = selected.decode(pre, registry)
             except Rejected as e:
                 fallback = adapters.fallback()
@@ -142,7 +160,10 @@ async def serve_stdio(
                     adapter = selected
                 ex = Exchange(registry, request, selected, item)
                 ex.keep_log_level = keep_log_level
-                if not selected.can_ask and not ex.can_ask:
+                # Run it inline only where nothing can come back from the client. A
+                # handler that waits for an answer needs this loop to keep reading, and
+                # a client that offers its model can still be asked for a completion.
+                if not selected.can_ask and not ex.can_ask and not ex.can_push_request:
                     attach(ex)
                     outcome = await dispatcher.run(ex)
                     if not item.is_notification:
@@ -190,10 +211,20 @@ async def run_stdio(
     *,
     adapters: AdapterSet | None = None,
     app_state: dict[Any, Any] | None = None,
+    resources: Literal["native", "tool"] | None = None,
+    prompts: Literal["native", "resource"] | None = None,
 ) -> None:
     """Serve `registry` over real stdin/stdout until stdin closes."""
     reader = await stdin_reader()
-    await serve_stdio(registry, reader, write_stdout, adapters=adapters, app_state=app_state)
+    await serve_stdio(
+        registry,
+        reader,
+        write_stdout,
+        adapters=adapters,
+        app_state=app_state,
+        resources=resources,
+        prompts=prompts,
+    )
 
 
 __all__ = ["StdioRequest", "run_stdio", "serve_stdio"]

@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import uuid
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Iterator
 from contextlib import AsyncExitStack
 from typing import Any
 
 import psycopg
 import pytest
 import redis
+from aiohttp.log import access_logger
 from aiohttp.test_utils import TestClient, TestServer
 from pydantic import BaseModel, Field
 
@@ -21,6 +22,7 @@ from aiohttp_tiny_mcp import (  # noqa: E402
     elicit,
     elicit_decline,
 )
+from aiohttp_tiny_mcp.access_log import TokenQueryFilter
 from aiohttp_tiny_mcp.protocol.models import CompleteParams
 from aiohttp_tiny_mcp.protocol.selection import AdapterSet
 from aiohttp_tiny_mcp.testing import serving
@@ -130,6 +132,15 @@ def registry(store_and_hub) -> Registry:
         raise RuntimeError("kaboom")
 
     @reg.tool
+    async def sampled(args: Nothing, ex: Exchange) -> str:
+        """Have the client's model answer, and report what it said."""
+        answered = await ex.completion(
+            messages=[{"role": "user", "content": {"type": "text", "text": "say something"}}],
+            max_tokens=32,
+        )
+        return f"{answered.model}: {answered.text}"
+
+    @reg.tool
     async def confirm(args: Confirm, ex: Exchange) -> str:
         """MRTR round trip."""
         if (answer := ex.answers.get("confirm")) is not None:
@@ -226,7 +237,7 @@ def registry(store_and_hub) -> Registry:
         """Templated resource."""
         return f"item-{args.id}"
 
-    @reg.resource("res://public", cache_ttl_ms=60_000, cache_scope="public")
+    @reg.resource("res://public", cache_ttl=60, cache_scope="public")
     async def public_doc(args: Nothing) -> str:
         """Explicitly opted into public client-side caching."""
         return "public content"
@@ -298,3 +309,20 @@ def postgres_url_or_none() -> str | None:
     except psycopg.Error:
         return None
     return POSTGRES_URL
+
+
+@pytest.fixture
+def restore_access_filters() -> Iterator[None]:
+    """Run with no token filter installed, and put the logger back afterwards.
+
+    The filter is installed on the aiohttp access logger, which is process-wide, so a
+    test that installs one must not leak it into the next.
+    """
+    filters = list(access_logger.filters)
+    for installed in filters:
+        if isinstance(installed, TokenQueryFilter):
+            access_logger.removeFilter(installed)
+    try:
+        yield
+    finally:
+        access_logger.filters[:] = filters

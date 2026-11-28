@@ -5,6 +5,16 @@
 ```{eval-rst}
 .. autoclass:: aiohttp_tiny_mcp.Registry
    :members:
+
+.. autoclass:: aiohttp_tiny_mcp.Icon
+   :members: from_bytes, from_file, from_files
+
+.. autoclass:: aiohttp_tiny_mcp.Icons
+
+.. autoclass:: aiohttp_tiny_mcp.Cache
+   :members: ttl, set_ttl
+
+.. autoclass:: aiohttp_tiny_mcp.CacheHint
 ```
 
 ## Extensions and skills
@@ -27,7 +37,7 @@ resource URIs. Loading directories requires `aiohttp-tiny-mcp[skills]`.
    :members: app, setup, routes, view
 
 .. autoclass:: aiohttp_tiny_mcp.SseEndpoint
-   :members: setup, routes
+   :members: setup, routes, aclose
 
 .. autofunction:: aiohttp_tiny_mcp.run_stdio
 ```
@@ -37,8 +47,16 @@ resource URIs. Loading directories requires `aiohttp-tiny-mcp[skills]`.
 ```{eval-rst}
 .. autoclass:: aiohttp_tiny_mcp.Exchange
    :members: ask, answered, accepted, action, answers, log, logs, progress,
+             completion, completed, can_complete,
              session, sessions, state, client_info, can_ask, cancel,
              wait_cancelled
+
+.. autoclass:: aiohttp_tiny_mcp.CompletionRequest
+
+.. autoclass:: aiohttp_tiny_mcp.CompletionMessage
+
+.. autoclass:: aiohttp_tiny_mcp.CompletionResult
+   :members: from_reply, text
 
 .. autofunction:: aiohttp_tiny_mcp.elicit
 
@@ -164,6 +182,14 @@ The classes below provide the API reference.
 .. autoclass:: aiohttp_tiny_mcp.auth.Authentication
    :members:
 
+.. autodata:: aiohttp_tiny_mcp.auth.Source
+
+.. autoclass:: aiohttp_tiny_mcp.auth.Header
+
+.. autoclass:: aiohttp_tiny_mcp.auth.Query
+
+.. autofunction:: aiohttp_tiny_mcp.auth.read_credential
+
 .. autoclass:: aiohttp_tiny_mcp.auth.BasicAuth
    :members:
 
@@ -218,7 +244,8 @@ The classes below provide the API reference.
 ```{eval-rst}
 .. autoclass:: aiohttp_tiny_mcp.Client
    :members: initialize, list_tools, call_tool, list_resources, read_resource,
-             list_prompts, get_prompt, complete, listen, set_log_level, request_method
+             list_resource_templates, list_prompts, get_prompt, complete, listen,
+             set_log_level, request_method
 
 .. autoclass:: aiohttp_tiny_mcp.client.stdio.StdioClient
    :members: spawn
@@ -230,7 +257,7 @@ The classes below provide the API reference.
 
 ```{eval-rst}
 .. autoclass:: aiohttp_tiny_mcp.protocol.adapter.Adapter
-   :members: version, can_ask, can_push_ask, asks_in_arguments, has_handshake,
+   :members: version, can_ask, can_push_ask, can_push_request, asks_in_arguments, has_handshake,
              allows_batch, carries_state, decode, encode, describe_tool,
              capabilities
 

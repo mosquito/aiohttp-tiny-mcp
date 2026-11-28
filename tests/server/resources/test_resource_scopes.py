@@ -248,7 +248,7 @@ def test_scoped_resources_reject_public_caching(uri: str):
 
 async def test_scoped_resource_cache_metadata_stays_private():
     registry, calls = registry_with_resources({"files:read", "profile:read"})
-    registry.resources_fixed["files://config"].cache_ttl_ms = 1000
+    registry.resources_fixed["files://config"].cache_ttl = 1
     async with over_http(
         registry, adapter="2026-07-28", headers={"Authorization": "Bearer test-token"}
     ) as client:

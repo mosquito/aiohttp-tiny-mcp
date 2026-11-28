@@ -13,6 +13,8 @@ from aiohttp_tiny_mcp.auth import Principal
 from aiohttp_tiny_mcp.extensions import ExtensionResult
 from aiohttp_tiny_mcp.protocol.core import (
     LOG_LEVELS,
+    NEEDED_CAPABILITY,
+    QUESTIONS,
     Failure,
     FailureKind,
     NeedInput,
@@ -43,14 +45,24 @@ from aiohttp_tiny_mcp.protocol.models import (
     SetLevelParams,
     SubscribeParams,
     TextContent,
+    TextResourceContents,
     ToolDef,
+    cache_ttl_milliseconds,
 )
 
-from .exchange import Exchange
+from .caching import Cache
+from .exchange import Exchange, waiting_for
 from .registry import Registry
 from .request_state import RequestStates, protect_request_state, restore_request_state
 from .resource_auth import resource_refusal, visible_resource
-from .resource_tools import resource_capabilities, resource_modes
+from .resource_tools import (
+    PROMPT_SCHEME,
+    prompt_address,
+    prompt_addresses,
+    prompts_as_resources,
+    resource_capabilities,
+    resource_modes,
+)
 from .specs import ToolSpec
 from .subscriptions import listen, subscribe, unsubscribe
 
@@ -107,9 +119,10 @@ class Dispatcher:
                 return failure
         operation = ex.call.operation
         try:
-            outcome = await self.dispatch(operation, ex)
-        except NeedInput as e:
-            outcome = await self.resolve_need_input(ex, e)
+            try:
+                outcome = await self.dispatch(operation, ex)
+            except NeedInput as e:
+                outcome = await self.resolve_need_input(ex, e)
         except Rejected as e:
             outcome = e.failure
         except Exception as e:  # noqa: BLE001 -- last resort, see the per-operation handlers
@@ -121,17 +134,41 @@ class Dispatcher:
             await self.request_state.drop(resumed)
         return outcome
 
+    def undeclared(self, ex: Exchange, e: NeedInput) -> tuple[str, ...]:
+        """Return the required capabilities that the client did not declare."""
+        wanted = {
+            NEEDED_CAPABILITY.get(str(request.get("method")), "elicitation")
+            for request in e.requests.values()
+            if not (ex.adapter.asks_in_arguments and request.get("method") in QUESTIONS)
+        }
+        return tuple(sorted(n for n in wanted if ex.call.client.capabilities.get(n) is None))
+
+    def pushable(self, ex: Exchange, e: NeedInput) -> bool:
+        """Return whether this revision can push every requested input."""
+        for request in e.requests.values():
+            question = str(request.get("method")) in QUESTIONS
+            if not (ex.adapter.can_push_ask if question else ex.adapter.can_push_request):
+                return False
+        return bool(e.requests)
+
     async def resolve_need_input(self, ex: Exchange, e: NeedInput) -> Outcome:
-        if ex.can_ask and ex.adapter.can_push_ask and not ex.adapter.can_ask:
-            return await self.ask_on_the_stream(ex, e)
-        if ex.can_ask:
-            return NeedsInput(requests=e.requests, state=e.state)
-        if ex.adapter.can_ask:
+        # The fault is the client's, and the reply names what to declare. A revision
+        # with no channel at all reports that the request cannot be put instead.
+        missing = self.undeclared(ex, e)
+        if missing:
+            if not ex.asks_somehow:
+                return Failure(
+                    FailureKind.INPUT_UNSUPPORTED, f"{ex.adapter.version} cannot ask the user"
+                )
             return Failure(
                 FailureKind.MISSING_REQUIRED_CAPABILITY,
-                "client did not declare the elicitation capability",
-                data={"requiredCapabilities": {"elicitation": {}}},
+                f"client did not declare the {' and '.join(missing)} capability",
+                data={"requiredCapabilities": {name: {} for name in missing}},
             )
+        if self.pushable(ex, e) and not ex.adapter.can_ask:
+            return await self.ask_on_the_stream(ex, e)
+        if ex.adapter.can_ask or ex.adapter.asks_in_arguments:
+            return NeedsInput(requests=e.requests, state=e.state)
         return Failure(FailureKind.INPUT_UNSUPPORTED, f"{ex.adapter.version} cannot ask the user")
 
     async def ask_on_the_stream(self, ex: Exchange, first: NeedInput) -> Outcome:
@@ -143,12 +180,20 @@ class Dispatcher:
         """
         asked = first
         for _ in range(PUSH_ASK_ROUNDS):
+            if self.undeclared(ex, asked) or not self.pushable(ex, asked):
+                return await self.resolve_need_input(ex, asked)
             answers = dict(ex.call.answers)
             actions = dict(ex.call.actions)
             for key, request in asked.requests.items():
-                answer = await ex.push_ask(key, request)
-                answers[key] = dict(answer.content)
-                actions[key] = answer.action
+                if str(request.get("method")) in QUESTIONS:
+                    answer = await ex.push_ask(key, request)
+                    answers[key] = dict(answer.content)
+                    actions[key] = answer.action
+                    continue
+                # Keep the completion in its original shape.
+                answers[key] = dict(
+                    await ex.push(key, request, timeout=waiting_for(request, self.registry))
+                )
             ex.call.answers = answers
             ex.call.actions = actions
             ex.call.state = asked.state
@@ -273,9 +318,14 @@ class Dispatcher:
 
     async def describe(self, ex: Exchange) -> Outcome:
         result = ex.adapter.describe_server(self.registry, ex.call)
-        caps = resource_capabilities(
-            self.registry, ex.adapter, resource_modes(self.registry, ex.request)
-        )
+        modes = resource_modes(self.registry, ex.request)
+        caps = resource_capabilities(self.registry, ex.adapter, modes)
+        if (
+            "native" in modes
+            and self.registry.prompts
+            and prompts_as_resources(self.registry, ex.request)
+        ):
+            caps.setdefault("resources", {})
         return Value(result=result.model_copy(update={"capabilities": caps}))
 
     async def handshake_complete(self, ex: Exchange) -> Outcome:
@@ -336,6 +386,10 @@ class Dispatcher:
             return Value(result=CallToolResult.failure(f"invalid arguments:\n{e}"))
         except NeedInput:
             raise
+        except Rejected:
+            # A protocol failure, not a tool fault: the client broke the exchange, so
+            # the reply is a JSON-RPC error rather than a result the model reads.
+            raise
         except Exception as e:  # noqa: BLE001 -- tool faults are results, not RPC errors
             return Value(result=CallToolResult.failure(f"{type(e).__name__}: {e}"))
         return Value(result=CallToolResult.of(value))
@@ -361,6 +415,8 @@ class Dispatcher:
             for spec in self.registry.resources_templated
             if isinstance(d := ex.adapter.describe_resource(spec), ResourceTemplateDef)
         ]
+        if prompts_as_resources(self.registry, ex.request):
+            defs.extend(prompt_addresses(self.registry, ex.adapter))
         defs.sort(key=lambda item: item.uri_template)
         found = self.paged(ex, defs, lambda item: item.uri_template, params)
         if isinstance(found, Failure):
@@ -372,6 +428,23 @@ class Dispatcher:
 
     async def read_resource(self, ex: Exchange, *, uri: str | None = None) -> Outcome:
         uri = uri if uri is not None else ex.call.target or ""
+        if uri.casefold().startswith(PROMPT_SCHEME) and prompts_as_resources(
+            self.registry, ex.request
+        ):
+            prompt = await self.read_prompt_address(ex, uri)
+            if not isinstance(prompt, Value):
+                return prompt
+            return Value(
+                result=ReadResourceResult(
+                    contents=[
+                        TextResourceContents(
+                            uri=uri,
+                            mime_type="application/json",
+                            text=prompt.result.model_dump_json(by_alias=True, exclude_none=True),
+                        )
+                    ]
+                )
+            )
         found = self.registry.match_resource(uri)
         if found is None:
             return Failure(FailureKind.RESOURCE_NOT_FOUND, f"resource not found: {uri}")
@@ -380,11 +453,22 @@ class Dispatcher:
             return Failure(FailureKind.RESOURCE_NOT_FOUND, f"resource not found: {uri}")
         if (refused := resource_refusal(spec, ex.principal)) is not None:
             return Failure(FailureKind.ACCESS_DENIED, refused)
+        ttl = spec.cache_ttl
+        if ttl is None and (hint := self.registry.cache_hints.get("resources/read")) is not None:
+            ttl = hint.cache_ttl
+        cache = Cache(0 if ttl is None else ttl)
+        ex.resolved[Cache] = cache
         try:
             value = await spec.bound.call(variables, ex)
         except ValidationError as e:
             return Failure(FailureKind.INVALID_PARAMS, str(e))
-        return Value(result=ReadResourceResult(contents=spec.contents(uri, value)))
+        finally:
+            ex.resolved.pop(Cache, None)
+        return Value(
+            result=ReadResourceResult(
+                contents=spec.contents(uri, value), ttl_ms=cache_ttl_milliseconds(cache.ttl)
+            )
+        )
 
     async def list_prompts(self, ex: Exchange) -> Outcome:
         prompts: list[PromptDef] = [
@@ -399,15 +483,34 @@ class Dispatcher:
         shown, next_cursor = found
         return Value(result=ListPromptsResult(prompts=shown, next_cursor=next_cursor))
 
-    async def get_prompt(self, ex: Exchange) -> Outcome:
-        spec = self.registry.prompts.get(ex.call.target or "")
+    async def get_prompt(
+        self, ex: Exchange, *, name: str | None = None, arguments: Mapping[str, Any] | None = None
+    ) -> Outcome:
+        name = name if name is not None else ex.call.target
+        spec = self.registry.prompts.get(name or "")
         if spec is None or ex.adapter.describe_prompt(spec) is None:
-            return Failure(FailureKind.UNKNOWN_TARGET, f"unknown prompt: {ex.call.target}")
+            return Failure(FailureKind.UNKNOWN_TARGET, f"unknown prompt: {name}")
         try:
-            value = await spec.bound.call(dict(ex.call.arguments), ex)
+            value = await spec.bound.call(
+                dict(ex.call.arguments if arguments is None else arguments), ex
+            )
         except ValidationError as e:
             return Failure(FailureKind.INVALID_PARAMS, str(e))
         return Value(result=prompt_result(value))
+
+    async def read_prompt_address(self, ex: Exchange, uri: str) -> Outcome:
+        try:
+            name, arguments = prompt_address(uri)
+        except ValueError:
+            return Failure(FailureKind.INVALID_PARAMS, "Invalid prompt address or arguments")
+        try:
+            return await self.get_prompt(ex, name=name, arguments=arguments)
+        except NeedInput:
+            if ex.call.operation is Operation.READ_RESOURCE and ex.adapter.asks_in_arguments:
+                return Failure(
+                    FailureKind.INPUT_UNSUPPORTED, "Use the resource tool to answer this prompt"
+                )
+            raise
 
     async def complete(self, ex: Exchange) -> Outcome:
         if isinstance(ex.call.params, CompleteParams) and ex.call.params.ref.type == "ref/resource":

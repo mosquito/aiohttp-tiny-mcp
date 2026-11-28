@@ -6,10 +6,21 @@ import json
 from urllib.parse import quote
 
 import pytest
+from pydantic import BaseModel
 
-from aiohttp_tiny_mcp import ClientError, Registry
+from aiohttp_tiny_mcp import Client, ClientError, Extension, Registry
 from aiohttp_tiny_mcp.extensions.skills import SKILLS_EXTENSION, Skills
-from aiohttp_tiny_mcp.testing import connect, over_http
+from aiohttp_tiny_mcp.protocol.models import ListParams
+from aiohttp_tiny_mcp.protocol.selection import AdapterSet
+from aiohttp_tiny_mcp.testing import connect, over_http, pick, serving
+
+
+class EmptySkillArguments(BaseModel):
+    pass
+
+
+class SkillName(BaseModel):
+    name: str
 
 
 def write_skill(root, name="deploy", *, extra="", newline="\n"):
@@ -125,6 +136,70 @@ async def test_single_skill_directory_and_legacy_uri(tmp_path):
         params = quote(json.dumps({"uri": uri}), safe="")
         detail = await client.read_resource(prefix + "skills/get?params=" + params)
         assert json.loads(detail.contents[0].text)["skill"] == listing["skills"][0]
+
+
+@pytest.mark.parametrize("version", tuple(AdapterSet.default().by_version))
+@pytest.mark.parametrize("live", [False, True], ids=["snapshot", "live"])
+async def test_resource_tools_list_and_read_skill_files(tmp_path, version, live):
+    registry = Registry("skills", "1")
+    uri = "skill://deploy/SKILL.md"
+    body = "---\nname: deploy\ndescription: Deploy the application.\n---\nDeploy the blue release."
+    if live:
+        extension = Extension(SKILLS_EXTENSION)
+
+        @extension.resource(uri, mime_type="text/markdown")
+        async def read_skill(args: EmptySkillArguments) -> str:
+            return body
+    else:
+        directory = write_skill(tmp_path)
+        body = (directory / "SKILL.md").read_text()
+        extension = Skills.from_directory(directory)
+    registry.extension(extension)
+
+    adapter = pick(version)
+    if not adapter.supports_extensions:
+        uri = f"mcp-extensions://{SKILLS_EXTENSION}/deploy/SKILL.md"
+
+    async with serving(registry) as url, Client(url + "?resources=tool", adapter) as client:
+        await client.initialize()
+        listed = await client.call_tool("mcp_resources_list", {"query": "SKILL.md"})
+        (entry,) = json.loads(listed.content[0].text)["items"]
+        assert entry["uri"] == uri
+
+        result = await client.call_tool("mcp_resources_read", {"uri": entry["uri"]})
+        assert json.loads(result.content[0].text)["contents"][0]["text"] == body
+        if live:
+            body = body.replace("blue", "green")
+            result = await client.call_tool("mcp_resources_read", {"uri": entry["uri"]})
+            assert "green release" in json.loads(result.content[0].text)["contents"][0]["text"]
+
+
+async def test_resource_tools_do_not_enumerate_live_skill_template_instances():
+    extension = Extension(SKILLS_EXTENSION)
+
+    @extension.method("skills/list")
+    async def list_skills(args: ListParams) -> dict:
+        return {"skills": [{"uri": "skill://deploy/SKILL.md", "resources": "dynamic"}]}
+
+    @extension.resource("skill://{name}/SKILL.md")
+    async def read_skill(args: SkillName) -> str:
+        return f"Instructions for {args.name}"
+
+    registry = Registry("skills", "1")
+    registry.extension(extension)
+    async with (
+        serving(registry) as url,
+        Client(url + "?resources=tool", pick("2026-07-28")) as client,
+    ):
+        await client.initialize()
+        listed = await client.call_tool("mcp_resources_list", {})
+        assert json.loads(listed.content[0].text)["items"] == [
+            {"uriTemplate": "skill://{name}/SKILL.md"}
+        ]
+        result = await client.call_tool("mcp_resources_read", {"uri": "skill://deploy/SKILL.md"})
+        assert (
+            json.loads(result.content[0].text)["contents"][0]["text"] == "Instructions for deploy"
+        )
 
 
 @pytest.mark.parametrize(

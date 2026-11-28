@@ -25,18 +25,28 @@ from aiohttp_tiny_mcp.protocol.core import (
     unwrap_answers,
 )
 from aiohttp_tiny_mcp.protocol.models import (
+    CacheableResult,
     CallToolParams,
+    CallToolResult,
     CompleteParams,
+    CompleteResult,
     GetPromptParams,
+    GetPromptResult,
     Incoming,
     ListenParams,
     ListParams,
+    ListPromptsResult,
+    ListResourcesResult,
+    ListResourceTemplatesResult,
+    ListToolsResult,
     Meta,
     Model,
     Params,
     ReadResourceParams,
     ReadResourceResult,
+    ResultModel,
     ToolDef,
+    cache_ttl_milliseconds,
 )
 from aiohttp_tiny_mcp.protocol.schema import header_params
 from aiohttp_tiny_mcp.server.specs import ToolSpec
@@ -116,14 +126,15 @@ def path_value(arguments: Mapping[str, Any], path: tuple[str, ...]) -> Any:
     return value
 
 
-class DiscoverResult(Model):
-    result_type: Literal["complete"] = "complete"
+class DiscoverResult(CacheableResult):
+    """Carries the freshness fields of every cacheable result, so one rule covers it."""
+
+    # Discovery is always complete, so the field only needs its default. The type stays
+    # the one every result has, because narrowing a field a caller may write is unsound.
+    result_type: Literal["complete"] | None = "complete"
     supported_versions: list[str]
     capabilities: dict[str, Any]
     instructions: str | None = None
-    ttl_ms: int | None = None
-    cache_scope: Literal["private", "public"] | None = None
-    meta: Meta | None = Field(default=None, alias="_meta")
 
 
 class InputRequiredResult(Model):
@@ -131,6 +142,23 @@ class InputRequiredResult(Model):
     input_requests: dict[str, Any]
     request_state: str | None = None
     meta: Meta | None = Field(default=None, alias="_meta")
+
+
+RESULT_MODELS: Mapping[Operation, type[ResultModel]] = MappingProxyType(
+    {
+        Operation.DESCRIBE: DiscoverResult,
+        Operation.LIST_TOOLS: ListToolsResult,
+        Operation.CALL_TOOL: CallToolResult,
+        Operation.LIST_RESOURCES: ListResourcesResult,
+        Operation.LIST_RESOURCE_TEMPLATES: ListResourceTemplatesResult,
+        Operation.READ_RESOURCE: ReadResourceResult,
+        Operation.LIST_PROMPTS: ListPromptsResult,
+        Operation.GET_PROMPT: GetPromptResult,
+        Operation.COMPLETE: CompleteResult,
+    }
+)
+"""The result each operation answers with. A cacheable one subclasses `CacheableResult`,
+which is where the set of methods that carry freshness fields comes from."""
 
 
 class Adapter2026_07_28(Adapter):  # noqa: N801 -- revision date, greppable against the spec
@@ -283,22 +311,47 @@ class Adapter2026_07_28(Adapter):  # noqa: N801 -- revision date, greppable agai
     def method_for(self, operation: Operation) -> str | None:
         return METHOD_NAMES.get(operation)
 
+    def freshness(
+        self, call: Call, registry: RegistryProtocol, result: CacheableResult
+    ) -> dict[str, Any]:
+        """Fill `ttlMs` and `cacheScope`, each from the first source that states it.
+
+        A handler's own value wins, then a resource declaration for the read of that
+        resource, then the registry default for the method, then `0` and `"private"`,
+        which tell a client to keep nothing. The fields are resolved apart, so a handler
+        that states one of them does not lose the other, which the revision requires.
+
+        A resource with scopes never answers `"public"`, whatever the default says. Its
+        content depends on the caller, so a shared cache would serve it to another one.
+        """
+        ttl_ms, scope = result.ttl_ms, result.cache_scope
+        spec = None
+        if isinstance(result, ReadResourceResult):
+            found = registry.match_resource(call.target or "")
+            spec = found[0] if found is not None else None
+        if spec is not None:
+            if ttl_ms is None and spec.cache_ttl is not None:
+                ttl_ms = cache_ttl_milliseconds(spec.cache_ttl)
+            scope = spec.cache_scope if scope is None else scope
+        # An extension answers a cacheable result of its own, under a method this
+        # revision does not name. It takes no default, and states its own fields.
+        method = METHOD_NAMES.get(call.operation)
+        default = registry.cache_hints.get(method) if method is not None else None
+        if default is not None:
+            if ttl_ms is None and default.cache_ttl is not None:
+                ttl_ms = cache_ttl_milliseconds(default.cache_ttl)
+            scope = default.scope if scope is None else scope
+        if spec is not None and spec.scopes and scope == "public":
+            scope = "private"
+        return {"ttl_ms": 0 if ttl_ms is None else ttl_ms, "cache_scope": scope or "private"}
+
     def encode_value(self, call: Call, registry: RegistryProtocol, result: Any) -> dict[str, Any]:
         meta = getattr(result, "meta", None) or Meta()
         updates: dict[str, Any] = {"meta": meta.model_copy(update={"server_info": registry.info})}
         if getattr(result, "result_type", "absent") is None:
             updates["result_type"] = "complete"
-        if getattr(result, "ttl_ms", "absent") is None:
-            ttl_ms, cache_scope = 0, "private"
-            if isinstance(result, ReadResourceResult):
-                spec = registry.match_resource(call.target or "")
-                if spec is not None:
-                    if spec[0].cache_ttl_ms is not None:
-                        ttl_ms = spec[0].cache_ttl_ms
-                    if spec[0].cache_scope is not None:
-                        cache_scope = spec[0].cache_scope
-            updates["ttl_ms"] = ttl_ms
-            updates["cache_scope"] = cache_scope
+        if isinstance(result, CacheableResult):
+            updates.update(self.freshness(call, registry, result))
         result = result.model_copy(update=updates)
         return {"jsonrpc": "2.0", "id": call.id, "result": result.wire()}
 

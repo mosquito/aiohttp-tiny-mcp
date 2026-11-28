@@ -55,19 +55,63 @@ assert {version: result.structured_content for version, result in results.items(
     "2026-07-28": {"total": 5},
     "2025-11-25": {"total": 5},
     "2025-06-18": {"total": 5},
-    "2025-03-26": {"total": 5},
-    "2024-11-05": {"total": 5},
+    "2025-03-26": None,
+    "2024-11-05": None,
 }
 ```
 
-The helpers are async context managers. They close streams, HTTP clients, and
-temporary servers when the block exits. Use a production Client and a deployed
-URL in integration tests that must cover your proxy, TLS, or load balancer.
+The two oldest revisions return structured output as text. They have no
+`structuredContent` field.
+
+`connect`, `over_http`, and `serving` close their resources when the async
+context exits. Await `every_revision` directly. Use a production `Client` and
+a deployed URL to test your proxy, TLS, or load balancer.
 
 `connect` limits request and response lines to 1 MiB by default, matching
 `StdioClient.spawn`. Pass `limit=...` in bytes to change both in-memory reader
 limits, for example `connect(registry, limit=4 * 1024 * 1024)` for 4 MiB.
 This permits large catalogues without pagination.
+
+## Test a model completion
+
+Pass `completion=` to `connect` or `over_http` for a fixed text reply. Use
+`on_completion=` for a callback that inspects the request or returns a different
+completion each time. Both helpers declare the `sampling` wire capability only
+when a provider is present.
+
+<!-- name: async test_testing_completion -->
+```python
+from pydantic import BaseModel
+
+from aiohttp_tiny_mcp import Exchange, Registry
+from aiohttp_tiny_mcp.testing import connect
+
+
+class Nothing(BaseModel):
+    pass
+
+
+registry = Registry("writer", "1.0")
+
+
+@registry.tool
+async def headline(args: Nothing, ex: Exchange) -> str:
+    """Ask the client's model for a headline."""
+    result = await ex.completion(
+        messages=[{"role": "user", "content": {"type": "text", "text": "A headline about trees"}}],
+        max_tokens=32,
+    )
+    return result.text
+
+
+async with connect(registry, completion="Trees store carbon") as client:
+    result = await client.call_tool("headline", {})
+
+assert result.content[0].text == "Trees store carbon"
+```
+
+Omit both options to test the missing-capability refusal. Pass a complete result
+mapping to `completion=` when the role, content type or model matters.
 
 ## Test the HTTP boundary
 

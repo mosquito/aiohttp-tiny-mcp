@@ -61,6 +61,16 @@ async def entry(args: Entry) -> str:
 
 A variable matches one path segment: `{id}` does not span a `/`.
 
+A variable name starts with a letter or `_`, and continues with letters, digits
+or `_`. Registration refuses a URI that breaks the form: an unclosed or
+unopened brace, a name of another shape, the same name twice, and two variables
+with no literal text between them. The last one has no single answer when an
+address is divided, and the others are typos that would otherwise register a
+fixed resource at an address no request can reach.
+
+A URI is limited to 8192 characters and a template to 256 variables. RFC 6570
+operators such as `{+path}` are not supported; use simple `{name}` variables.
+
 Fixed resources appear in `resources/list`. Templates appear in
 `resources/templates/list`, because a client cannot enumerate them -- it has to
 be told the shape and fill it in.
@@ -74,9 +84,11 @@ url = await serve(registry)
 async with Client(url, AdapterSet.default().by_version["2026-07-28"]) as client:
     await client.initialize()
     listed = await client.list_resources()
+    templates = await client.list_resource_templates()
     read = await client.read_resource("notebook://entries/42")
 
 assert {resource.uri for resource in listed} == {"config://app"}
+assert {entry.uri_template for entry in templates} == {"notebook://entries/{id}"}
 assert read.contents[0].text == "entry 42"
 ```
 
@@ -110,7 +122,8 @@ The setting applies to each request, including discovery and notification stream
 
 Repeated values are accepted. Empty or unknown values return HTTP 400.
 Other endpoint query parameters are preserved. On legacy HTTP+SSE, the advertised
-POST URL carries the selected modes. Stdio uses native resources.
+POST URL carries the selected modes. To use the tools over stdio, pass
+`resources="tool"` to [the launch function](../deployment/transports.md#stdio).
 
 Tool mode exposes two names through `tools/list`:
 
@@ -164,9 +177,13 @@ In tool-only mode, the server omits the native `resources` capability and reject
 native resource listing, reading, subscription, and completion requests. Resource
 notifications are disabled. Use both modes when the client needs subscriptions.
 
-`Registry` reserves exactly `mcp_resources_list` and `mcp_resources_read` by default.
-Registering either as an application tool raises `ValueError`. Disable the feature
-to release both names and stop interpreting the `resources` query parameter:
+The tool catalogue also lists [prompts](prompts.md#clients-without-native-prompts)
+as address templates. With native resources, add `prompts=resource` to include
+those templates in `resources/templates/list` and use `resources/read`.
+
+`Registry` reserves the tool names `mcp_resources_list` and `mcp_resources_read`
+and the `mcp-prompt:` scheme by default. Disable the feature to release those
+names and turn off the two compatibility query options:
 
 <!-- name: test_resource_tools_opt_out -->
 ```python
@@ -258,9 +275,8 @@ render the thing, and how.
 
 ## Reading one that is not there
 
-A URI that matches no resource and no template is a `-32002`, resource not
-found. That is a protocol failure rather than a result, because -- unlike a
-tool call -- there was nothing to reach.
+An unknown URI produces JSON-RPC error `-32602` (HTTP 404) on `2026-07-28`
+and `-32002` on older revisions.
 
 <!-- name: async test_resources; fixtures: serve -->
 ```python
@@ -300,25 +316,9 @@ See [Notifications](notifications.md#changes-to-what-the-server-offers).
 
 ## Cache hints
 
-`2026-07-28` lets a result say how long it may be cached and by whom. The
-default is not to cache, which is the safe answer for anything that depends on
-who is asking.
-
-<!-- name: test_resources -->
-```python
-@registry.resource(
-    "notebook://schema",
-    mime_type="application/json",
-    cache_ttl_ms=300_000,
-    cache_scope="public",
-)
-async def schema(args: Nothing) -> dict:
-    """The same for every caller, and it rarely changes."""
-    return {"version": 3}
-```
-
-Say `public` only where the answer genuinely does not depend on the caller. On
-the older revisions the hints are absent entirely and the fields are ignored.
+Use `cache_ttl` and `cache_scope` to set freshness hints for reads of a
+resource or template. See [Cache hints](caching.md) for examples, registry
+defaults, and the order in which values take effect.
 
 ## When a resource is the wrong shape
 

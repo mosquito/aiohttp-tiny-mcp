@@ -43,7 +43,7 @@ from aiohttp_tiny_mcp.transport.sse import SSEResponse
 
 from .batch import run_batch
 from .dispatcher import Dispatcher
-from .exchange import Exchange
+from .exchange import Exchange, is_reply, relay_reply
 from .http import Endpoint
 from .registry import Registry
 from .resource_auth import allowed_resource
@@ -87,6 +87,8 @@ class SseEndpoint:
         self.batch_concurrency = batch_concurrency
         self.sse_path = sse_path
         self.message_path = message_path
+        #: The requests this endpoint still serves. Each one answered 202 already.
+        self.running: set[asyncio.Task[None]] = set()
 
     @property
     def adapter(self) -> Adapter:
@@ -133,6 +135,8 @@ class SseEndpoint:
         query = [("session_id", session_id)]
         if self.registry.resource_tools:
             query.extend(("resources", mode) for mode in request.query.getall("resources", []))
+            if "resource" in request.query.getall("prompts", ()):
+                query.append(("prompts", "resource"))
         await self.write(response, "endpoint", str(URL(posting).with_query(query)))
 
         try:
@@ -220,7 +224,16 @@ class SseEndpoint:
         await response.send(data, event=event)
 
     async def receive(self, request: web.Request) -> web.StreamResponse:
-        """Take one message and answer 202. The reply goes to the stream."""
+        """Take one message, answer 202, and serve it. The reply goes to the stream.
+
+        The 202 does not wait for the handler. A client of this transport posts one
+        message at a time, including the answer to a question a handler asked, so a
+        handler that waits for that answer would wait for a message the client cannot
+        send until this response arrives.
+
+        The work retains request data, but not middleware resource lifetimes. Use
+        handler-scoped providers for resources that require cleanup.
+        """
         resource_modes(self.registry, request)
         try:
             self.origins.check_origin(request)
@@ -245,6 +258,13 @@ class SseEndpoint:
         where = topic(STREAM, session_id)
 
         pre = Preamble.of(raw, request.headers)
+
+        # An answer to a pushed question is a response, so it has no method and no
+        # handler. Relay it through the hub, which may wake a handler on another node.
+        if is_reply(pre.body):
+            await relay_reply(self.registry.hub, pre.body)
+            return web.Response(status=202)
+
         try:
             adapter = self.speaking(pre, record)
             items = adapter.decode(pre)
@@ -257,8 +277,34 @@ class SseEndpoint:
                 adapter, item, session_id, record, where, request=request, principal=principal
             )
 
-        await run_batch(items, execute, self.batch_concurrency if pre.is_batch else 1)
+        async def work() -> None:
+            await run_batch(items, execute, self.batch_concurrency if pre.is_batch else 1)
+
+        # Answer 202 before the handler runs. A client of this transport posts one
+        # message at a time, so a handler that waits for an answer would wait for a
+        # message the client cannot send until this response arrives.
+        task = asyncio.create_task(work())
+        self.running.add(task)
+        task.add_done_callback(self.finished)
         return web.Response(status=202)
+
+    def finished(self, task: asyncio.Task[None]) -> None:
+        """Forget a finished request, and report what no caller can see."""
+        self.running.discard(task)
+        if task.cancelled():
+            return
+        error = task.exception()
+        if error is not None:
+            log.exception("a message on the HTTP+SSE transport failed", exc_info=error)
+
+    async def closing(self, app: web.Application) -> None:
+        """Signal handler shape of `aclose`, registered by `setup`."""
+        await self.aclose()
+
+    async def aclose(self) -> None:
+        """End the requests still in flight. Call this where `setup` was not used."""
+        await stop(*self.running)
+        self.running.clear()
 
     async def serve(
         self,
@@ -301,6 +347,10 @@ class SseEndpoint:
             negotiated = getattr(outcome.result, "protocol_version", None)
             if isinstance(negotiated, str):
                 await session.remember_version(negotiated)
+            # This transport opens the session before the handshake, so the capabilities
+            # arrive later than the record. Without them the server reads a client that
+            # declared nothing, and refuses to ask it anything.
+            await session.remember_capabilities(item.client.capabilities)
 
         if item.is_notification:
             return
@@ -359,9 +409,10 @@ class SseEndpoint:
         mask_tokens_in_logs: bool = True,
     ) -> web.Application:
         if mask_tokens_in_logs:
-            install_token_filter()
+            install_token_filter(*self.registry.credential_arguments)
         log.debug("adding the HTTP+SSE routes to %r", app)
         app.add_routes(self.routes(sse_path, message_path, metadata=metadata))
+        app.on_shutdown.append(self.closing)
         return app
 
 

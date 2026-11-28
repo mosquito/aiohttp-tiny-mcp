@@ -266,7 +266,7 @@ references on 2026-11-16:
 | [Claude Code](https://code.claude.com/docs/en/mcp#user-scope) | `.mcp.json` | `~/.claude.json` | `mcpServers`, `type: "http"`, `url` |
 | [Codex](https://learn.chatgpt.com/docs/config-file/config-basic) | `.codex/config.toml` | `~/.codex/config.toml` | `mcp_servers`, `url`, `http_headers` |
 | [Cursor](https://cursor.com/docs/mcp) | `.cursor/mcp.json` | `~/.cursor/mcp.json` | `mcpServers`, `url` |
-| [VS Code / Copilot](https://code.visualstudio.com/docs/agents/reference/mcp-configuration) | `.mcp.json` | `~/.copilot/mcp-config.json` | `mcpServers`, `type: "http"`, `url`, `tools` |
+| [GitHub Copilot](https://code.visualstudio.com/docs/agents/reference/mcp-configuration) | `.mcp.json` | `~/.copilot/mcp-config.json` | `mcpServers`, `type: "http"`, `url`, `tools` |
 | [Gemini CLI](https://geminicli.com/docs/tools/mcp-server/) | `.gemini/settings.json` | `~/.gemini/settings.json` | `mcpServers`, `httpUrl` |
 | [Pi](https://docs.pi.dev/latest/mcp) | `.pi/mcp.json` | `~/.pi/agent/mcp.json` | `mcpServers`, `url` |
 | [Antigravity](https://antigravity.google/docs/mcp) | `.agents/mcp_config.json` | `~/.gemini/config/mcp_config.json` | `mcpServers`, `serverUrl` |
@@ -301,6 +301,12 @@ every version of an agent lacks native resource support.
 Selecting only native resources removes all existing `resources` parameters.
 The Antigravity format and paths were checked on 2026-11-21.
 
+Codex defaults to native resources with **include prompts** enabled. This adds
+`prompts=resource` to the generated URL. Select or clear **include prompts**
+when using native resources to control this setting. The resource tools already
+include [prompt addresses](prompts.md#clients-without-native-prompts), including
+in the Pi preset.
+
 When the registry disables resource tools, pass the same setting to the console:
 
 ```python
@@ -334,9 +340,8 @@ support inline Markdown; embedded HTML and tags with attributes stay escaped.
 The Markdown renderer is included with the console. It needs no external
 library or network request.
 
-Everything from the server is escaped before a single tag is added, and links
-are limited to `http`, `https` and `mailto`. A description cannot bring its own
-HTML, which matters most exactly when the server is one you have not read.
+The renderer escapes server text. Links can start with `http:`, `https:`,
+`mailto:`, `#`, or `/`.
 
 ## Every revision
 
@@ -394,6 +399,10 @@ routes. It does not declare protocol extension support. See
 
 ## Questions
 
+The catalogue and server title display declared icons on revisions that carry
+them. The console selects light/dark variants and scales images to 16 pixels.
+See [Icons](icons.md) for presets, custom images and the runnable demo.
+
 A handler that calls `ex.ask` puts a question to the page, and the page puts it
 to the person -- with a form built from the request's schema, and the three
 answers the protocol defines: accept, decline, cancel.
@@ -401,6 +410,21 @@ answers the protocol defines: accept, decline, cancel.
 Untick **Can be asked** and the console stops declaring the capability, which
 is how to see what a client that cannot answer gets. A handler with a default
 takes it; one without is told the client cannot be asked.
+
+Select **Can answer for a model** before connecting to answer
+model completion requests yourself. The dialog shows the messages and model
+options, and accepts a text completion. The reply names its model
+`console-operator`; no API key or model service is needed. **Decline**,
+**Cancel**, and Escape return an error rather than an empty completion.
+For a pushed request, the server waits up to its configured completion timeout.
+With MRTR, the client controls when it submits the completion. Background notifications
+continue while the dialog is open. Disconnect before changing the checkbox.
+
+To try it, run `uv run python examples/demo.py`, open
+`http://127.0.0.1:8080/console`, select the checkbox, and connect. Choose
+**summarize**, enter text, and click **Call**. Enter a sentence in the dialog
+and click **Send completion**. Try **Decline**, then disconnect and clear the
+checkbox to see the missing-capability refusal. This works on all five revisions.
 
 ## Your own page
 

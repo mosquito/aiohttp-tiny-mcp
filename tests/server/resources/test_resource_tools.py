@@ -9,20 +9,34 @@ from urllib.parse import parse_qs, quote, urlsplit
 
 import aiohttp
 import pytest
+from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 from pydantic import BaseModel
 
-from aiohttp_tiny_mcp import Client, Endpoint, Extension, Registry, SseEndpoint
+from aiohttp_tiny_mcp import (
+    Authorization,
+    Client,
+    Endpoint,
+    Exchange,
+    Extension,
+    Icon,
+    Principal,
+    Registry,
+    SseEndpoint,
+    StaticVerifier,
+    elicit,
+)
 from aiohttp_tiny_mcp.client.base import ClientError
-from aiohttp_tiny_mcp.protocol.core import Operation
+from aiohttp_tiny_mcp.protocol.core import Failure, FailureKind, Operation, Rejected
 from aiohttp_tiny_mcp.protocol.models import (
     CallToolResult,
     ListParams,
+    ReadResourceParams,
     TextContent,
 )
 from aiohttp_tiny_mcp.protocol.selection import AdapterSet
 from aiohttp_tiny_mcp.storage.hub import NOTIFICATIONS, topic
-from aiohttp_tiny_mcp.testing import connect, pick, serving
+from aiohttp_tiny_mcp.testing import answering, connect, pick, serving
 from tests.helpers import OldClient
 from tests.server.resources.test_resource_scopes import registry_with_resources
 from tests.server.resources.test_subscriptions import event, message
@@ -37,6 +51,16 @@ class Nothing(BaseModel):
 
 class Entry(BaseModel):
     name: str
+
+
+async def described_resource(args: Nothing) -> str:
+    """A resource with something to show beside its address."""
+    return "alpha content"
+
+
+async def entry_resource(args: Entry) -> str:
+    """One entry by name."""
+    return f"entry {args.name}"
 
 
 def resource_registry(**kwargs: Any) -> Registry:
@@ -63,11 +87,15 @@ async def resource_client(
     query: str = "resources=tool",
     version: str = "2026-07-28",
     headers: dict[str, str] | None = None,
+    answers: dict[str, Any] | None = None,
 ) -> AsyncIterator[tuple[Client, dict[str, Any]]]:
     async with serving(registry) as url:
         async with aiohttp.ClientSession(headers=headers) as session:
             async with Client(
-                url + ("?" + query if query else ""), pick(version), session=session
+                url + ("?" + query if query else ""),
+                pick(version),
+                session=session,
+                on_ask=answering(answers),
             ) as client:
                 yield client, await client.initialize()
 
@@ -78,6 +106,146 @@ def tool_data(result: CallToolResult | dict[str, Any]) -> dict[str, Any]:
     assert len(result.content) == 1
     assert isinstance(result.content[0], TextContent)
     return json.loads(result.content[0].text)
+
+
+@pytest.mark.parametrize("version", VERSIONS)
+async def test_prompt_addresses_use_the_native_handler(version):
+    registry = Registry("prompts", "1")
+
+    @registry.prompt(name="Review / code")
+    async def review(args: Entry) -> str:
+        return f"Review {args.name}"
+
+    query = "resources=tool&resources=native&prompts=resource"
+    async with resource_client(registry, query=query, version=version) as (client, discovery):
+        assert "resources" in discovery["capabilities"]
+        assert await client.list_resources() == []
+        (template,) = await client.list_resource_templates()
+        listed = tool_data(await client.call_tool("mcp_resources_list", {"templates": True}))
+        assert listed["items"][0]["uriTemplate"] == template.uri_template
+        assert listed["items"][0]["arguments"] == [{"name": "name", "required": True}]
+        args = {"name": "a + b / код"}
+        uri = template.uri_template.replace("{arguments}", quote(json.dumps(args), safe=""))
+        prompt = await client.get_prompt("Review / code", args)
+        expected = prompt.model_dump(mode="json", by_alias=True, include={"messages"})
+        assert tool_data(await client.call_tool("mcp_resources_read", {"uri": uri})) == expected
+        result = await client.read_resource(uri)
+        assert json.loads(result.contents[0].text) == expected
+
+        address = template.uri_template.split("?", 1)[0]
+        for uri in (
+            address,
+            address + "?arguments=%5B%5D",
+            address + "?arguments=%7B%7D&arguments=%7B%7D",
+        ):
+            rejected = await client.call_tool("mcp_resources_read", {"uri": uri})
+            assert isinstance(rejected, CallToolResult) and rejected.is_error
+            with pytest.raises(ClientError):
+                await client.read_resource(uri)
+
+
+@pytest.mark.parametrize("version", VERSIONS)
+async def test_prompt_tool_read_can_ask(version):
+    registry = Registry("prompts", "1")
+
+    @registry.prompt
+    async def topic(args: Nothing, ex: Exchange) -> str:
+        answer = await ex.ask("topic", elicit("Choose a topic", Entry.model_json_schema()))
+        return f"Review {answer.content['name']}"
+
+    async with resource_client(
+        registry, version=version, answers={"topic": {"name": "Python"}}
+    ) as (client, discovery):
+        assert "resources" not in discovery["capabilities"]
+        (item,) = tool_data(await client.call_tool("mcp_resources_list", {}))["items"]
+        assert item["uriTemplate"] == "mcp-prompt:///topic"
+        result = tool_data(
+            await client.call_tool("mcp_resources_read", {"uri": item["uriTemplate"]})
+        )
+        assert result["messages"][0]["content"]["text"] == "Review Python"
+
+    async with resource_client(
+        registry, query="prompts=resource", version=version, answers={"topic": {"name": "Python"}}
+    ) as (client, _):
+        uri = "mcp-prompt:///topic"
+        if pick(version).asks_in_arguments:
+            with pytest.raises(ClientError, match="Use the resource tool"):
+                await client.read_resource(uri)
+        elif pick(version).can_ask:
+            first = await client.request(
+                Operation.READ_RESOURCE, ReadResourceParams(uri=uri), name=uri
+            )
+            assert first["resultType"] == "input_required"
+            result = await client.request(
+                Operation.READ_RESOURCE,
+                ReadResourceParams(
+                    uri=uri,
+                    input_responses={
+                        "topic": {"action": "accept", "content": {"name": "Python"}},
+                    },
+                ),
+                name=uri,
+            )
+            assert json.loads(result["contents"][0]["text"])["messages"][0]["content"]["text"] == (
+                "Review Python"
+            )
+        else:
+            result = await client.read_resource(uri)
+            assert json.loads(result.contents[0].text)["messages"][0]["content"]["text"] == (
+                "Review Python"
+            )
+
+
+async def test_prompt_addresses_preserve_application_permissions():
+    verifier = StaticVerifier({"token": Principal(subject="alice")})
+    registry = Registry("prompts", "1", auth=Authorization(verifier, "https://example.test/mcp"))
+
+    @registry.prompt
+    async def private(args: Nothing, principal: Principal) -> str:
+        if "private:read" not in principal.scopes:
+            raise Rejected(Failure(FailureKind.ACCESS_DENIED, "private prompt"))
+        return "private text"
+
+    async with resource_client(
+        registry,
+        "resources=tool&resources=native&prompts=resource",
+        headers={"Authorization": "Bearer token"},
+    ) as (client, _):
+        with pytest.raises(ClientError, match="private prompt"):
+            await client.get_prompt("private", {})
+        with pytest.raises(ClientError, match="private prompt"):
+            await client.read_resource("mcp-prompt:///private")
+        with pytest.raises(ClientError, match="private prompt"):
+            await client.call_tool("mcp_resources_read", {"uri": "mcp-prompt:///private"})
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+async def test_prompt_address_opt_in_and_reserved_scheme(enabled):
+    registry = Registry("prompts", "1", resource_tools=enabled)
+
+    async def real_resource(args: Nothing) -> str:
+        return "ordinary data"
+
+    uri = "mcp-prompt:///example"
+    if enabled:
+        with pytest.raises(ValueError, match="reserved scheme"):
+            registry.resource(uri, real_resource)
+    else:
+        registry.resource(uri, real_resource)
+
+    @registry.prompt
+    async def example(args: Nothing) -> str:
+        return "prompt text"
+
+    query = "" if enabled else "prompts=resource"
+    async with resource_client(registry, query=query) as (client, discovery):
+        assert await client.list_resource_templates() == []
+        if enabled:
+            assert "resources" not in discovery["capabilities"]
+            with pytest.raises(ClientError):
+                await client.read_resource(uri)
+        else:
+            assert (await client.read_resource(uri)).contents[0].text == "ordinary data"
 
 
 @pytest.mark.parametrize("version", VERSIONS)
@@ -541,6 +709,39 @@ async def open_legacy_resources(client: OldClient, query: str) -> str:
     return endpoint
 
 
+async def test_legacy_sse_carries_prompt_resource_mode_to_the_post_url():
+    registry = Registry("prompts", "1")
+
+    @registry.prompt
+    async def example(args: Nothing) -> str:
+        return "prompt text"
+
+    app = SseEndpoint(registry).setup(web.Application())
+    async with TestServer(app) as server:
+        client = OldClient(str(server.make_url("")).rstrip("/"))
+        try:
+            endpoint = await open_legacy_resources(client, "prompts=resource")
+            assert parse_qs(urlsplit(endpoint).query)["prompts"] == ["resource"]
+            discovery = await client.call(
+                "initialize",
+                {
+                    "protocolVersion": "2024-11-05",
+                    "clientInfo": {"name": "test", "version": "1"},
+                    "capabilities": {},
+                },
+            )
+            assert "resources" in discovery["result"]["capabilities"]
+            listed = await client.call("resources/templates/list", {}, request_id=2)
+            (template,) = listed["result"]["resourceTemplates"]
+            read = await client.call(
+                "resources/read", {"uri": template["uriTemplate"]}, request_id=3
+            )
+            result = json.loads(read["result"]["contents"][0]["text"])
+            assert result["messages"][0]["content"]["text"] == "prompt text"
+        finally:
+            await client.close()
+
+
 @pytest.mark.parametrize("query", ["resources=tool", "resources=tool&resources=native"])
 async def test_legacy_sse_preserves_resource_selection_in_post_endpoint(query: str):
     registry = resource_registry()
@@ -661,3 +862,25 @@ async def test_resource_read_tool_executes_legacy_extension_method_alias(version
         assert result["contents"][0]["uri"] == uri
         assert json.loads(result["contents"][0]["text"]) == {"removed": "report"}
     assert calls == ["report"]
+
+
+@pytest.mark.parametrize("version", VERSIONS)
+async def test_the_resource_catalogue_carries_no_icon(version: str):
+    """An icon is a URL or bytes for a person to look at, and this catalogue is read by
+    a model. The name and the title are left out for the same reason.
+    """
+    registry = Registry("icons", "1")
+    icon = Icon(src="https://example.test/i.png")
+    registry.resource("file://alpha", described_resource, icons=[icon], title="Alpha")
+    registry.resource("file://entries/{name}", entry_resource, name="entry", icons=[icon])
+
+    async with resource_client(registry, version=version) as (client, discovery):
+        for templates in (False, True):
+            listed = tool_data(
+                await client.call_tool("mcp_resources_list", {"templates": templates})
+            )
+            assert listed["items"], listed
+            for item in listed["items"]:
+                assert "icons" not in item
+                assert "title" not in item
+                assert "name" not in item

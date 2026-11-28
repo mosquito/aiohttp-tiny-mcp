@@ -3,6 +3,10 @@
     uv run python examples/demo.py
     uv run python examples/demo.py --stdio
 
+For manual model completions, open http://127.0.0.1:8080/console. Select
+"Can answer for a model", connect, and call "summarize". Enter the model
+completion in the dialog. Decline the request to test a refusal.
+
 Then, for a 2026-07-28 client:
     curl localhost:8080/mcp -H 'Content-Type: application/json' \\
         -H 'Accept: application/json, text/event-stream' \\
@@ -33,6 +37,7 @@ from pydantic import BaseModel
 from aiohttp_tiny_mcp import (
     Endpoint,
     Exchange,
+    Icons,
     MemoryHub,
     MemorySessionStore,
     Registry,
@@ -78,6 +83,8 @@ registry = Registry(
     hub=hub,
     instructions="Toy server. Speaks every revision this package supports.",
     session_store=MemorySessionStore(),
+    icons=[Icons.CODE],
+    website_url="https://mosquito.github.io/aiohttp-tiny-mcp/",
 )
 registry.provide(Pool, POOL)
 registry.provide(User, current_user)
@@ -92,7 +99,7 @@ class Sum(BaseModel):
     result: int
 
 
-@registry.tool
+@registry.tool(icons=[Icons.PLUS])
 async def add(args: Add) -> Sum:
     """Add two integers."""
     return Sum(result=args.a + args.b)
@@ -102,10 +109,28 @@ class Nothing(BaseModel):
     pass
 
 
+class Passage(BaseModel):
+    text: str
+
+
+@registry.tool(icons=[Icons.FILE])
+async def summarize(args: Passage, ex: Exchange) -> str:
+    """Ask the client's model to summarize text in one sentence."""
+    completed = await ex.completion(
+        messages=[{"role": "user", "content": {"type": "text", "text": args.text}}],
+        max_tokens=128,
+        system_prompt="Summarize the text in one sentence.",
+        model_preferences={"speedPriority": 1.0},
+        include_context="none",
+        temperature=0.2,
+    )
+    return f"{completed.model}: {completed.text}"
+
+
 SETTINGS: dict[str, bool] = {"debug": False}
 
 
-@registry.resource("config://app", mime_type="application/json")
+@registry.resource("config://app", mime_type="application/json", icons=[Icons.GEAR])
 async def config(args: Nothing) -> dict:
     """Application configuration."""
     return dict(SETTINGS)
@@ -115,7 +140,7 @@ class Debug(BaseModel):
     debug: bool
 
 
-@registry.tool
+@registry.tool(icons=[Icons.GEAR])
 async def set_debug(args: Debug) -> str:
     """Change the configuration and notify subscribers."""
     SETTINGS["debug"] = args.debug
@@ -134,7 +159,7 @@ class UserRef(BaseModel):
     id: int
 
 
-@registry.resource("db://users/{id}", name="user", mime_type="application/json")
+@registry.resource("db://users/{id}", name="user", mime_type="application/json", icons=[Icons.USER])
 async def user_row(args: UserRef, pool: Pool) -> str:
     """One user by id. Template variables arrive as the args model."""
     return await pool.query(f"select * from users where id={args.id}")
@@ -144,7 +169,7 @@ class Review(BaseModel):
     language: str
 
 
-@registry.prompt
+@registry.prompt(icons=[Icons.CODE])
 async def review(args: Review) -> str:
     """Ask for a code review."""
     return f"Please review this {args.language} code."
@@ -167,7 +192,7 @@ class Deploy(BaseModel):
     service: str
 
 
-@registry.tool
+@registry.tool(icons=[Icons.UPLOAD])
 async def deploy(args: Deploy, ex: Exchange) -> str:
     """Ask for confirmation before deploying."""
     confirm = await ex.ask("confirm", elicit(f"Deploy {args.service} to production?"))
@@ -193,7 +218,7 @@ async def reach_session(ex: Exchange, handle: str | None):
     return await ex.sessions.use(handle) if ex.sessions is not None else None
 
 
-@registry.tool
+@registry.tool(icons=[Icons.PLUS])
 async def session_open(args: Nothing, ex: Exchange) -> dict:
     """Create a session handle. Pass it to session_set/session_info on later calls, including on
     revisions without protocol sessions.
@@ -204,7 +229,7 @@ async def session_open(args: Nothing, ex: Exchange) -> dict:
     return {"handle": session.id}
 
 
-@registry.tool
+@registry.tool(icons=[Icons.FLOPPY_DISK])
 async def session_set(args: SessionValue, ex: Exchange) -> str:
     """Store a value that outlives this request."""
     session = await reach_session(ex, args.handle)
@@ -214,7 +239,7 @@ async def session_set(args: SessionValue, ex: Exchange) -> str:
     return f"session {session.id}: {args.key} = {args.value!r}"
 
 
-@registry.tool
+@registry.tool(icons=[Icons.CIRCLE_INFO])
 async def session_info(args: SessionRef, ex: Exchange) -> dict:
     """Show which session this call reaches, and what it holds."""
     session = await reach_session(ex, args.handle)
@@ -223,7 +248,7 @@ async def session_info(args: SessionRef, ex: Exchange) -> dict:
     return {"session": session.id, "values": dict(session.values)}
 
 
-@registry.tool(streaming=True)
+@registry.tool(streaming=True, icons=[Icons.PLAY])
 async def slow_count(args: Add, ex: Exchange) -> str:
     """Report progress and messages before returning the count."""
     await ex.log("debug", f"counting from {args.a} to {args.b}", logger="slow_count")
@@ -242,8 +267,9 @@ async def auth(request: web.Request, handler):
 
 @web.middleware
 async def tenant(request: web.Request, handler):
-    """Isolate demo callers by forwarded address or request.remote. Production deployments should
-    use an authenticated account or token subject.
+    """Group demo callers by X-Tenant or request.remote.
+
+    In production, use an authenticated account or token subject.
     """
     namespace.set(request.headers.get("X-Tenant") or request.remote)
     return await handler(request)

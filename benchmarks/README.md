@@ -7,7 +7,7 @@ uv run python -m benchmarks.run                          # everything
 uv run python -m benchmarks.run --suite server
 uv run python -m benchmarks.run --suite client
 uv run python -m benchmarks.run --suite stdio
-uv run python -m benchmarks.run --concurrency 32 --calls 3000
+uv run python -m benchmarks.run --suite server --operations call --concurrency 32 --calls 3000 --repeats 2
 uv run python -m benchmarks.run --operations call text list
 uv run python -m benchmarks.schema_cost                  # one request, no socket
 ```
@@ -55,331 +55,232 @@ a small and for a realistic schema.
 
 ## The floor
 
-Every table names two rows that are not MCP at all: one aiohttp handler and
-one Starlette handler, each parsing the request and answering a fixed JSON
-body. They exist because this package runs on aiohttp and the official SDK
-runs on uvicorn, and **without them a reader compares two web servers and
-believes they compared two MCP libraries.**
-
-`of floor` is each row's rate as a share of its own stack answering that fixed
-body. It is the number to read. A library that reaches 70% of its floor is
-spending 30% of the request on protocol work; the absolute rates also carry
-whatever separates aiohttp from uvicorn on the day.
+The HTTP server tables include bare aiohttp and Starlette handlers that return
+a fixed JSON body. `Of floor` divides each server's rate by its own stack's
+baseline. The stdio tables include a raw pipe baseline. The HTTP client tables
+contain MCP pairings only.
 
 ## Conditions
 
-Every number below came from one run on one machine. They compare rows within
-that run and say nothing about any other machine.
+Measured on an Arch Linux x86-64 VM with 16 vCPUs on an AMD Ryzen AI 9 HX PRO
+370, kernel `7.2.11-arch1-1`. CPython 3.14.2, aiohttp 3.14.5, Pydantic 2.14.4,
+MCP SDK 2.2.0, uvicorn 0.54.0, and Starlette 1.10.0. Both HTTP listeners use
+`TCP_NODELAY`. The driver and servers run on the same machine over loopback,
+without TLS. Logging is set to ERROR and HTTP access logs are disabled.
 
-|                         |                                                         |
-|-------------------------|---------------------------------------------------------|
-| Machine                 | Apple M4, 10 cores, macOS 26.2                          |
-| Python                  | 3.14.2                                                  |
-| `aiohttp` / `pydantic`  | 3.14.3 / 2.13.5                                         |
-| `mcp`                   | 2.0.0                                                   |
-| `uvicorn` / `starlette` | 0.53.0 / 1.6.0                                          |
-| Transport               | Streamable HTTP over loopback, no TLS                   |
-| Settings                | `--calls 1500 --warmup 200 --repeats 3`                 |
-| Logging                 | every logger at ERROR, on both sides                    |
+The serial runs use 1,500 measured calls, 200 warmup calls, and three rotated
+rounds per row. The concurrent run uses 3,000 calls, 200 warmup calls, two
+rounds, and up to 32 calls in flight. Each table reports the fastest round
+per row and the latency percentiles from that round.
 
 ## Results
 
-### Server, one call at a time
+### Server, add (model result)
 
-`add(a, b)` -- an argument model in, a result model out.
+| Pairing | Calls/s | Mean (ms) | p50 (ms) | p95 (ms) | p99 (ms) | Of floor |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| aiohttp-tiny-mcp 2024-11-05 | 5745 | 0.17 | 0.16 | 0.21 | 0.32 | 55% |
+| aiohttp-tiny-mcp 2025-03-26 | 6001 | 0.16 | 0.15 | 0.20 | 0.32 | 58% |
+| aiohttp-tiny-mcp 2025-06-18 | 6037 | 0.16 | 0.15 | 0.23 | 0.32 | 58% |
+| aiohttp-tiny-mcp 2025-11-25 | 6248 | 0.16 | 0.15 | 0.18 | 0.26 | 60% |
+| aiohttp-tiny-mcp 2026-07-28 | 5956 | 0.16 | 0.15 | 0.21 | 0.39 | 57% |
+| SDK stateless 2024-11-05 | 802 | 1.20 | 1.05 | 1.59 | 2.55 | 13% |
+| SDK stateless 2025-03-26 | 776 | 1.24 | 1.05 | 1.70 | 2.90 | 12% |
+| SDK stateless 2025-06-18 | 726 | 1.33 | 1.08 | 1.42 | 3.11 | 11% |
+| SDK stateless 2025-11-25 | 752 | 1.28 | 1.06 | 1.63 | 2.43 | 12% |
+| SDK stateless 2026-07-28 | 1347 | 0.73 | 0.67 | 0.88 | 2.15 | 21% |
+| SDK session 2024-11-05 | 852 | 1.13 | 0.93 | 1.21 | 2.58 | 13% |
+| SDK session 2025-03-26 | 824 | 1.17 | 0.92 | 1.60 | 2.81 | 13% |
+| SDK session 2025-06-18 | 846 | 1.14 | 0.90 | 1.28 | 2.32 | 13% |
+| SDK session 2025-11-25 | 853 | 1.13 | 0.90 | 1.28 | 2.64 | 13% |
+| SDK session 2026-07-28 | 1404 | 0.71 | 0.66 | 0.90 | 1.63 | 22% |
+| aiohttp, no protocol | 10411 | 0.09 | 0.08 | 0.10 | 0.14 | 100% |
+| uvicorn, no protocol | 6329 | 0.15 | 0.14 | 0.18 | 0.31 | 100% |
 
-| Server               | Revision   | calls/s   | p50   |   p99 | of floor  |
-|----------------------|------------|----------:|------:|-----:|----------:|
-| aiohttp-tiny-mcp     | 2024-11-05 |      5722 |  0.16 |  0.18 |   **79%** |
-| aiohttp-tiny-mcp     | 2025-03-26 |      5685 |  0.16 |  0.19 |   **79%** |
-| aiohttp-tiny-mcp     | 2025-06-18 |      5839 |  0.15 |  0.18 |   **81%** |
-| aiohttp-tiny-mcp     | 2025-11-25 |      5780 |  0.15 |  0.18 |   **80%** |
-| aiohttp-tiny-mcp     | 2026-07-28 |      5458 |  0.16 |  0.19 |   **76%** |
-| SDK, stateless       | 2024-11-05 |      1085 |  0.83 |  1.16 |       22% |
-| SDK, stateless       | 2025-03-26 |      1105 |  0.80 |  1.18 |       23% |
-| SDK, stateless       | 2025-06-18 |      1079 |  0.82 |  1.26 |       22% |
-| SDK, stateless       | 2025-11-25 |      1095 |  0.82 |  1.11 |       23% |
-| SDK, stateless       | 2026-07-28 |      1649 |  0.58 |  0.68 |       34% |
-| SDK, with session    | 2024-11-05 |      1263 |  0.70 |  0.95 |       26% |
-| SDK, with session    | 2025-03-26 |      1237 |  0.70 |  1.44 |       25% |
-| SDK, with session    | 2025-06-18 |      1277 |  0.70 |  1.30 |       26% |
-| SDK, with session    | 2025-11-25 |      1235 |  0.70 |  1.30 |       25% |
-| SDK, with session    | 2026-07-28 |      1616 |  0.58 |  0.63 |       33% |
-| aiohttp, no protocol | --         |      7208 |  0.12 |  0.16 |      100% |
-| uvicorn, no protocol | --         |      4866 |  0.19 |  0.21 |      100% |
+### Server, text (string result)
 
-`text()` -- no arguments, a plain string out.
+| Pairing | Calls/s | Mean (ms) | p50 (ms) | p95 (ms) | p99 (ms) | Of floor |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| aiohttp-tiny-mcp 2024-11-05 | 6263 | 0.15 | 0.15 | 0.18 | 0.22 | 64% |
+| aiohttp-tiny-mcp 2025-03-26 | 5610 | 0.17 | 0.14 | 0.32 | 0.43 | 57% |
+| aiohttp-tiny-mcp 2025-06-18 | 6744 | 0.14 | 0.14 | 0.16 | 0.20 | 69% |
+| aiohttp-tiny-mcp 2025-11-25 | 6785 | 0.14 | 0.14 | 0.16 | 0.19 | 69% |
+| aiohttp-tiny-mcp 2026-07-28 | 6148 | 0.16 | 0.14 | 0.19 | 0.30 | 63% |
+| SDK stateless 2024-11-05 | 740 | 1.28 | 1.03 | 2.34 | 4.00 | 12% |
+| SDK stateless 2025-03-26 | 777 | 1.24 | 1.02 | 1.53 | 2.89 | 12% |
+| SDK stateless 2025-06-18 | 753 | 1.28 | 1.02 | 1.54 | 2.45 | 12% |
+| SDK stateless 2025-11-25 | 775 | 1.24 | 1.01 | 1.59 | 3.05 | 12% |
+| SDK stateless 2026-07-28 | 1667 | 0.59 | 0.54 | 0.77 | 1.61 | 26% |
+| SDK session 2024-11-05 | 812 | 1.18 | 0.90 | 2.01 | 2.77 | 13% |
+| SDK session 2025-03-26 | 873 | 1.09 | 0.90 | 1.24 | 1.74 | 14% |
+| SDK session 2025-06-18 | 859 | 1.11 | 0.90 | 1.42 | 2.18 | 14% |
+| SDK session 2025-11-25 | 866 | 1.11 | 0.88 | 1.10 | 2.77 | 14% |
+| SDK session 2026-07-28 | 1711 | 0.58 | 0.54 | 0.64 | 1.95 | 27% |
+| aiohttp, no protocol | 9821 | 0.10 | 0.08 | 0.12 | 0.30 | 100% |
+| uvicorn, no protocol | 6310 | 0.15 | 0.14 | 0.18 | 0.30 | 100% |
 
-| Server               | Revision   | calls/s   | p50   |   p99 | of floor  |
-|----------------------|------------|----------:|------:|-----:|----------:|
-| aiohttp-tiny-mcp     | 2024-11-05 |      5621 |  0.16 |  0.18 |   **78%** |
-| aiohttp-tiny-mcp     | 2025-03-26 |      5624 |  0.16 |  0.18 |   **78%** |
-| aiohttp-tiny-mcp     | 2025-06-18 |      5680 |  0.16 |  0.18 |   **79%** |
-| aiohttp-tiny-mcp     | 2025-11-25 |      5680 |  0.16 |  0.18 |   **79%** |
-| aiohttp-tiny-mcp     | 2026-07-28 |      5428 |  0.17 |  0.19 |   **75%** |
-| SDK, stateless       | 2024-11-05 |      1059 |  0.84 |  1.52 |       22% |
-| SDK, stateless       | 2025-03-26 |      1086 |  0.82 |  1.47 |       23% |
-| SDK, stateless       | 2025-06-18 |      1062 |  0.83 |  1.52 |       22% |
-| SDK, stateless       | 2025-11-25 |      1060 |  0.83 |  1.17 |       22% |
-| SDK, stateless       | 2026-07-28 |      1888 |  0.51 |  0.54 |       39% |
-| SDK, with session    | 2024-11-05 |      1272 |  0.70 |  1.39 |       26% |
-| SDK, with session    | 2025-03-26 |      1288 |  0.69 |  1.36 |       27% |
-| SDK, with session    | 2025-06-18 |      1278 |  0.70 |  1.41 |       27% |
-| SDK, with session    | 2025-11-25 |      1239 |  0.69 |  1.34 |       26% |
-| SDK, with session    | 2026-07-28 |      1909 |  0.50 |  0.56 |       40% |
-| aiohttp, no protocol | --         |      7193 |  0.12 |  0.14 |      100% |
-| uvicorn, no protocol | --         |      4809 |  0.19 |  0.22 |      100% |
+### Server, tools/list
 
-`tools/list` -- the catalogue, which is where a tool's schema is written.
+| Pairing | Calls/s | Mean (ms) | p50 (ms) | p95 (ms) | p99 (ms) | Of floor |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| aiohttp-tiny-mcp 2024-11-05 | 6379 | 0.15 | 0.14 | 0.17 | 0.30 | 60% |
+| aiohttp-tiny-mcp 2025-03-26 | 6568 | 0.15 | 0.14 | 0.16 | 0.23 | 62% |
+| aiohttp-tiny-mcp 2025-06-18 | 6307 | 0.15 | 0.14 | 0.17 | 0.27 | 59% |
+| aiohttp-tiny-mcp 2025-11-25 | 6406 | 0.15 | 0.14 | 0.18 | 0.27 | 60% |
+| aiohttp-tiny-mcp 2026-07-28 | 6028 | 0.16 | 0.15 | 0.19 | 0.32 | 57% |
+| SDK stateless 2024-11-05 | 892 | 1.08 | 0.93 | 1.48 | 2.65 | 15% |
+| SDK stateless 2025-03-26 | 862 | 1.12 | 0.93 | 1.22 | 2.31 | 14% |
+| SDK stateless 2025-06-18 | 830 | 1.16 | 0.92 | 1.39 | 2.08 | 14% |
+| SDK stateless 2025-11-25 | 823 | 1.17 | 0.93 | 1.49 | 2.62 | 13% |
+| SDK stateless 2026-07-28 | 2155 | 0.46 | 0.43 | 0.58 | 1.01 | 35% |
+| SDK session 2024-11-05 | 949 | 1.01 | 0.80 | 1.05 | 2.47 | 15% |
+| SDK session 2025-03-26 | 977 | 0.98 | 0.80 | 0.96 | 2.46 | 16% |
+| SDK session 2025-06-18 | 941 | 1.02 | 0.80 | 1.27 | 2.55 | 15% |
+| SDK session 2025-11-25 | 959 | 1.00 | 0.80 | 0.90 | 1.99 | 16% |
+| SDK session 2026-07-28 | 2135 | 0.46 | 0.42 | 0.48 | 1.02 | 35% |
+| aiohttp, no protocol | 10608 | 0.09 | 0.08 | 0.11 | 0.23 | 100% |
+| uvicorn, no protocol | 6123 | 0.16 | 0.15 | 0.20 | 0.32 | 100% |
 
-| Server               | Revision   | calls/s   | p50   |   p99 | of floor  |
-|----------------------|------------|----------:|------:|-----:|----------:|
-| aiohttp-tiny-mcp     | 2024-11-05 |      5637 |  0.16 |  0.18 |   **80%** |
-| aiohttp-tiny-mcp     | 2025-03-26 |      5631 |  0.16 |  0.18 |   **79%** |
-| aiohttp-tiny-mcp     | 2025-06-18 |      5616 |  0.16 |  0.18 |   **79%** |
-| aiohttp-tiny-mcp     | 2025-11-25 |      5615 |  0.16 |  0.18 |   **79%** |
-| aiohttp-tiny-mcp     | 2026-07-28 |      5420 |  0.17 |  0.19 |   **76%** |
-| SDK, stateless       | 2024-11-05 |      1145 |  0.82 |  1.36 |       24% |
-| SDK, stateless       | 2025-03-26 |      1171 |  0.75 |  1.41 |       24% |
-| SDK, stateless       | 2025-06-18 |      1187 |  0.74 |  1.22 |       25% |
-| SDK, stateless       | 2025-11-25 |      1181 |  0.74 |  1.00 |       24% |
-| SDK, stateless       | 2026-07-28 |      2368 |  0.40 |  0.51 |       49% |
-| SDK, with session    | 2024-11-05 |      1368 |  0.62 |  1.28 |       28% |
-| SDK, with session    | 2025-03-26 |      1386 |  0.62 |  0.85 |       29% |
-| SDK, with session    | 2025-06-18 |      1408 |  0.62 |  0.83 |       29% |
-| SDK, with session    | 2025-11-25 |      1392 |  0.63 |  1.14 |       29% |
-| SDK, with session    | 2026-07-28 |      2291 |  0.40 |  0.47 |       47% |
-| aiohttp, no protocol | --         |      7088 |  0.12 |  0.14 |      100% |
-| uvicorn, no protocol | --         |      4824 |  0.19 |  0.25 |      100% |
+### Client, add (model result)
 
-Three things are in these tables.
+| Pairing | Calls/s | Mean (ms) | p50 (ms) | p95 (ms) | p99 (ms) |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| raw aiohttp -> aiohttp-tiny-mcp server | 6104 | 0.16 | 0.14 | 0.17 | 0.71 |
+| raw aiohttp -> SDK stateless | 768 | 1.26 | 1.03 | 1.64 | 2.58 |
+| raw aiohttp -> SDK session | 912 | 1.05 | 0.91 | 1.72 | 3.02 |
+| aiohttp-tiny-mcp 2024-11-05 -> aiohttp-tiny-mcp server | 4794 | 0.20 | 0.19 | 0.23 | 0.36 |
+| aiohttp-tiny-mcp 2025-03-26 -> aiohttp-tiny-mcp server | 4779 | 0.20 | 0.19 | 0.22 | 0.57 |
+| aiohttp-tiny-mcp 2025-06-18 -> aiohttp-tiny-mcp server | 4650 | 0.21 | 0.18 | 0.27 | 0.61 |
+| aiohttp-tiny-mcp 2025-11-25 -> aiohttp-tiny-mcp server | 4742 | 0.20 | 0.18 | 0.25 | 0.76 |
+| aiohttp-tiny-mcp 2026-07-28 -> aiohttp-tiny-mcp server | 4179 | 0.23 | 0.21 | 0.28 | 0.61 |
+| aiohttp-tiny-mcp 2024-11-05 -> SDK stateless | 790 | 1.23 | 0.96 | 1.50 | 2.74 |
+| aiohttp-tiny-mcp 2025-03-26 -> SDK stateless | 856 | 1.12 | 0.93 | 1.43 | 2.43 |
+| aiohttp-tiny-mcp 2025-06-18 -> SDK stateless | 916 | 1.06 | 0.94 | 1.58 | 2.56 |
+| aiohttp-tiny-mcp 2025-11-25 -> SDK stateless | 839 | 1.16 | 0.95 | 1.47 | 2.03 |
+| aiohttp-tiny-mcp 2026-07-28 -> SDK stateless | 1211 | 0.81 | 0.74 | 1.30 | 2.08 |
+| aiohttp-tiny-mcp 2024-11-05 -> SDK session | 1005 | 0.94 | 0.82 | 1.62 | 2.45 |
+| aiohttp-tiny-mcp 2025-03-26 -> SDK session | 981 | 0.91 | 0.81 | 1.14 | 2.41 |
+| aiohttp-tiny-mcp 2025-06-18 -> SDK session | 1064 | 0.91 | 0.80 | 1.04 | 2.06 |
+| aiohttp-tiny-mcp 2025-11-25 -> SDK session | 939 | 1.03 | 0.81 | 1.96 | 2.68 |
+| aiohttp-tiny-mcp 2026-07-28 -> SDK session | 1289 | 0.76 | 0.71 | 0.91 | 1.59 |
+| official SDK 2025-11-25 -> aiohttp-tiny-mcp server | 1454 | 0.67 | 0.64 | 0.79 | 1.26 |
+| official SDK 2025-11-25 -> SDK stateless | 506 | 1.94 | 1.68 | 2.43 | 4.60 |
+| official SDK 2025-11-25 -> SDK session | 539 | 1.82 | 1.57 | 2.41 | 3.71 |
 
-**The revision costs this package nothing.** Five revisions, 75-81% of the
-floor, and the spread between them is smaller than the spread between two runs
-of the same row. The adapters are not free, but they are below the noise.
+### Client, text (string result)
 
-**The session costs the SDK more than everything else it does.** Same server,
-same handler, same stack; only the revision differs. The four revisions that
-carry a session sit at 22-29% of the floor. `2026-07-28`, which has no
-session, reaches 33-40% on a call and 47-49% on a listing. Removing the
-session is worth more than halving the work.
+| Pairing | Calls/s | Mean (ms) | p50 (ms) | p95 (ms) | p99 (ms) |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| raw aiohttp -> aiohttp-tiny-mcp server | 5981 | 0.16 | 0.14 | 0.27 | 0.51 |
+| raw aiohttp -> SDK stateless | 762 | 1.26 | 1.02 | 1.82 | 2.58 |
+| raw aiohttp -> SDK session | 892 | 1.08 | 0.88 | 1.15 | 2.33 |
+| aiohttp-tiny-mcp 2024-11-05 -> aiohttp-tiny-mcp server | 5031 | 0.19 | 0.18 | 0.22 | 0.35 |
+| aiohttp-tiny-mcp 2025-03-26 -> aiohttp-tiny-mcp server | 5154 | 0.19 | 0.18 | 0.21 | 0.28 |
+| aiohttp-tiny-mcp 2025-06-18 -> aiohttp-tiny-mcp server | 5203 | 0.18 | 0.18 | 0.20 | 0.32 |
+| aiohttp-tiny-mcp 2025-11-25 -> aiohttp-tiny-mcp server | 5045 | 0.19 | 0.18 | 0.22 | 0.34 |
+| aiohttp-tiny-mcp 2026-07-28 -> aiohttp-tiny-mcp server | 4620 | 0.21 | 0.20 | 0.25 | 0.34 |
+| aiohttp-tiny-mcp 2024-11-05 -> SDK stateless | 873 | 1.11 | 0.96 | 1.32 | 2.46 |
+| aiohttp-tiny-mcp 2025-03-26 -> SDK stateless | 883 | 1.09 | 0.92 | 1.49 | 2.21 |
+| aiohttp-tiny-mcp 2025-06-18 -> SDK stateless | 905 | 1.07 | 0.92 | 1.20 | 1.88 |
+| aiohttp-tiny-mcp 2025-11-25 -> SDK stateless | 868 | 1.12 | 0.94 | 1.46 | 2.09 |
+| aiohttp-tiny-mcp 2026-07-28 -> SDK stateless | 1531 | 0.64 | 0.62 | 0.71 | 1.18 |
+| aiohttp-tiny-mcp 2024-11-05 -> SDK session | 997 | 0.97 | 0.81 | 1.10 | 2.72 |
+| aiohttp-tiny-mcp 2025-03-26 -> SDK session | 1075 | 0.90 | 0.80 | 1.13 | 2.31 |
+| aiohttp-tiny-mcp 2025-06-18 -> SDK session | 992 | 0.98 | 0.79 | 1.34 | 2.97 |
+| aiohttp-tiny-mcp 2025-11-25 -> SDK session | 1094 | 0.85 | 0.78 | 1.00 | 1.45 |
+| aiohttp-tiny-mcp 2026-07-28 -> SDK session | 1548 | 0.63 | 0.59 | 0.75 | 1.37 |
+| official SDK 2025-11-25 -> aiohttp-tiny-mcp server | 1581 | 0.62 | 0.59 | 0.72 | 1.27 |
+| official SDK 2025-11-25 -> SDK stateless | 521 | 1.88 | 1.65 | 2.27 | 4.75 |
+| official SDK 2025-11-25 -> SDK session | 568 | 1.73 | 1.53 | 2.07 | 3.24 |
 
-**The SDK's stateless mode is the slower of its two.** `stateless_http=True`
-does not remove the session -- it builds and destroys one per request -- and
-on the legacy revisions it costs 12-16% against keeping one. The name suggests
-the opposite.
+### Stdio, add (model result)
 
-Listing costs this package the same as calling, because a tool definition is
-derived once per revision and kept on the tool rather than rebuilt per
-request. The two-field tool here cannot show what that saves; see
-[what a schema costs](#what-a-schema-costs).
+| Pairing | Calls/s | Mean (ms) | p50 (ms) | p95 (ms) | p99 (ms) |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| raw pipe -> no protocol | 47734 | 0.02 | 0.02 | 0.02 | 0.03 |
+| aiohttp-tiny-mcp 2024-11-05 -> aiohttp-tiny-mcp | 12770 | 0.07 | 0.06 | 0.09 | 0.20 |
+| aiohttp-tiny-mcp 2025-03-26 -> aiohttp-tiny-mcp | 12379 | 0.08 | 0.06 | 0.10 | 0.31 |
+| aiohttp-tiny-mcp 2025-06-18 -> aiohttp-tiny-mcp | 12403 | 0.06 | 0.05 | 0.09 | 0.23 |
+| aiohttp-tiny-mcp 2025-11-25 -> aiohttp-tiny-mcp | 12576 | 0.07 | 0.05 | 0.10 | 0.35 |
+| aiohttp-tiny-mcp 2026-07-28 -> aiohttp-tiny-mcp | 11480 | 0.08 | 0.06 | 0.13 | 0.41 |
+| official SDK 2025-11-25 -> aiohttp-tiny-mcp | 6567 | 0.14 | 0.11 | 0.18 | 0.67 |
+| aiohttp-tiny-mcp 2024-11-05 -> SDK | 3064 | 0.32 | 0.30 | 0.44 | 0.65 |
+| aiohttp-tiny-mcp 2025-03-26 -> SDK | 3081 | 0.32 | 0.28 | 0.45 | 0.75 |
+| aiohttp-tiny-mcp 2025-06-18 -> SDK | 2957 | 0.33 | 0.29 | 0.58 | 0.87 |
+| aiohttp-tiny-mcp 2025-11-25 -> SDK | 2862 | 0.34 | 0.32 | 0.48 | 0.87 |
+| aiohttp-tiny-mcp 2026-07-28 -> SDK | 2508 | 0.39 | 0.36 | 0.54 | 0.91 |
+| official SDK 2025-11-25 -> SDK | 2203 | 0.44 | 0.40 | 0.66 | 1.03 |
+
+### Stdio, text (string result)
+
+| Pairing | Calls/s | Mean (ms) | p50 (ms) | p95 (ms) | p99 (ms) |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| raw pipe -> no protocol | 52581 | 0.02 | 0.02 | 0.02 | 0.02 |
+| aiohttp-tiny-mcp 2024-11-05 -> aiohttp-tiny-mcp | 15950 | 0.06 | 0.05 | 0.07 | 0.15 |
+| aiohttp-tiny-mcp 2025-03-26 -> aiohttp-tiny-mcp | 17989 | 0.05 | 0.05 | 0.06 | 0.12 |
+| aiohttp-tiny-mcp 2025-06-18 -> aiohttp-tiny-mcp | 19056 | 0.05 | 0.04 | 0.05 | 0.10 |
+| aiohttp-tiny-mcp 2025-11-25 -> aiohttp-tiny-mcp | 18744 | 0.05 | 0.04 | 0.06 | 0.16 |
+| aiohttp-tiny-mcp 2026-07-28 -> aiohttp-tiny-mcp | 14424 | 0.06 | 0.05 | 0.07 | 0.21 |
+| official SDK 2025-11-25 -> aiohttp-tiny-mcp | 9293 | 0.10 | 0.09 | 0.12 | 0.29 |
+| aiohttp-tiny-mcp 2024-11-05 -> SDK | 2704 | 0.36 | 0.30 | 0.65 | 1.31 |
+| aiohttp-tiny-mcp 2025-03-26 -> SDK | 2763 | 0.35 | 0.32 | 0.59 | 1.01 |
+| aiohttp-tiny-mcp 2025-06-18 -> SDK | 2950 | 0.33 | 0.31 | 0.47 | 1.02 |
+| aiohttp-tiny-mcp 2025-11-25 -> SDK | 2735 | 0.36 | 0.32 | 0.63 | 0.97 |
+| aiohttp-tiny-mcp 2026-07-28 -> SDK | 2388 | 0.41 | 0.37 | 0.68 | 1.15 |
+| official SDK 2025-11-25 -> SDK | 2414 | 0.40 | 0.36 | 0.58 | 0.98 |
 
 ### Server, 32 calls in flight
 
-`add(a, b)`, `--concurrency 32 --calls 3000 --repeats 2`. Latency stops being
-the reciprocal of the rate here; read the rate.
-
-| Server               | Revision   | calls/s   | p50   |    p99 | of floor  |
-|----------------------|------------|----------:|------:|------:|----------:|
-| aiohttp-tiny-mcp     | 2024-11-05 |      8147 |  3.22 |   6.37 |   **64%** |
-| aiohttp-tiny-mcp     | 2025-03-26 |      7982 |  3.25 |   4.82 |   **63%** |
-| aiohttp-tiny-mcp     | 2025-06-18 |      8325 |  3.13 |   5.20 |   **66%** |
-| aiohttp-tiny-mcp     | 2025-11-25 |      8299 |  3.13 |   5.44 |   **66%** |
-| aiohttp-tiny-mcp     | 2026-07-28 |      7673 |  3.43 |   5.17 |   **61%** |
-| SDK, stateless       | 2024-11-05 |      1571 | 18.48 |  57.16 |       20% |
-| SDK, stateless       | 2025-03-26 |      1549 | 18.00 |  44.80 |       20% |
-| SDK, stateless       | 2025-06-18 |      1506 | 17.78 |  55.54 |       20% |
-| SDK, stateless       | 2025-11-25 |      1448 | 18.26 |  60.96 |       19% |
-| SDK, stateless       | 2026-07-28 |      2354 | 11.82 |  36.81 |       31% |
-| SDK, with session    | 2024-11-05 |      1422 | 21.83 |  31.25 |       18% |
-| SDK, with session    | 2025-03-26 |      1413 | 21.25 |  75.51 |       18% |
-| SDK, with session    | 2025-06-18 |      1406 | 21.95 |  31.75 |       18% |
-| SDK, with session    | 2025-11-25 |      1402 | 21.47 |  92.26 |       18% |
-| SDK, with session    | 2026-07-28 |      2259 | 12.05 |  37.90 |       29% |
-| aiohttp, no protocol | --         |     12654 |  1.66 |   4.93 |      100% |
-| uvicorn, no protocol | --         |      7698 |  3.53 |   5.96 |      100% |
-
-Under load the gap widens rather than closes: 5-6x on the rate, and a tail one
-order of magnitude apart -- 4.8-6.4 ms against 31-92 ms at the 99th
-percentile. The SDK's session revisions reach 18-20% of their floor here
-against 25-27% one call at a time.
-
-### Client, one call at a time
-
-`add(a, b)`. The server is the constant down each block, so what varies is the
-cost of building a request and reading a reply.
-
-| Client                          | Server            | calls/s   |    p50   |     p99  |
-|---------------------------------|-------------------|----------:|---------:|---------:|
-| raw aiohttp, no client          | aiohttp-tiny-mcp  |      5632 |     0.16 |     0.18 |
-| aiohttp-tiny-mcp 2024-11-05     | aiohttp-tiny-mcp  |      5112 |     0.19 |     0.22 |
-| aiohttp-tiny-mcp 2025-03-26     | aiohttp-tiny-mcp  |      5169 |     0.19 |     0.21 |
-| aiohttp-tiny-mcp 2025-06-18     | aiohttp-tiny-mcp  |      5225 |     0.18 |     0.21 |
-| aiohttp-tiny-mcp 2025-11-25     | aiohttp-tiny-mcp  |      5247 |     0.18 |     0.20 |
-| aiohttp-tiny-mcp 2026-07-28     | aiohttp-tiny-mcp  |      4888 |     0.20 |     0.23 |
-| **official SDK 2025-11-25** | **aiohttp-tiny-mcp** | **1465** | **0.65** | **0.76** |
-| raw aiohttp, no client          | SDK stateless     |      1034 |     0.89 |     1.31 |
-| aiohttp-tiny-mcp 2024-11-05     | SDK stateless     |      1135 |     0.83 |     0.99 |
-| aiohttp-tiny-mcp 2025-03-26     | SDK stateless     |      1130 |     0.83 |     1.10 |
-| aiohttp-tiny-mcp 2025-06-18     | SDK stateless     |      1125 |     0.83 |     0.95 |
-| aiohttp-tiny-mcp 2025-11-25     | SDK stateless     |      1124 |     0.83 |     1.00 |
-| aiohttp-tiny-mcp 2026-07-28     | SDK stateless     |      1658 |     0.59 |     0.68 |
-| **official SDK 2025-11-25** | **SDK stateless** | **613** | **1.54** | **1.94** |
-| raw aiohttp, no client          | SDK session       |      1237 |     0.71 |     1.39 |
-| aiohttp-tiny-mcp 2024-11-05     | SDK session       |      1326 |     0.70 |     0.83 |
-| aiohttp-tiny-mcp 2025-03-26     | SDK session       |      1318 |     0.71 |     0.87 |
-| aiohttp-tiny-mcp 2025-06-18     | SDK session       |      1339 |     0.70 |     0.97 |
-| aiohttp-tiny-mcp 2025-11-25     | SDK session       |      1293 |     0.71 |     1.09 |
-| aiohttp-tiny-mcp 2026-07-28     | SDK session       |      1656 |     0.59 |     0.67 |
-| **official SDK 2025-11-25** | **SDK session** | **652** | **1.44** | **1.84** |
-
-Against one server, this package's client runs at 87-93% of a hand-written
-`aiohttp` loop. Against the same server the two clients are 5247 and 1465
-calls a second: **3.6x**, or about half a millisecond of client-side work per
-call. On the SDK's own servers the two are 1124 and 613: **1.8x**.
-
-The cross pairings work in both directions. This package's client speaks all
-five revisions to both SDK servers, and the official client speaks to this
-one -- it negotiates `2025-11-25` there, which is the newest revision it and
-this server agree on through a handshake.
-
-### Over stdio
-
-`--calls 1500 --warmup 200 --repeats 3`. One subprocess, one pipe.
-
-| Pairing                                          | `add`, a model  | `text`, a string   |
-|--------------------------------------------------|----------------:|-------------------:|
-| raw pipe, no protocol                            |           16330 |              15787 |
-| aiohttp-tiny-mcp 2024-11-05 client and server    |        **8341** |           **8653** |
-| aiohttp-tiny-mcp 2025-03-26 client and server    |        **8285** |           **8811** |
-| aiohttp-tiny-mcp 2025-06-18 client and server    |        **8313** |           **9002** |
-| aiohttp-tiny-mcp 2025-11-25 client and server    |        **8486** |           **8931** |
-| aiohttp-tiny-mcp 2026-07-28 client and server    |        **7030** |           **7152** |
-| official SDK client -> aiohttp-tiny-mcp server   |            3812 |               4094 |
-| aiohttp-tiny-mcp 2024-11-05 client -> SDK server |            2051 |               2060 |
-| aiohttp-tiny-mcp 2025-03-26 client -> SDK server |            2069 |               2062 |
-| aiohttp-tiny-mcp 2025-06-18 client -> SDK server |            2067 |               2072 |
-| aiohttp-tiny-mcp 2025-11-25 client -> SDK server |            2051 |               2070 |
-| aiohttp-tiny-mcp 2026-07-28 client -> SDK server |            1926 |               1942 |
-| official SDK client and server                   |            1573 |               1581 |
-
-The comparison with the fewest things in it, and the largest ratios. Against
-the same server the two clients are 8486 and 3812; against the same client the
-two servers are 8486 and 2051. Nothing here is a web framework: it is a pipe,
-a process boundary, and the protocol.
-
-`2026-07-28` is the slowest revision for this package over stdio, by about
-17%. That is the one place a revision shows up at all, and it is the newest
-one: it carries the protocol version and client capabilities in `_meta` on
-every request, where the others state them once in a handshake.
+| Pairing | Calls/s | Mean (ms) | p50 (ms) | p95 (ms) | p99 (ms) | Of floor |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| aiohttp-tiny-mcp 2024-11-05 | 8323 | 3.21 | 3.07 | 3.86 | 10.29 | 59% |
+| aiohttp-tiny-mcp 2025-03-26 | 8340 | 3.07 | 3.01 | 3.67 | 5.06 | 59% |
+| aiohttp-tiny-mcp 2025-06-18 | 8594 | 3.04 | 2.93 | 3.84 | 6.28 | 61% |
+| aiohttp-tiny-mcp 2025-11-25 | 8446 | 3.07 | 2.99 | 3.53 | 5.70 | 60% |
+| aiohttp-tiny-mcp 2026-07-28 | 8140 | 3.21 | 3.12 | 3.87 | 5.61 | 58% |
+| SDK stateless 2024-11-05 | 1007 | 30.20 | 28.36 | 51.98 | 77.62 | 13% |
+| SDK stateless 2025-03-26 | 1016 | 29.46 | 23.91 | 69.47 | 104.87 | 13% |
+| SDK stateless 2025-06-18 | 949 | 31.81 | 25.19 | 90.38 | 120.52 | 12% |
+| SDK stateless 2025-11-25 | 913 | 33.12 | 28.20 | 65.75 | 159.26 | 12% |
+| SDK stateless 2026-07-28 | 1599 | 18.36 | 15.65 | 42.80 | 79.26 | 20% |
+| SDK session 2024-11-05 | 809 | 39.10 | 36.11 | 55.40 | 155.99 | 10% |
+| SDK session 2025-03-26 | 827 | 38.20 | 34.95 | 52.15 | 188.42 | 10% |
+| SDK session 2025-06-18 | 795 | 39.23 | 36.26 | 50.66 | 197.07 | 10% |
+| SDK session 2025-11-25 | 755 | 41.70 | 36.05 | 57.76 | 306.89 | 10% |
+| SDK session 2026-07-28 | 1530 | 19.12 | 16.94 | 36.57 | 57.64 | 19% |
+| aiohttp, no protocol | 14112 | 1.62 | 1.48 | 2.50 | 5.77 | 100% |
+| uvicorn, no protocol | 7879 | 3.31 | 2.88 | 5.97 | 12.54 | 100% |
 
 ### What a schema costs
 
-```
+```text
 No HTTP. Answer sizes are the bytes the server would write.
 
 small schema
-2024-11-05 tools/call                  50344 ops/s     19.9 us    104 B
-2024-11-05 tools/list                  77547 ops/s     12.9 us    303 B
-2025-03-26 tools/call                  51114 ops/s     19.6 us    104 B
-2025-03-26 tools/list                  75877 ops/s     13.2 us    303 B
-2025-06-18 tools/call                  54161 ops/s     18.5 us    137 B
-2025-06-18 tools/list                  73488 ops/s     13.6 us    489 B
-2025-11-25 tools/call                  54950 ops/s     18.2 us    137 B
-2025-11-25 tools/list                  73870 ops/s     13.5 us    489 B
-2026-07-28 tools/call                  40226 ops/s     24.9 us    249 B
-2026-07-28 tools/list                  50668 ops/s     19.7 us    634 B
+2024-11-05 tools/call                  46801 ops/s     21.4 us    104 B
+2024-11-05 tools/list                  78218 ops/s     12.8 us    303 B
+2025-03-26 tools/call                  57804 ops/s     17.3 us    104 B
+2025-03-26 tools/list                  79616 ops/s     12.6 us    303 B
+2025-06-18 tools/call                  65133 ops/s     15.4 us    137 B
+2025-06-18 tools/list                  77070 ops/s     13.0 us    489 B
+2025-11-25 tools/call                  61603 ops/s     16.2 us    137 B
+2025-11-25 tools/list                  74117 ops/s     13.5 us    489 B
+2026-07-28 tools/call                  46903 ops/s     21.3 us    249 B
+2026-07-28 tools/list                  58353 ops/s     17.1 us    634 B
 
 fat schema
-2024-11-05 tools/call                  46426 ops/s     21.5 us    175 B
-2024-11-05 tools/list                  39437 ops/s     25.4 us   2071 B
-2025-03-26 tools/call                  49138 ops/s     20.4 us    175 B
-2025-03-26 tools/list                  39953 ops/s     25.0 us   2071 B
-2025-06-18 tools/call                  53120 ops/s     18.8 us    259 B
-2025-06-18 tools/list                  32654 ops/s     30.6 us   2999 B
-2025-11-25 tools/call                  52693 ops/s     19.0 us    259 B
-2025-11-25 tools/list                  32705 ops/s     30.6 us   2999 B
-2026-07-28 tools/call                  38048 ops/s     26.3 us    371 B
-2026-07-28 tools/list                  26639 ops/s     37.5 us   3069 B
+2024-11-05 tools/call                  52827 ops/s     18.9 us    175 B
+2024-11-05 tools/list                  40846 ops/s     24.5 us   2071 B
+2025-03-26 tools/call                  51318 ops/s     19.5 us    175 B
+2025-03-26 tools/list                  38908 ops/s     25.7 us   2071 B
+2025-06-18 tools/call                  55467 ops/s     18.0 us    259 B
+2025-06-18 tools/list                  30158 ops/s     33.2 us   2999 B
+2025-11-25 tools/call                  58259 ops/s     17.2 us    259 B
+2025-11-25 tools/list                  25572 ops/s     39.1 us   2999 B
+2026-07-28 tools/call                  36188 ops/s     27.6 us    371 B
+2026-07-28 tools/list                  28967 ops/s     34.5 us   3069 B
 ```
 
-`uv run python -m benchmarks.schema_cost`. No socket: one request is decoded,
-dispatched, encoded and serialized in this process, so what is left is the
-protocol and nothing else.
-
-`small` is the tool the tables above use. `fat` is what a real catalogue
-holds: a twelve-field argument model with two `$defs`, an enum, a `Literal`
-and nullable unions.
-
-The schema moves `tools/list`, which writes it, and leaves `tools/call`, which
-does not. On `2025-11-25` a listing goes from 14 us for 489 bytes to 31 us for
-3 KB, while a call stays at 18-19 us either way. Revisions before `2026-07-28`
-simplify a schema for the client -- inlining `$defs`, collapsing nullable
-unions, stripping `x-mcp-header` -- and that projection is built once per
-revision and kept on the tool. Were it rebuilt per request, the fat rows would
-be several times slower and `tools/call` would pay it too.
-
-`2026-07-28` is the slowest here on a listing because it writes the schema
-whole, refs and all: 3069 bytes against 2071 on `2024-11-05`, which inlines
-and simplifies.
-
-### What per-request logging costs
-
-Every logger is set to ERROR, which is a condition of the run rather than an
-option. Worth recording what that suppresses.
-
-Starting the SDK's server sets the **root** logger to INFO and installs a
-`rich` handler on it, for the whole process. Importing `mcp` alone does not do
-this; starting the server does. From then on its stateless server writes a
-line for every session it opens and closes -- which is one per request -- and
-`httpx` writes another for every call the official client makes.
-
-Measured on `client: call` when this condition was found, on an earlier
-interpreter. The rates are not the ones in the tables above; read the last
-column:
-
-| Row | logging off | as the SDK leaves it | |
-| --- | ---: | ---: | ---: |
-| aiohttp-tiny-mcp 2025-11-25 -> aiohttp-tiny-mcp server | 3455 | 3459 | no change |
-| official SDK -> aiohttp-tiny-mcp server | 782 | 771 | -1% |
-| raw aiohttp -> SDK stateless | 839 | 695 | **-17%** |
-| aiohttp-tiny-mcp 2025-11-25 -> SDK stateless | 995 | 743 | **-25%** |
-| official SDK -> SDK stateless | 385 | 346 | -10% |
-
-The penalty lands on whoever talks to the SDK's stateless server. Its
-session-keeping mode does not log per request. This package logs nothing per
-request above DEBUG, and `aiohttp`'s client logs nothing at all, so its rows
-do not move.
-
-That cost is real for a deployment that logs at INFO. It is excluded here
-because it is not what these tables are trying to measure, and because
-excluding it treats both sides alike.
-
-## What is not measured, and one thing that does not add up
-
-- **The raw driver is a reference, not a ceiling.** Against a server that
-  frames its answers as an event stream it runs 4-10% *below* the client
-  libraries, consistently, and the cause has not been isolated: the requests
-  are byte-identical and both read the stream the same way. Read the raw row
-  as a rough floor for what the transport costs, and compare clients with each
-  other rather than with it.
-- **Loopback only.** No network, no TLS, no proxy. Every number is dominated
-  by round trips on one machine, so treat them as relative.
-- **One process.** Both servers share the machine with the driver, so this
-  compares rows within one run, never runs across machines.
-- **Trivial handlers.** Real work would swamp the differences. That is the
-  point: what is left is the protocol machinery.
-- **`2026-07-28` negotiates nothing**, having no handshake, so a server that
-  quietly serves something else there cannot be marked. On the other four a
-  row is marked `(spoke ...)` where the server refused the revision asked for.
-
-## Reading a run
-
-`calls/s` at `--concurrency 1` is really a latency measurement: one request at
-a time, so the rate is the reciprocal of the round trip. Raise the concurrency
-to ask about throughput instead. Both are worth having, and they do not rank
-the same way.
-
-Percentiles are milliseconds. Warm-up runs before the clock starts, because
-the first calls of any client pay for a connection and a cold cache, and
-reporting those beside the steady state describes neither.
+The results describe protocol overhead for small handlers. Real deployments also
+pay for network latency, TLS, application work, and any shared stores. The
+HTTP benchmark reuses one initialized client session per server.

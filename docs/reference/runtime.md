@@ -125,7 +125,7 @@ The dispatcher builds each listing from the current registry, projects it for
 the selected revision, sorts it, and applies the requested cursor. It does not
 cache serialized lists. New registrations therefore appear on the next request.
 
-On `2026-07-28`, cacheable results carry freshness hints. The default is
-`ttlMs: 0` with `cacheScope: "private"`. Resource declarations can override
-these values, and extension handlers can return `CacheableResult` subclasses.
-These hints describe client caching; they do not cache server handler results.
+On `2026-07-28`, cacheable results carry client freshness hints. Each field
+comes from the result, the resource declaration, the method default, or the
+built-in fallback, in that order. See [Cache hints](../guide/caching.md) for
+configuration examples and the rules for shared caching.

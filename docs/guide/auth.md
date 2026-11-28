@@ -18,15 +18,17 @@ flowchart TD
     C --> E["Endpoint<br/>Select namespace and check session ownership"]
 ```
 
-Replace the verifier to change token validation. Subclass `Authentication`
-to change credential extraction, challenges, or metadata.
+Replace the verifier to change token validation. Set `sources` to change
+[where credentials come from](#credential-sources). Subclass `Authentication`
+to implement a policy with its own challenge or metadata.
 
 ## Choose an integration
 
 | Requirement | Integration |
 | --- | --- |
 | Fixed accounts or a user database | [Basic authentication](#basic-authentication) |
-| API key, cookie, or existing identity | [Custom authentication](#custom-authentication) |
+| Read a token from an API key header, cookie, or query parameter | [Credential sources](#credential-sources) |
+| Verify an existing identity or define a custom challenge | [Custom authentication](#custom-authentication) |
 | Static tokens, JWT, or introspection | [OAuth Bearer authentication](#oauth-bearer-authentication) |
 | GitHub browser login | [GitHub sign-in](#github-sign-in) |
 | Another OAuth provider | [Provider adapters](#oauth-provider-adapters) |
@@ -88,12 +90,16 @@ assert principal is not None and principal.subject == "alice"
 
 `StaticBasicAuth` rejects empty credentials. Custom `verify()` implementations
 decide whether to accept them. Control characters are rejected; colons separate
-the username from the password. Passwords may contain colons. Query credentials are not read.
+the username from the password. Passwords may contain colons. Basic
+authentication reads the header by default. Use [credential sources](#credential-sources)
+to read a Basic credential from another location.
 
 ## Custom authentication
 
-Subclass `Authentication` when you need control over credential extraction
-and verification. Implement `authenticate(request)` and `challenge(refusal)`:
+Subclass `Authentication` when you need your own verification flow or challenge.
+To read a credential from a different location with a built-in policy, use
+[credential sources](#credential-sources). Implement `authenticate(request)` and
+`challenge(refusal)` in your subclass:
 
 <!-- name: async test_custom_auth -->
 ```python
@@ -279,9 +285,7 @@ assert await read_report(ReportRequest(report_id="quarterly"), bob) == CallToolR
 
 The dispatcher checks the tool scope; the handler checks ownership against
 server-side data. Calling the Python function directly bypasses dispatcher scope
-checks. For resources, prompts, and extensions, explicitly check `holds()` before
-reading or changing protected data. Scope checks do not hide tool definitions
-from the catalogue.
+checks. Scope checks do not hide tool definitions from the catalogue.
 
 ## Sending credentials
 
@@ -306,9 +310,80 @@ async with ClientSession(headers=headers) as http:
 For Bearer authentication, use `{"Authorization": "Bearer <access-token>"}`.
 The client sends the configured headers on its HTTP requests. To obtain and
 refresh OAuth tokens, pass an `OAuth` context through `Client(auth=...)`; see
-[Client OAuth](client-oauth.md). Static session headers do not refresh tokens. Basic and Bearer policies
-do not read credentials from URLs; use a custom policy when required by your
-application.
+[Client OAuth](client-oauth.md). Static session headers do not refresh tokens.
+
+### Credential sources
+
+Basic and Bearer authentication use `Header("Basic")` and `Header("Bearer")`
+by default. Passing `sources` replaces the entire list of sources.
+
+The policy calls the sources in order. A source returns `None` to continue to
+the next one. The first string ends the search, and the policy verifies it
+once. If verification fails, the policy rejects the credential. If all sources
+return `None`, the policy treats the credential as missing.
+
+(credentials-in-a-url)=
+### A credential in the URL
+
+Use `Query` if a client can send a URL but cannot set a header.
+
+<!-- name: async test_auth_query -->
+```python
+from base64 import b64encode
+
+from aiohttp.test_utils import make_mocked_request
+
+from aiohttp_tiny_mcp import (
+    Authorization,
+    Header,
+    Principal,
+    Query,
+    StaticBasicAuth,
+    StaticVerifier,
+)
+
+tokens = {
+    "alice-token": Principal(subject="alice"),
+    "bob-token": Principal(subject="bob"),
+}
+bearer = Authorization(
+    verifier=StaticVerifier(tokens),
+    resource="https://mcp.example.com/mcp",
+    sources=(Header("Bearer"), Query("access_token"), Query("token")),
+)
+query_request = make_mocked_request("POST", "/mcp?token=alice-token")
+assert (await bearer.authenticate(query_request)).subject == "alice"
+
+header_request = make_mocked_request(
+    "POST", "/mcp?token=alice-token", headers={"Authorization": "Bearer bob-token"}
+)
+assert (await bearer.authenticate(header_request)).subject == "bob"
+assert bearer.metadata()["bearer_methods_supported"] == ["header", "query"]
+
+basic = StaticBasicAuth(
+    ("alice", "example-password"),
+    sources=(Header("Basic"), Query("auth")),
+)
+encoded = b64encode(b"alice:example-password").decode("ascii")
+principal = await basic.authenticate(make_mocked_request("POST", f"/mcp?auth={encoded}"))
+assert principal is not None and principal.subject == "alice"
+```
+
+With `Header` first, a missing or empty `Authorization` header lets the policy
+try the query sources in order. A non-empty header with the wrong scheme or
+format raises `Unauthorized` and ends the search.
+`sources=(Query("token"),)` reads the query parameter alone.
+A Basic value keeps its `+` characters, which query decoding would otherwise
+turn into spaces. A Bearer token must URL-encode a literal `+` as `%2B`.
+
+Both transports read it: `POST /mcp`, and for the legacy transport both
+`GET /sse` and every `POST /messages`. The address the stream names carries no
+credential, because a server does not echo one back; a client that authenticates
+this way appends its own to that address.
+
+The URL reaches browser history, saved client settings, referrer headers, and
+proxies. Keep the lifetime of URL credentials short and prefer a header where
+the client has one. See [access-log masking](#access-log-masking).
 
 Legacy HTTP+SSE clients must authenticate both `GET /sse` and every
 `POST /messages`. A successful stream opening does not authenticate later
@@ -316,6 +391,57 @@ POSTs. Missing or invalid credentials return HTTP 401 with the configured
 challenge, before creating a session or dispatching a message. A different
 session owner receives HTTP 404. Older clients need a separately acquired
 token if they lack OAuth discovery and login support.
+
+### Custom credential sources
+
+A source can be a synchronous function. It returns a raw Bearer token or a
+Base64 Basic credential, or `None` to try the next source.
+
+<!-- name: async test_auth_custom_source -->
+```python
+from aiohttp import web
+from aiohttp.test_utils import make_mocked_request
+
+from aiohttp_tiny_mcp import Authorization, Principal, StaticVerifier
+
+
+def api_key(request: web.Request) -> str | None:
+    return request.headers.get("X-API-Key")
+
+
+auth = Authorization(
+    verifier=StaticVerifier({"example-key": Principal(subject="alice")}),
+    resource="https://mcp.example.com/mcp",
+    sources=(api_key,),
+)
+request = make_mocked_request("POST", "/mcp", headers={"X-API-Key": "example-key"})
+assert (await auth.authenticate(request)).subject == "alice"
+```
+
+The source receives the original `web.Request`. Read metadata such as headers,
+query parameters, cookies, and routing data. Leave the request body and state
+intact for the MCP handler.
+
+A custom `Authentication` policy can call `read_credential(request, sources)`
+from `aiohttp_tiny_mcp.auth` to run the same lookup.
+
+#### Access-log masking
+
+`Endpoint.setup()`, `Endpoint.app()`, and `SseEndpoint.setup()` install the
+access-log filter by default. It masks `token`, `access_token`, `secret`, `jwt`,
+and the names of `Query` sources in registered policies.
+
+If your function or wrapper policy reads another query parameter, register its
+name with the access-log filter before serving requests.
+
+```python
+from aiohttp_tiny_mcp.access_log import install_token_filter
+
+install_token_filter("api_key")
+```
+
+This adds the name to the process-wide `aiohttp.access` filter, including for
+requests rejected before authentication runs.
 
 ## Console authentication
 
@@ -338,8 +464,8 @@ server authentication message. Use **Authentication** to change credentials;
 **Connect** starts a new MCP session. Closing the dialog cancels editing without
 changing active credentials.
 
-Credentials are saved in browser `localStorage`, scoped to the console path and
-exact endpoint URL. Reloading restores matching credentials; editing the endpoint
+Credentials are saved in browser `localStorage`, scoped to the console path
+and the endpoint's origin and path. Reloading restores them. Editing the endpoint
 does not delete saved records. **Clear** removes the current endpoint's saved
 credentials and disconnects. Closing the dialog leaves saved credentials unchanged.
 If storage is unavailable, credentials stay in page memory.
@@ -494,6 +620,20 @@ oauth.setup(app)
 Console("/mcp", oauth_client_id="console").setup(app, "/console")
 ```
 
+`OAuthServer.resource()` reads the Bearer header by default. Pass `sources`
+to add [another way to send the MCP token](#credentials-in-a-url).
+
+<!-- name: async test_github_oauth_configuration -->
+```python
+from aiohttp_tiny_mcp import Header, Query
+
+auth = oauth.resource(
+    required_scopes=["reports:read"],
+    sources=(Header("Bearer"), Query("access_token")),
+)
+assert auth.metadata()["bearer_methods_supported"] == ["header", "query"]
+```
+
 The two callback URLs have different roles. `/oauth/callback` receives the
 GitHub response. `/console/oauth-callback` returns the MCP authorization code
 to the console popup. Register other MCP clients with their own `OAuthClient`
@@ -503,7 +643,7 @@ The console reads the Bearer challenge, protected-resource metadata, and
 authorization-server metadata. **Sign in with OAuth** opens a popup that redirects
 straight to GitHub. The user signs in and returns to the console.
 The console checks the response state and issuer before exchanging the code
-with PKCE. The MCP token stays in page memory. Allow popups for this page.
+with PKCE. Allow popups for this page.
 
 Explicitly registered clients skip the local consent page by default. Register
 only clients you trust. To require local confirmation for a client, set
@@ -734,6 +874,11 @@ Give resource the public MCP URL, including its path. Endpoint publishes RFC
 challenge for missing, invalid, expired, or insufficient tokens.
 authorization_servers tells an MCP client where it may obtain a token.
 
+The Python client and console send tokens obtained through OAuth in the
+`Authorization: Bearer` header. `Authorization` issues a Bearer challenge
+with any source configuration. For automatic sign-in with those clients,
+include `Header("Bearer")` or a custom source that reads that header.
+
 <!-- name: async test_auth -->
 ```python
 from pydantic import BaseModel
@@ -789,8 +934,9 @@ bind_sessions=True is also the default: a legacy HTTP session belongs to the
 principal that opened it. Do not disable it unless a separate trusted layer
 binds session IDs to callers.
 
-These checks also apply to the legacy `SseEndpoint`: both `GET /sse` and
-every `POST /messages` require the Bearer header. Verification occurs before
+These checks also apply to the legacy `SseEndpoint`. Both `GET /sse` and every
+`POST /messages` use the policy's [credential sources](#credential-sources).
+By default, `Authorization` reads the Bearer header. Verification occurs before
 opening a stream or dispatching a message. The stored session owner is checked
 on each POST, including requests handled by another worker. Historical clients
 must acquire a token separately if they lack OAuth discovery and login support.
@@ -960,6 +1106,10 @@ assert [resource.canonical for resource in root.router.resources()] == [
     auth.metadata_path,
 ]
 ```
+
+`routes()` only supplies route definitions. Call
+`install_token_filter(*registry.credential_arguments)` to enable
+[access-log masking](#access-log-masking) with manual route registration.
 
 When both HTTP transports share a protected resource, publish its metadata once:
 

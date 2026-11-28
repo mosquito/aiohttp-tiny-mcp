@@ -5,10 +5,21 @@ from __future__ import annotations
 import asyncio
 
 import pytest
+from pydantic import BaseModel
 
-from aiohttp_tiny_mcp import Client, elicit_accept, elicit_decline
+from aiohttp_tiny_mcp import (
+    Client,
+    ClientError,
+    Exchange,
+    NeedInput,
+    Registry,
+    elicit,
+    elicit_accept,
+    elicit_decline,
+)
 from aiohttp_tiny_mcp.protocol.models import CallToolResult, TextContent, TextResourceContents
 from aiohttp_tiny_mcp.protocol.selection import AdapterSet
+from aiohttp_tiny_mcp.testing import connect, over_http
 
 pytestmark = pytest.mark.asyncio
 
@@ -81,6 +92,18 @@ async def test_resources(real_server_url, adapter):
         contents = result.contents[0]
         assert isinstance(contents, TextResourceContents)
         assert "item-42" in contents.text
+
+
+@pytest.mark.parametrize("adapter", ADAPTERS, ids=lambda a: a.version)
+async def test_resource_templates(real_server_url, adapter):
+    """Every revision serves the template listing, and the helper reads every page."""
+    async with Client(real_server_url, adapter) as client:
+        await client.initialize()
+        templates = await client.list_resource_templates()
+
+    found = {entry.uri_template: entry for entry in templates}
+    assert "res://items/{id}" in found
+    assert found["res://items/{id}"].name == "item"
 
 
 @pytest.mark.parametrize("adapter", ADAPTERS, ids=lambda a: a.version)
@@ -164,6 +187,38 @@ def accepting(seen: list[str]):
         return elicit_accept({"value": len(seen)})
 
     return on_ask
+
+
+class Review(BaseModel):
+    language: str
+
+
+@pytest.mark.parametrize("transport", [connect, over_http], ids=["stdio", "http"])
+async def test_get_prompt_resumes_with_answers_and_state(transport):
+    registry = Registry("review", "1")
+
+    @registry.prompt
+    async def review(args: Review, ex: Exchange) -> str:
+        if not ex.answered("first"):
+            raise NeedInput({"first": elicit("First?")}, state=1)
+        if not ex.answered("second"):
+            assert ex.state == 1
+            raise NeedInput({"second": elicit("Second?")}, state=2)
+        assert ex.state == 2
+        return f"{args.language}: {ex.answers['first']['value']}+{ex.answers['second']['value']}"
+
+    seen: list[str] = []
+    async with transport(registry, adapter="2026-07-28", on_ask=accepting(seen)) as client:
+        result = await client.get_prompt("review", {"language": "Python"})
+    assert seen == ["First?", "Second?"]
+    content = result.messages[0].content
+    assert isinstance(content, TextContent)
+    assert content.text == "Python: 1+2"
+
+    async with transport(registry, adapter="2026-07-28") as client:
+        with pytest.raises(ClientError, match="requires input") as error:
+            await client.get_prompt("review", {"language": "Python"})
+    assert error.value.data["resultType"] == "input_required"
 
 
 @pytest.mark.parametrize("adapter", ASKABLE, ids=lambda a: a.version)

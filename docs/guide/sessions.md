@@ -254,17 +254,13 @@ Sessions and request state expire on separate schedules. Set the request-state
 TTL long enough for the interaction you expect; a follow-up call with an expired
 state identifier is rejected.
 
-Every request that carries `Mcp-Session-Id` renews the session, so the TTL is
-the longest silence a client may keep, not the longest conversation. A request
-naming a session the store no longer holds -- expired, deleted, or lost to a
-restart of a process-local store -- is answered with `404` and a JSON-RPC error,
-as the specification requires. `Client` handles that by calling `initialize`
-again and repeating the request once.
+MCP requests that load a valid `Mcp-Session-Id` renew the session. Replies to
+pushed requests receive `202` without a session lookup. A GET notification
+stream renews the TTL only on opening.
 
-An open GET notification stream does not renew the TTL after its initial request.
-A reconnect can therefore receive 404 even when the stream was open before a
-server restart. A persistent store preserves live sessions across restarts;
-it does not restore expired records.
+A lookup for an expired or deleted session returns `404` with a JSON-RPC error.
+`Client` calls `initialize` again and repeats the request once. A persistent
+store preserves live sessions across restarts.
 
 ### Diagnosing session rejection
 

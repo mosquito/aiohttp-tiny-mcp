@@ -45,7 +45,9 @@ pieces
 :caption: Writing handlers
 
 guide/tools
+guide/icons
 guide/resources
+guide/caching
 guide/extensions
 guide/extension-compatibility
 guide/dynamic-skills

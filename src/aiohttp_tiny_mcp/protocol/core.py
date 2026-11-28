@@ -6,6 +6,7 @@ import json
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import Enum
+from types import MappingProxyType
 from typing import Any
 
 from pydantic import BaseModel
@@ -256,6 +257,22 @@ def elicit(message: str, schema: dict[str, Any] | None = None) -> InputRequest:
             else {"type": "object", "properties": {}},
         },
     }
+
+
+COMPLETION_KEY = "completion"
+"""The input key a completion request and its answer share on a restart."""
+
+NEEDED_CAPABILITY: Mapping[str, str] = MappingProxyType(
+    {
+        "sampling/createMessage": "sampling",
+        "elicitation/create": "elicitation",
+    }
+)
+"""The client capability each server request needs, by the method that carries it."""
+
+QUESTIONS: frozenset[str] = frozenset({"elicitation/create"})
+"""The requests that are questions. They use the channel elicitation arrived with;
+everything else uses the one a server request has always had."""
 
 
 def elicit_accept(content: Mapping[str, Any]) -> dict[str, Any]:

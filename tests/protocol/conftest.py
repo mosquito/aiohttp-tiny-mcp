@@ -1,7 +1,7 @@
 import pytest
 from pydantic import BaseModel
 
-from aiohttp_tiny_mcp import Exchange, MemoryHub, MemorySessionStore, Registry, elicit
+from aiohttp_tiny_mcp import Exchange, Icon, MemoryHub, MemorySessionStore, Registry, elicit
 from aiohttp_tiny_mcp.protocol.models import AudioContent, CallToolResult, ResourceLink, TextContent
 from aiohttp_tiny_mcp.protocol.selection import AdapterSet
 
@@ -58,13 +58,25 @@ async def described(args: Nothing) -> str:
     return "ok"
 
 
+ICON = Icon(src="https://example.test/i.png", sizes=["48x48"], mime_type="image/png")
+
+
 @pytest.fixture
 def projection_registry() -> Registry:
-    registry = Registry("p", "1.0", hub=MemoryHub(), session_store=MemorySessionStore())
+    registry = Registry(
+        "p",
+        "1.0",
+        hub=MemoryHub(),
+        session_store=MemorySessionStore(),
+        icons=[ICON],
+        website_url="https://example.test",
+    )
     registry.tool(counted)
     registry.tool(linking)
-    registry.tool(described, title="A Display Title")
-    registry.resource("config://app", counted, title="Configuration")
+    registry.tool(described, title="A Display Title", icons=[ICON])
+    registry.resource("config://app", counted, title="Configuration", icons=[ICON])
+    registry.resource("items://{id}", counted, name="item", icons=[ICON])
+    registry.prompt(described, icons=[ICON])
     return registry
 
 

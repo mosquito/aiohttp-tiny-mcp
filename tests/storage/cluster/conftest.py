@@ -7,6 +7,7 @@ import subprocess
 import sys
 import time
 from collections.abc import Iterator
+from contextlib import closing
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -31,7 +32,7 @@ class Cluster:
 
     def rows(self, prefix: str) -> int:
         """Count stored events whose topic starts with `prefix`."""
-        with sqlite3.connect(self.db) as db:
+        with closing(sqlite3.connect(self.db)) as db:
             return db.execute(
                 "SELECT COUNT(*) FROM mcp_events WHERE topic LIKE ?", (f"{prefix}%",)
             ).fetchone()[0]
@@ -65,13 +66,13 @@ def accepting(port: int) -> bool:
 def start(name: str, script: Path, db: Path, root: Path, extra: list[str]) -> Node:
     port = free_port()
     log = root / f"{name}.log"
-    handle = log.open("w")
-    process = subprocess.Popen(
-        [sys.executable, str(script), "--db", str(db), "--port", str(port), *extra],
-        stdout=handle,
-        stderr=subprocess.STDOUT,
-        cwd=str(HERE.parents[2]),
-    )
+    with log.open("w") as handle:
+        process = subprocess.Popen(
+            [sys.executable, str(script), "--db", str(db), "--port", str(port), *extra],
+            stdout=handle,
+            stderr=subprocess.STDOUT,
+            cwd=str(HERE.parents[2]),
+        )
     return Node(name=name, url=f"http://127.0.0.1:{port}/mcp", process=process, log=log)
 
 

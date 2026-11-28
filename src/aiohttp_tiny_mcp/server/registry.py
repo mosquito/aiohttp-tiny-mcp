@@ -2,19 +2,21 @@
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable, Iterable, Mapping
+from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
 from typing import Any
 
-from aiohttp_tiny_mcp.auth import Authentication, Principal
+from aiohttp_tiny_mcp.auth import Authentication, Principal, Query
 from aiohttp_tiny_mcp.extensions import Extension, ExtensionSpec
-from aiohttp_tiny_mcp.protocol.models import Implementation
+from aiohttp_tiny_mcp.icons import Icons, expand_icons
+from aiohttp_tiny_mcp.protocol.models import Icon, Implementation
 from aiohttp_tiny_mcp.storage.hub import NOTIFICATIONS, Cursor, Hub, MemoryHub, topic
 from aiohttp_tiny_mcp.storage.sessions import DEFAULT_TTL_SECONDS, MemorySessionStore, SessionStore
 
+from .caching import Cache, CacheHint, checked_cache_hints
 from .exchange import Exchange, Instance
 from .request_state import DEFAULT_TTL_SECONDS as STATE_TTL_SECONDS
 from .request_state import RequestStates
-from .resource_tools import RESOURCE_TOOL_NAMES, resource_tool_specs
+from .resource_tools import PROMPT_SCHEME, RESOURCE_TOOL_NAMES, resource_tool_specs
 from .specs import Bound, PromptSpec, ResourceSpec, ToolSpec
 
 
@@ -44,10 +46,16 @@ class Registry:
         request_state_ttl_seconds: int = STATE_TTL_SECONDS,
         hub_poll_seconds: float = 30.0,
         ask_timeout_seconds: float = 120.0,
+        completion_timeout_seconds: float = 300.0,
         page_size: int | None = None,
         resource_tools: bool = True,
+        cache_hints: Mapping[str, CacheHint] | None = None,
+        icons: Sequence[Icon | Icons] | None = None,
+        website_url: str | None = None,
     ) -> None:
-        self.info = Implementation(name=name, version=version)
+        self.info = Implementation(
+            name=name, version=version, icons=expand_icons(icons), website_url=website_url
+        )
         self.instructions = instructions
         self.hub = hub if hub is not None else MemoryHub()
         self.session_store = session_store if session_store is not None else MemorySessionStore()
@@ -55,11 +63,15 @@ class Registry:
         self.session_ttl_seconds = session_ttl_seconds
         #: Most entries per listing page. `None`, the default, answers with all of them.
         self.page_size = page_size
+        #: The freshness a cacheable method answers with where nothing else states it.
+        self.cache_hints = checked_cache_hints(cache_hints)
         self.resource_tools = resource_tools
         self.resource_tool_specs = resource_tool_specs() if resource_tools else {}
         self.request_state = RequestStates(self.session_store, request_state_ttl_seconds)
         self.hub_poll_seconds = hub_poll_seconds
         self.ask_timeout_seconds = ask_timeout_seconds
+        #: A model call waits longer than a person does, so it has its own bound.
+        self.completion_timeout_seconds = completion_timeout_seconds
         self.tools: dict[str, ToolSpec] = {}
         self.resources_fixed: dict[str, ResourceSpec] = {}
         self.resources_templated: list[ResourceSpec] = []
@@ -92,6 +104,17 @@ class Registry:
         if isinstance(self._auth, Authentication):
             return (self._auth,)
         return self._auth
+
+    @property
+    def credential_arguments(self) -> tuple[str, ...]:
+        """Return distinct names from Query objects in the policies' sources."""
+        found = {
+            source.name: None
+            for policy in self.auth_policies
+            for source in getattr(policy, "sources", ())
+            if isinstance(source, Query)
+        }
+        return tuple(found)
 
     def extension(self, extension: Extension) -> None:
         """Install an extension and its resources after checking all declarations.
@@ -144,6 +167,7 @@ class Registry:
             for address in {uri, resource.legacy_uri}:
                 if address is None:
                     continue
+                self.check_resource_address(address)
                 if (
                     address in claimed
                     or address in self.resources_fixed
@@ -152,7 +176,7 @@ class Registry:
                 ):
                     raise ValueError(f"duplicate resource: {address}")
                 claimed.add(address)
-            self.check(uri, resource.bound)
+            self.check(uri, resource.bound, resource=True)
         self.extensions[extension.name] = extension.snapshot()
         for uri, resource in resources.items():
             resource = resource.model_copy(deep=True)
@@ -233,8 +257,10 @@ class Registry:
             )
         self.providers[kind or type(value)] = Instance(value)
 
-    def check(self, what: str, bound: Bound) -> None:
+    def check(self, what: str, bound: Bound, *, resource: bool = False) -> None:
         for name, kind in bound.plan:
+            if kind is Cache and resource:
+                continue
             if kind is Principal:
                 if self.auth is None:
                     raise TypeError(
@@ -270,6 +296,8 @@ class Registry:
         return register(fn) if fn else register
 
     def resource(self, uri: str, fn: Callable[..., Awaitable[Any]] | None = None, **kw: Any):
+        self.check_resource_address(uri)
+
         def register(fn: Callable[..., Awaitable[Any]]):
             spec = ResourceSpec.build(uri, fn, **kw)
             if spec.scopes and self.auth is None:
@@ -277,7 +305,7 @@ class Registry:
                     f"{uri}: scopes were declared, but this registry has no auth= -- "
                     f"a scope nothing verifies is a check that never runs"
                 )
-            self.check(uri, spec.bound)
+            self.check(uri, spec.bound, resource=True)
             if spec.definition is not None:
                 if (
                     spec.definition.uri in self.resources_fixed
@@ -297,6 +325,10 @@ class Registry:
             return fn
 
         return register(fn) if fn else register
+
+    def check_resource_address(self, uri: str) -> None:
+        if self.resource_tools and uri.casefold().startswith(PROMPT_SCHEME):
+            raise ValueError(f"resource address uses reserved scheme {PROMPT_SCHEME} {uri}")
 
     def prompt(self, fn: Callable[..., Awaitable[Any]] | None = None, **kw: Any):
         def register(fn: Callable[..., Awaitable[Any]]):

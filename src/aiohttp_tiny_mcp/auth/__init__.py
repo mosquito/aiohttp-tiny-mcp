@@ -7,7 +7,7 @@ import time
 from abc import ABC, abstractmethod
 from base64 import b64decode
 from binascii import Error as Base64Error
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from hashlib import sha256
 from secrets import compare_digest
@@ -131,6 +131,57 @@ class Unauthorized(Exception):
         self.status = status
 
 
+Source = Callable[[web.Request], str | None]
+"""A synchronous callable that reads a credential from request metadata.
+
+The source receives the original request. Leave its body and state intact.
+"""
+
+
+@dataclass(frozen=True)
+class Header:
+    """Read the credential for a scheme from the Authorization header.
+
+    Raise Unauthorized if the header has a value in the wrong format.
+    """
+
+    scheme: str
+
+    def __call__(self, request: web.Request) -> str | None:
+        value = request.headers.get("Authorization")
+        if not value:
+            return None
+        scheme = self.scheme.lower()
+        if scheme == "basic":
+            parts = value.split()
+            if len(parts) == 2 and parts[0].lower() == scheme:
+                return parts[1]
+            raise Unauthorized("invalid_credentials", "valid credentials required")
+        prefix = f"{scheme} "
+        if not value.lower().startswith(prefix):
+            raise Unauthorized("invalid_request", "authorization required")
+        return value[len(prefix) :].strip()
+
+
+@dataclass(frozen=True)
+class Query:
+    """Read a named query parameter and declare its name for log masking."""
+
+    name: str
+
+    def __call__(self, request: web.Request) -> str | None:
+        return request.query.get(self.name) or None
+
+
+def read_credential(request: web.Request, sources: Sequence[Source]) -> str | None:
+    """Call sources with the original request until one returns a value."""
+    for source in sources:
+        value = source(request)
+        if value is not None:
+            return value
+    return None
+
+
 class Authentication(ABC):
     """Subclass this policy and pass an instance to `Registry(auth=...)`.
 
@@ -189,7 +240,8 @@ class Authentication(ABC):
 class BasicAuth(Authentication):
     """Subclass `verify` to authenticate Basic credentials against your user store.
 
-    Credentials use standard Base64 and UTF-8. Query credentials are not read.
+    Credentials use standard Base64 and UTF-8. The default source reads the
+    `Authorization` header.
     Use `StaticBasicAuth` for configured accounts with individual scopes.
     """
 
@@ -200,12 +252,14 @@ class BasicAuth(Authentication):
         bind_sessions: bool = True,
         namespace_from_token: bool = True,
         required_scopes: Sequence[str] = (),
+        sources: Sequence[Source] = (Header("Basic"),),
     ) -> None:
         super().__init__(
             bind_sessions=bind_sessions,
             namespace_from_token=namespace_from_token,
             required_scopes=required_scopes,
         )
+        self.sources = tuple(sources)
         if not realm.isascii() or any(ord(char) < 32 or ord(char) == 127 for char in realm):
             raise ValueError("realm must contain only printable ASCII characters")
         self.realm = realm
@@ -215,12 +269,12 @@ class BasicAuth(Authentication):
         """Return the verified identity, or None when credentials do not match."""
 
     async def authenticate(self, request: web.Request) -> Principal | None:
-        header = request.headers.get("Authorization", "")
-        parts = header.split()
-        if len(parts) != 2 or parts[0].lower() != "basic":
+        given = read_credential(request, self.sources)
+        if given is None:
             return None
         try:
-            decoded = b64decode(parts[1], validate=True).decode("utf-8")
+            # Query decoding can turn Base64 plus signs into spaces.
+            decoded = b64decode(given.replace(" ", "+"), validate=True).decode("utf-8")
         except (ValueError, Base64Error, UnicodeDecodeError):
             return None
         username, separator, password = decoded.partition(":")
@@ -248,12 +302,14 @@ class StaticBasicAuth(BasicAuth):
         bind_sessions: bool = True,
         namespace_from_token: bool = True,
         required_scopes: Sequence[str] = (),
+        sources: Sequence[Source] = (Header("Basic"),),
     ) -> None:
         super().__init__(
             realm=realm,
             bind_sessions=bind_sessions,
             namespace_from_token=namespace_from_token,
             required_scopes=required_scopes,
+            sources=sources,
         )
         if not accounts:
             raise ValueError("at least one Basic account is required")
@@ -317,6 +373,10 @@ class Authorization(Authentication):
     documentation: str | None = None
     bind_sessions: bool = True  # ty: ignore[incompatible-attribute-override]
     namespace_from_token: bool = True  # ty: ignore[incompatible-attribute-override]
+    sources: Sequence[Source] = (Header("Bearer"),)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "sources", tuple(self.sources))
 
     @property
     def metadata_path(self) -> str:
@@ -335,7 +395,16 @@ class Authorization(Authentication):
             found["resource_name"] = self.resource_name
         if self.documentation:
             found["resource_documentation"] = self.documentation
-        found["bearer_methods_supported"] = ["header"]
+        methods = []
+        if any(
+            isinstance(source, Header) and source.scheme.lower() == "bearer"
+            for source in self.sources
+        ):
+            methods.append("header")
+        if any(isinstance(source, Query) for source in self.sources):
+            methods.append("query")
+        if methods:
+            found["bearer_methods_supported"] = methods
         return found
 
     def challenge(self, refusal: Unauthorized) -> str:
@@ -356,14 +425,20 @@ class Authorization(Authentication):
         """Verify an Authorization header and return its principal."""
         if not authorization or not authorization.lower().startswith("bearer "):
             raise Unauthorized("invalid_request", "authorization required")
-        found = await self.verifier.verify(authorization[len("bearer ") :].strip())
+        return await self._verify(authorization[len("bearer ") :].strip())
+
+    async def _verify(self, token: str) -> Principal:
+        found = await self.verifier.verify(token)
         if found is None or found.expired:
             raise Unauthorized("invalid_token", "the token is not valid for this resource")
         return self.check(found)
 
     async def authenticate(self, request: web.Request) -> Principal:
-        """Verify the request's Bearer header using the configured token verifier."""
-        return await self.principal(request.headers.get("Authorization"))
+        """Verify the request's Bearer credential with the configured token verifier."""
+        token = read_credential(request, self.sources)
+        if token is None:
+            raise Unauthorized("invalid_request", "authorization required")
+        return await self._verify(token.strip())
 
 
 __all__ = [
@@ -372,9 +447,13 @@ __all__ = [
     "Authorization",
     "BasicAuth",
     "Principal",
+    "Header",
+    "Query",
+    "Source",
     "StaticBasicAuth",
     "StaticVerifier",
     "TokenVerifier",
     "Unauthorized",
     "principal_from_claims",
+    "read_credential",
 ]

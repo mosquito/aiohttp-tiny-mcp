@@ -11,6 +11,7 @@ from typing import Any
 import jwt
 from aiohttp import web
 from aiohttp_tiny_mcp import Authentication, Principal, Unauthorized, principal_from_claims
+from aiohttp_tiny_mcp.auth import read_credential
 from aiohttp_tiny_mcp.auth.jwt import HMACJWTVerifier
 
 from .store import Store
@@ -66,6 +67,9 @@ def credentials(request: web.Request) -> str | None:
     return None
 
 
+SOURCES = (credentials,)
+
+
 def chat_principal(claims: Mapping[str, Any]) -> Principal:
     validated = principal_from_claims(claims)
     user = validated_user(claims.get("sub"))
@@ -88,7 +92,7 @@ class DemoIdentity(Authentication):
 
     async def authenticate(self, request: web.Request) -> Principal:
         org, user = request_context(request)
-        if credentials(request) is not None:
+        if read_credential(request, SOURCES) is not None:
             raise Unauthorized("invalid_token", "JWT authentication is not configured.")
         await self.store.ensure_organization(org)
         return Principal(subject=user or "human", namespace=org)
@@ -108,7 +112,7 @@ class JWTIdentity(Authentication):
         )
 
     async def authenticate(self, request: web.Request) -> Principal:
-        token = credentials(request)
+        token = read_credential(request, SOURCES)
         principal = await self.verifier.verify(token) if token else None
         if principal is None or principal.expired:
             raise Unauthorized("invalid_token", "A valid, unexpired JWT token is required.")

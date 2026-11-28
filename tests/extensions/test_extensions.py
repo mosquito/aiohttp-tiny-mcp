@@ -11,8 +11,10 @@ from aiohttp_tiny_mcp import (
     Endpoint,
     Exchange,
     Extension,
+    NeedInput,
     Registry,
     TextResourceContents,
+    elicit,
 )
 from aiohttp_tiny_mcp.protocol.models import CacheableResult
 from aiohttp_tiny_mcp.testing import connect, over_http
@@ -232,3 +234,52 @@ def test_resource_conflicts_and_missing_providers_leave_registry_unchanged():
     with pytest.raises(TypeError, match="no provider"):
         registry.extension(other)
     assert not registry.extensions
+
+
+class Step(BaseModel):
+    job: str
+
+
+@pytest.mark.parametrize("transport", [connect, over_http])
+async def test_an_extension_call_resumes_with_the_state_the_server_issued(transport):
+    extension = Extension("example.org/steps")
+    seen = []
+
+    @extension.method("steps/run")
+    async def run(args: Step, ex: Exchange):
+        if not ex.answered("confirm"):
+            raise NeedInput({"confirm": elicit(f"Run {args.job}?")}, state={"job": args.job})
+        seen.append((ex.state, ex.answers))
+        return {"done": args.job}
+
+    registry = Registry("steps", "1")
+    registry.extension(extension)
+    answer = {"confirm": {"action": "accept", "content": {}}}
+
+    async with transport(registry, adapter="2026-07-28") as client:
+
+        async def asked(job: str) -> str:
+            first = await client.request_method("steps/run", {"job": job})
+            assert first["resultType"] == "input_required"
+            return first["requestState"]
+
+        state = await asked("build")
+        retry = {"job": "build", "requestState": state, "inputResponses": answer}
+        done = await client.request_method("steps/run", retry)
+        assert done["done"] == "build"
+        assert seen == [({"job": "build"}, {"confirm": {}})]
+
+        with pytest.raises(ClientError, match="invalid requestState") as spent:
+            await client.request_method("steps/run", retry)
+        assert spent.value.code == -32602
+
+        state = await asked("build")
+        with pytest.raises(ClientError, match="invalid requestState"):
+            await client.request_method(
+                "steps/run", {"job": "deploy", "requestState": state, "inputResponses": answer}
+            )
+        with pytest.raises(ClientError, match="invalid requestState"):
+            await client.request_method(
+                "steps/run", {"job": "build", "requestState": "unknown", "inputResponses": answer}
+            )
+        assert len(seen) == 1

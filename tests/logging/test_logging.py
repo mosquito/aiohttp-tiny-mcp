@@ -3,14 +3,20 @@
 from __future__ import annotations
 
 import pytest
+from pydantic import BaseModel
 
-from aiohttp_tiny_mcp import Client
+from aiohttp_tiny_mcp import Client, Exchange, Registry
 from aiohttp_tiny_mcp.protocol.core import logs_at
 from aiohttp_tiny_mcp.protocol.selection import AdapterSet
+from aiohttp_tiny_mcp.testing import serving
 
 pytestmark = pytest.mark.asyncio
 
 ADAPTERS = AdapterSet.default().adapters
+
+
+class Nothing(BaseModel):
+    pass
 
 
 async def test_a_client_that_asked_for_nothing_hears_nothing():
@@ -80,3 +86,23 @@ async def test_an_unknown_level_is_refused(real_server_url):
         await client.initialize()
         with pytest.raises(ClientError):
             await client.set_log_level("chatty")
+
+
+@pytest.mark.parametrize("adapter", ADAPTERS, ids=lambda a: a.version)
+async def test_a_log_without_a_stream_is_dropped(adapter):
+    """A tool without `streaming=True` gets a plain JSON response, with nowhere to report."""
+    registry = Registry("quiet", "1")
+
+    @registry.tool
+    async def plain(args: Nothing, ex: Exchange) -> str:
+        await ex.log("error", "bad")
+        return "done"
+
+    seen: list[dict] = []
+    async with serving(registry) as url:
+        async with Client(url, adapter, log_level="debug", on_notification=collect(seen)) as client:
+            await client.initialize()
+            result = await client.call_tool("plain", {})
+    assert not result.is_error
+    assert result.content[0].text == "done"
+    assert seen == []

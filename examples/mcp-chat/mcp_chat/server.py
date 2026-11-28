@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from aiohttp import web
-from aiohttp_tiny_mcp import Endpoint, Principal, Registry
+from aiohttp_tiny_mcp import Endpoint, Icons, Principal, Registry
 from aiohttp_tiny_mcp.console import Console, ConsoleEndpoint
 from aiohttp_tiny_mcp.storage.sqlite import SqliteHub, SqliteSessionStore, SqliteStorage
 from pydantic import BaseModel, Field
@@ -82,6 +82,7 @@ def build_registry(
         hub=notifications,
         session_store=SqliteSessionStore(storage),
         instructions=RULES,
+        icons=[Icons.COMMENTS],
     )
 
     async def membership_updated(principal: Principal) -> None:
@@ -106,12 +107,12 @@ def build_registry(
         unread = [user for user in audience["users"] if user != username(principal)]
         await notifications.updated("chat://inbox", users=unread)
 
-    @registry.tool(annotations=READ_ONLY, description=TOOL_HELP["identity"])
+    @registry.tool(annotations=READ_ONLY, description=TOOL_HELP["identity"], icons=[Icons.USER])
     async def identity(args: Empty, principal: Principal) -> dict:
         """Return the organization and user selected by this connection."""
         return {"org": organization(principal), "user": username(principal)}
 
-    @registry.tool(annotations=APPEND, description=TOOL_HELP["create_channel"])
+    @registry.tool(annotations=APPEND, description=TOOL_HELP["create_channel"], icons=[Icons.PLUS])
     async def create_channel(args: CreateChannel, principal: Principal) -> dict:
         """Create a public channel and subscribe its creator."""
         result = await store.create_channel(
@@ -121,26 +122,32 @@ def build_registry(
         await notifications.updated("chat://subscriptions", users=[username(principal)])
         return result
 
-    @registry.tool(annotations=READ_ONLY, description=TOOL_HELP["list_channels"])
+    @registry.tool(
+        annotations=READ_ONLY, description=TOOL_HELP["list_channels"], icons=[Icons.HASHTAG]
+    )
     async def list_channels(args: Empty, principal: Principal) -> dict:
         """List this organization's channels with your subscription and unread counts."""
         return {"channels": await store.list_channels(organization(principal), username(principal))}
 
-    @registry.tool(annotations=IDEMPOTENT, description=TOOL_HELP["subscribe"])
+    @registry.tool(annotations=IDEMPOTENT, description=TOOL_HELP["subscribe"], icons=[Icons.BELL])
     async def subscribe(args: Channel, principal: Principal) -> dict:
         """Subscribe to future messages; an existing subscription keeps its read position."""
         result = await store.subscribe(organization(principal), username(principal), args.channel)
         await membership_updated(principal)
         return result
 
-    @registry.tool(annotations=IDEMPOTENT, description=TOOL_HELP["unsubscribe"])
+    @registry.tool(
+        annotations=IDEMPOTENT, description=TOOL_HELP["unsubscribe"], icons=[Icons.BELL_SLASH]
+    )
     async def unsubscribe(args: Channel, principal: Principal) -> dict:
         """Leave a channel; unread mentions remain in your inbox."""
         result = await store.unsubscribe(organization(principal), username(principal), args.channel)
         await membership_updated(principal)
         return result
 
-    @registry.tool(annotations=READ_ONLY, description=TOOL_HELP["list_subscriptions"])
+    @registry.tool(
+        annotations=READ_ONLY, description=TOOL_HELP["list_subscriptions"], icons=[Icons.BELL]
+    )
     async def list_subscriptions(args: Empty, principal: Principal) -> dict:
         """List your subscribed channels and their unread counts."""
         return {
@@ -149,19 +156,19 @@ def build_registry(
             )
         }
 
-    @registry.tool(annotations=IDEMPOTENT, description=TOOL_HELP["open_dm"])
+    @registry.tool(annotations=IDEMPOTENT, description=TOOL_HELP["open_dm"], icons=[Icons.LOCK])
     async def open_dm(args: DirectUser, principal: Principal) -> dict:
         """Open your private conversation with another user in this organization."""
         result = await store.open_dm(organization(principal), username(principal), args.user)
         await notifications.updated("chat://dms", users=[username(principal), args.user])
         return result
 
-    @registry.tool(annotations=READ_ONLY, description=TOOL_HELP["list_dms"])
+    @registry.tool(annotations=READ_ONLY, description=TOOL_HELP["list_dms"], icons=[Icons.LOCK])
     async def list_dms(args: Empty, principal: Principal) -> dict:
         """List only your direct conversations, peers, and unread counts."""
         return {"conversations": await store.list_dms(organization(principal), username(principal))}
 
-    @registry.tool(annotations=APPEND, description=TOOL_HELP["send_dm"])
+    @registry.tool(annotations=APPEND, description=TOOL_HELP["send_dm"], icons=[Icons.PAPER_PLANE])
     async def send_dm(args: DirectMessage, principal: Principal) -> dict:
         """Send a private message or thread reply to another user."""
         result = await store.send_dm(
@@ -175,7 +182,9 @@ def build_registry(
         await message_updated(principal, result)
         return result
 
-    @registry.tool(annotations=APPEND, description=TOOL_HELP["post_message"])
+    @registry.tool(
+        annotations=APPEND, description=TOOL_HELP["post_message"], icons=[Icons.PAPER_PLANE]
+    )
     async def post_message(args: PostMessage, principal: Principal) -> dict:
         """Post a root or thread reply; send_to_channel also delivers replies to channel members."""
         result = await store.post_message(
@@ -189,7 +198,9 @@ def build_registry(
         await message_updated(principal, result)
         return result
 
-    @registry.tool(annotations=READ_ONLY, description=TOOL_HELP["history"])
+    @registry.tool(
+        annotations=READ_ONLY, description=TOOL_HELP["history"], icons=[Icons.CLOCK_ROTATE_LEFT]
+    )
     async def history(args: History, principal: Principal) -> dict:
         """Read roots and broadcast replies in ID order without acknowledgement."""
         return message_page(
@@ -203,7 +214,7 @@ def build_registry(
             args.after,
         )
 
-    @registry.tool(annotations=READ_ONLY, description=TOOL_HELP["thread"])
+    @registry.tool(annotations=READ_ONLY, description=TOOL_HELP["thread"], icons=[Icons.REPLY])
     async def thread(args: Thread, principal: Principal) -> dict:
         """Read a root message and its replies in ascending ID order."""
         return message_page(
@@ -217,7 +228,7 @@ def build_registry(
             args.after,
         )
 
-    @registry.tool(annotations=READ_ONLY, description=TOOL_HELP["inbox"])
+    @registry.tool(annotations=READ_ONLY, description=TOOL_HELP["inbox"], icons=[Icons.INBOX])
     async def inbox(args: Page, principal: Principal) -> dict:
         """Read your unread channel, thread, and mention deliveries, excluding your own messages."""
         return message_page(
@@ -225,7 +236,7 @@ def build_registry(
             args.after,
         )
 
-    @registry.tool(annotations=IDEMPOTENT, description=TOOL_HELP["mark_read"])
+    @registry.tool(annotations=IDEMPOTENT, description=TOOL_HELP["mark_read"], icons=[Icons.CHECK])
     async def mark_read(args: MarkRead, principal: Principal) -> dict:
         """Acknowledge exact message IDs without changing other messages or threads."""
         selected = args.message_ids if args.message_ids is not None else args.message_id
@@ -240,7 +251,9 @@ def build_registry(
             await membership_updated(principal)
         return result
 
-    @registry.tool(annotations=READ_ONLY, description=TOOL_HELP["search"])
+    @registry.tool(
+        annotations=READ_ONLY, description=TOOL_HELP["search"], icons=[Icons.MAGNIFYING_GLASS]
+    )
     async def search(args: Search, principal: Principal) -> dict:
         """Search this organization's message text with FTS5, optionally in one channel."""
         return message_page(
@@ -255,47 +268,59 @@ def build_registry(
             args.after,
         )
 
-    @registry.resource("chat://channels", mime_type="application/json")
+    @registry.resource("chat://channels", mime_type="application/json", icons=[Icons.HASHTAG])
     async def channels_resource(args: Empty, principal: Principal) -> dict:
         """List channels in the current organization."""
         return await list_channels(args, principal)
 
-    @registry.resource("chat://channels/{channel}", mime_type="application/json")
+    @registry.resource(
+        "chat://channels/{channel}", mime_type="application/json", icons=[Icons.HASHTAG]
+    )
     async def channel_resource(args: Channel, principal: Principal) -> dict:
         """Read the first 50 channel messages; use history for subsequent pages."""
         return await history(History(channel=args.channel), principal)
 
-    @registry.resource("chat://channels/{channel}/messages/{after}", mime_type="application/json")
+    @registry.resource(
+        "chat://channels/{channel}/messages/{after}",
+        mime_type="application/json",
+        icons=[Icons.HASHTAG],
+    )
     async def channel_page_resource(args: History, principal: Principal) -> dict:
         """Read 50 channel messages after the supplied ID; continue using next_after."""
         return await history(args, principal)
 
-    @registry.resource("chat://threads/{message_id}", mime_type="application/json")
+    @registry.resource(
+        "chat://threads/{message_id}", mime_type="application/json", icons=[Icons.REPLY]
+    )
     async def thread_resource(args: Thread, principal: Principal) -> dict:
         """Read a root and its replies; use thread or the messages template for another page."""
         return await thread(args, principal)
 
-    @registry.resource("chat://threads/{message_id}/messages/{after}", mime_type="application/json")
+    @registry.resource(
+        "chat://threads/{message_id}/messages/{after}",
+        mime_type="application/json",
+        icons=[Icons.REPLY],
+    )
     async def thread_page_resource(args: Thread, principal: Principal) -> dict:
         """Read 50 thread messages after the supplied ID; continue using next_after."""
         return await thread(args, principal)
 
-    @registry.resource("chat://inbox", mime_type="application/json")
+    @registry.resource("chat://inbox", mime_type="application/json", icons=[Icons.INBOX])
     async def inbox_resource(args: Empty, principal: Principal) -> dict:
         """Read your first 50 unread messages; use inbox with next_after for another page."""
         return await inbox(Page(), principal)
 
-    @registry.resource("chat://subscriptions", mime_type="application/json")
+    @registry.resource("chat://subscriptions", mime_type="application/json", icons=[Icons.BELL])
     async def subscriptions_resource(args: Empty, principal: Principal) -> dict:
         """List your channel subscriptions and unread counts without changing them."""
         return await list_subscriptions(args, principal)
 
-    @registry.resource("chat://dms", mime_type="application/json")
+    @registry.resource("chat://dms", mime_type="application/json", icons=[Icons.LOCK])
     async def dms_resource(args: Empty, principal: Principal) -> dict:
         """List your private conversations; read a returned channel ID through channel resources."""
         return await list_dms(args, principal)
 
-    @registry.resource("chat://rules", mime_type="text/markdown")
+    @registry.resource("chat://rules", mime_type="text/markdown", icons=[Icons.FILE_LINES])
     async def rules_resource(args: Empty) -> str:
         """Read communication rules, channel purposes, resources, and tool call examples."""
         return RULES

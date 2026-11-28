@@ -2,15 +2,11 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
 from aiohttp_tiny_mcp.auth import Principal
+from aiohttp_tiny_mcp.protocol.adapter import Adapter, RegistryProtocol
 from aiohttp_tiny_mcp.protocol.models import ResourceDef, ResourceTemplateDef
 
-if TYPE_CHECKING:
-    from aiohttp_tiny_mcp.protocol.adapter import Adapter, RegistryProtocol
-
-    from .specs import ResourceSpec
+from .specs import ResourceSpec
 
 
 def visible_resource(

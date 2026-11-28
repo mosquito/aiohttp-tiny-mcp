@@ -18,7 +18,7 @@ against a real implementation where it was not obvious.
 | Batching | one message per POST | one message per POST | JSON-RPC batch arrays |
 | Unknown method | `404` + `-32601` | `200` + `-32601` | same |
 | Header/body mismatch | `400` + `-32020` | not defined | not defined |
-| Unsupported version | `400` + `-32022`, listing `supported` and `requested` | refused at `initialize` | refused at `initialize` |
+| Unsupported version | `400` + `-32022`, listing `supported` and `requested` | `initialize` falls back to the stable revision. Unknown versions in explicit headers are refused. | same |
 | Missing client capability | `400` + `-32021`, listing `requiredCapabilities` | not defined | not defined |
 | Result envelope | carries `resultType` | none | none |
 | Ask the user | MRTR | pushed `elicitation/create` | no mechanism; see below |
@@ -27,10 +27,16 @@ against a real implementation where it was not obvious.
 | `inputSchema` | full JSON Schema 2020-12 | restricted in practice; `$ref` poorly supported | same |
 | `outputSchema` | unrestricted; `structuredContent` may be any JSON | object-rooted; `structuredContent` must be an object | neither exists |
 | Display `title` on a tool, resource or prompt | yes | yes | no |
+| `icons` on a declaration, and `websiteUrl` on the server | yes | 2025-11-25 only | no |
+| Model completion (`ex.completion()`) | request carried in MRTR | pushed `sampling/createMessage` | same |
 | `resource_link` content | yes | yes | no |
 | Logging | per-request `_meta` key | `logging/setLevel`, kept for the session | same |
-| Cancellation | close the response stream | `notifications/cancelled` | same |
+| Cancellation | close the response stream | `notifications/cancelled` over stdio | same |
 | Extensions | declared in `server/discover`; custom methods callable | files and manifest through resources | same |
+
+On `2026-07-28`, SEP-2577 marks the standalone `sampling/createMessage` wire
+method as deprecated. Model completions remain available through MRTR;
+the application still calls `ex.completion()`.
 
 2024-11-05 (HTTP+SSE) is a different transport shape entirely -- two endpoints
 and an `endpoint` event as the first message -- so it is implemented by the
@@ -60,6 +66,10 @@ the declaration rather than on a version string.
 * - `asks_in_arguments`
   - The question rides in the tool call itself.
   - 2025-03-26, 2024-11-05
+* - `can_push_request`
+  - Any server request, not only a question, may be pushed on the stream.
+    Sampling is older than elicitation, so the two flags differ.
+  - 2025-11-25, 2025-06-18, 2025-03-26, 2024-11-05
 ```
 
 ### MRTR, on 2026-07-28
@@ -165,8 +175,8 @@ declared:
   cannot accept null, such as a `const`, is not simplified.
 - `x-mcp-header` annotations are stripped: a legacy client would not mirror
   them, and a server that then required the header would deadlock.
-- A schema that cannot be simplified losslessly means the tool is not offered on
-  that revision at all.
+- The legacy projection drops `if`, `then`, and `else`. If it cannot project
+  the input schema, such as one with `oneOf`, it omits the tool.
 
 Each is one decision in one adapter, visible in one place, rather than a
 condition in every handler.

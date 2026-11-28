@@ -11,7 +11,7 @@ from typing import Any, Protocol, runtime_checkable
 from aiohttp_tiny_mcp.protocol.adapter import Adapter
 from aiohttp_tiny_mcp.protocol.models import Implementation
 
-from .base import BaseClient, ClientError, Elicitor
+from .base import BaseClient, ClientError, CompletionProvider, Elicitor
 
 DEFAULT_STREAM_LIMIT = 1024 * 1024
 
@@ -34,6 +34,7 @@ class StdioClient(BaseClient):
         *,
         client_info: Implementation | None = None,
         on_ask: Elicitor | None = None,
+        on_completion: CompletionProvider | None = None,
         on_notification: Callable[[Mapping[str, Any]], Any] | None = None,
         log_level: str | None = None,
     ) -> None:
@@ -41,6 +42,7 @@ class StdioClient(BaseClient):
             adapter,
             client_info=client_info,
             on_ask=on_ask,
+            on_completion=on_completion,
             on_notification=on_notification,
             log_level=log_level,
         )
@@ -78,6 +80,7 @@ class StdioClient(BaseClient):
         adapter: Adapter,
         client_info: Implementation | None = None,
         on_ask: Elicitor | None = None,
+        on_completion: CompletionProvider | None = None,
         limit: int = DEFAULT_STREAM_LIMIT,
     ) -> AsyncGenerator[StdioClient, None]:
         """Launch cmd with protocol pipes and inherit stderr.
@@ -91,7 +94,12 @@ class StdioClient(BaseClient):
         assert process.stdout is not None
         try:
             yield cls(
-                process.stdout, process.stdin, adapter, client_info=client_info, on_ask=on_ask
+                process.stdout,
+                process.stdin,
+                adapter,
+                client_info=client_info,
+                on_ask=on_ask,
+                on_completion=on_completion,
             )
         finally:
             process.terminate()

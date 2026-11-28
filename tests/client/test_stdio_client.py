@@ -42,7 +42,9 @@ async def test_call_tool_success(adapter):
         result = await client.call_tool("add", {"a": 2, "b": 3})
         assert isinstance(result, CallToolResult)
         assert result.is_error is False
-        assert result.structured_content == {"result": 5}
+        expected = {"result": 5} if adapter.version >= "2025-06-18" else None
+        assert result.structured_content == expected
+        assert json.loads(result.content[0].text) == {"result": 5}
 
 
 @pytest.mark.parametrize("adapter", ADAPTERS, ids=lambda a: a.version)

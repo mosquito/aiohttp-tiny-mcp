@@ -301,9 +301,11 @@ class Client {
     this.version = version;
     this.rules = REVISIONS[version];
     this.answerable = options.answerable;
+    this.completion = Boolean(options.completion);
     this.onFrame = options.onFrame;       // every message, either way
     this.onNotify = options.onNotify;     // progress, logging, changes
     this.onQuestion = options.onQuestion; // returns an ElicitResult
+    this.onCompletion = options.onCompletion;
     this.authHeaders = { ...(options.authHeaders || {}) };
     this.onAuthError = options.onAuthError;
     this.notifications = Boolean(options.notifications);
@@ -325,7 +327,26 @@ class Client {
   }
 
   get capabilities() {
-    return this.answerable ? { elicitation: {} } : {};
+    return {
+      ...(this.answerable ? { elicitation: {} } : {}),
+      ...(this.completion ? { sampling: {} } : {}),
+    };
+  }
+
+  answerer(method) {
+    if (method === "elicitation/create" && this.answerable) return this.onQuestion;
+    if (method === "sampling/createMessage" && this.completion) return this.onCompletion;
+    return null;
+  }
+
+  async answer(request) {
+    const callback = this.answerer(request.method);
+    if (!callback) return { error: { code: -32601, message: `unsupported: ${request.method}` } };
+    try {
+      return { result: await callback(request.params || {}, this.abort.signal) };
+    } catch (error) {
+      return { error: { code: error.code ?? -32603, message: error.message } };
+    }
   }
 
   nextId() {
@@ -500,15 +521,8 @@ class Client {
       return;
     }
     if (!frame.method) return;
-    // Pushed questions receive a separate bare JSON-RPC response.
-    const reply = this.answerable
-      ? { jsonrpc: "2.0", id: frame.id, result: await this.onQuestion(frame.params || {}) }
-      : {
-          jsonrpc: "2.0",
-          id: frame.id,
-          error: { code: -32601, message: `unsupported: ${frame.method}` },
-        };
-    const response = await this.post(reply, "elicitation/create");
+    const reply = { jsonrpc: "2.0", id: frame.id, ...await this.answer(frame) };
+    const response = await this.post(reply, frame.method);
     await response.body?.cancel();
   }
 
@@ -743,10 +757,11 @@ class Client {
       const result = await this.request("tools/call", params, name);
       const asked = this.asked(result);
       if (!asked) return result;
-      if (!this.answerable) return result;
+      if (Object.values(asked.requests).some((request) => !this.answerer(request.method))) return result;
       state = asked.state;
       for (const [key, request] of Object.entries(asked.requests)) {
-        answers[key] = await this.onQuestion(request.params || {});
+        const reply = await this.answer(request);
+        answers[key] = reply.error || reply.result;
       }
     }
     throw new Error(`${name} is still asking after 8 rounds`);
@@ -790,6 +805,7 @@ const page = {
   agentResources: document.getElementById("agent-resources"),
   agentResourcesTool: document.getElementById("agent-resources-tool"),
   agentResourcesNative: document.getElementById("agent-resources-native"),
+  agentPromptResources: document.getElementById("agent-prompt-resources"),
   agentTarget: document.getElementById("agent-target"),
   agentInstructions: document.getElementById("agent-instructions"),
   agentLanguage: document.getElementById("agent-language"),
@@ -801,6 +817,7 @@ const page = {
   agentClose: document.getElementById("agent-close"),
   agentCopy: document.getElementById("agent-copy"),
   serverTitle: document.getElementById("server-title"),
+  serverIcon: document.getElementById("server-icon"),
   authOAuth: document.getElementById("auth-oauth"),
   authOAuthStatus: document.getElementById("auth-oauth-status"),
   authenticate: document.getElementById("authenticate"),
@@ -827,6 +844,7 @@ const page = {
   endpointParameters: document.getElementById("endpoint-parameters"),
   revision: document.getElementById("revision"),
   answerable: document.getElementById("answerable"),
+  completion: document.getElementById("sampling"),
   notifications: document.getElementById("notifications"),
   connect: document.getElementById("connect"),
   refresh: document.getElementById("refresh"),
@@ -849,6 +867,9 @@ const page = {
   questionText: document.getElementById("question-text"),
   questionFields: document.getElementById("question-fields"),
   answerForm: document.getElementById("answer"),
+  completionDialog: document.getElementById("sampling-request"),
+  completionDetails: document.getElementById("sampling-details"),
+  completionText: document.getElementById("sampling-text"),
 };
 
 let client = null;
@@ -885,6 +906,7 @@ function resetAgentResources() {
   const modes = agentResourceDefaults(page.agentMethod.value);
   page.agentResourcesTool.checked = modes.includes("tool");
   page.agentResourcesNative.checked = modes.includes("native");
+  page.agentPromptResources.checked = agentPromptResourceDefault(page.agentMethod.value);
 }
 
 function agentLevelKey() {
@@ -909,12 +931,14 @@ function renderAgentSetup() {
   page.agentDocs.hidden = true;
   try {
     if (!agentConnection) return;
+    page.agentPromptResources.disabled = !page.agentResourcesNative.checked;
     const variants = agentConfigurations({
       endpoint: agentConnection.url,
       level: page.agentLevel.value,
       name: page.agentName.value,
       headers: page.agentHeaders.checked ? agentConnection.headers : {},
       resourceTools: document.documentElement.dataset.resourceTools !== "false",
+      promptResources: page.agentPromptResources.checked,
       resourceModes: page.agentResources ? [
         ...(page.agentResourcesTool.checked ? ["tool"] : []),
         ...(page.agentResourcesNative.checked ? ["native"] : []),
@@ -983,6 +1007,7 @@ function setupAgentDialog() {
   if (page.agentResources) {
     page.agentResourcesTool.onchange = renderAgentSetup;
     page.agentResourcesNative.onchange = renderAgentSetup;
+    page.agentPromptResources.onchange = renderAgentSetup;
   }
   page.agentLevel.onchange = () => {
     try { localStorage.setItem(agentLevelKey(), page.agentLevel.value); } catch {}
@@ -1506,6 +1531,32 @@ function askPerson(request) {
 }
 
 
+function completePerson(request, signal) {
+  page.completionDetails.replaceChildren(valueViews(request));
+  page.completionText.value = "";
+  page.completionDialog.returnValue = "cancel";
+  page.completionDialog.showModal();
+  page.completionText.focus();
+  return new Promise((resolve, reject) => {
+    const cancel = () => page.completionDialog.close("cancel");
+    page.completionDialog.addEventListener("close", () => {
+      signal.removeEventListener("abort", cancel);
+      if (page.completionDialog.returnValue !== "accept") {
+        reject(Object.assign(new Error("Completion was refused."), { code: -32000 }));
+        return;
+      }
+      resolve({
+        role: "assistant",
+        content: { type: "text", text: page.completionText.value },
+        model: "console-operator",
+      });
+    }, { once: true });
+    signal.addEventListener("abort", cancel, { once: true });
+    if (signal.aborted) cancel();
+  });
+}
+
+
 function buildFields(schema, into, omit) {
   const properties = schema.properties || {};
   const required = new Set(schema.required || []);
@@ -1743,6 +1794,30 @@ function rememberToolFields(name, fields) {
 }
 
 
+function iconView(icons) {
+  const offered = (Array.isArray(icons) ? icons : []).filter((icon) =>
+    typeof icon?.src === "string" && /^(https?:\/\/|data:image\/)/i.test(icon.src)
+  );
+  if (!offered.length) return null;
+  const picture = element("picture", "declaration-icon");
+  for (const theme of ["dark", "light"]) {
+    const icon = offered.find((one) => one.theme === theme);
+    if (!icon) continue;
+    const source = document.createElement("source");
+    source.media = `(prefers-color-scheme: ${theme})`;
+    source.srcset = icon.src;
+    picture.append(source);
+  }
+  const image = document.createElement("img");
+  image.alt = "";
+  image.referrerPolicy = "no-referrer";
+  image.onerror = () => picture.remove();
+  image.src = (offered.find((one) => !one.theme) || offered[0]).src;
+  picture.append(image);
+  return picture;
+}
+
+
 function show(items, title, into, describe, pick) {
   if (!items.length) return [];
   const buttons = [];
@@ -1752,6 +1827,8 @@ function show(items, title, into, describe, pick) {
     const button = element("button", "item");
     button.type = "button";
     const name = element("span", "name", describe.label(item));
+    const icon = iconView(item.icons);
+    if (icon) name.prepend(icon);
     (describe.tags ? describe.tags(item) : []).forEach((tag) => {
       name.append(element("span", `tag ${tag}`, tag));
     });
@@ -1920,33 +1997,6 @@ function plain(text) {
     .replace(/^\s*[-*+]\s+/, "");
 }
 
-
-function show(items, title, into, describe, pick) {
-  if (!items.length) return [];
-  const buttons = [];
-  const group = element("div", "group");
-  group.append(element("h3", null, title));
-  items.forEach((item) => {
-    const button = element("button", "item");
-    button.type = "button";
-    const name = element("span", "name", describe.label(item));
-    (describe.tags ? describe.tags(item) : []).forEach((tag) => {
-      name.append(element("span", `tag ${tag}`, tag));
-    });
-    button.append(name);
-    const note = describe.note(item);
-    if (note) button.append(element("span", "note", note));
-    button.onclick = () => {
-      page.catalogue.querySelectorAll(".item").forEach((other) => other.classList.remove("chosen"));
-      button.classList.add("chosen");
-      pick(item);
-    };
-    group.append(button);
-    buttons.push(button);
-  });
-  into.append(group);
-  return buttons;
-}
 
 function hints(tool) {
   const annotations = tool.annotations || {};
@@ -2506,9 +2556,13 @@ async function invoke() {
 }
 
 
-function setServerInstructions(text) {
+function setServerInstructions(text, icons) {
   serverInstructions = text || "";
   if (page.serverTitle) page.serverTitle.disabled = !serverInstructions;
+  if (page.serverIcon) {
+    const icon = iconView(icons);
+    page.serverIcon.replaceChildren(...(icon ? [icon] : []));
+  }
 }
 
 function showServerInstructions(clearFragment = true) {
@@ -2535,6 +2589,7 @@ function rememberConnection(connected) {
       endpoint: endpointUrl.href,
       revision: page.revision.value,
       answerable: page.answerable.checked,
+      completion: page.completion.checked,
       notifications: page.notifications.checked,
     }));
   } catch {}
@@ -2550,6 +2605,7 @@ function restoreConnection() {
     page.endpoint.value = url.pathname + url.search;
     page.revision.value = saved.revision;
     page.answerable.checked = saved.answerable;
+    page.completion.checked = saved.completion === true;
     page.notifications.checked = saved.notifications;
     connect();
   } catch {}
@@ -2572,6 +2628,7 @@ function disconnect() {
   page.refresh.disabled = true;
   page.revision.disabled = false;
   page.answerable.disabled = false;
+  page.completion.disabled = false;
   page.notifications.disabled = false;
   setEndpointDisabled(false);
   page.connect.textContent = "Connect";
@@ -2584,6 +2641,7 @@ async function connect() {
   page.authenticate.disabled = true;
   page.revision.disabled = true;
   page.answerable.disabled = true;
+  page.completion.disabled = true;
   page.notifications.disabled = true;
   setEndpointDisabled(true);
   say("connecting", "");
@@ -2596,18 +2654,20 @@ async function connect() {
       authHeaders: credentials.forEndpoint(endpointUrl.href),
       onAuthError: openAuthentication,
       answerable: page.answerable.checked,
+      completion: page.completion.checked,
       notifications: page.notifications.checked,
       onNotificationError: (error) => report("Notifications interrupted", error.message, true),
       onFrame: record,
       onNotify: noticed,
       onQuestion: askPerson,
+      onCompletion: completePerson,
     });
     const described = await client.initialize();
-    setServerInstructions(described.instructions);
+    const info = described.serverInfo || (described._meta || {})["io.modelcontextprotocol/serverInfo"] || {};
+    setServerInstructions(described.instructions, info.icons);
     await loadCatalogue();
     page.refresh.disabled = false;
-    const name = (described.serverInfo || (described._meta || {})["io.modelcontextprotocol/serverInfo"] || {}).name;
-    say(`${name || "connected"} · ${client.version}`, "on");
+    say(`${info.name || "connected"} · ${client.version}`, "on");
     page.connect.textContent = "Disconnect";
     if (!chosen) showServerInstructions(false);
     client.startNotifications();
@@ -2619,6 +2679,7 @@ async function connect() {
     page.refresh.disabled = true;
     page.revision.disabled = false;
     page.answerable.disabled = false;
+    page.completion.disabled = false;
     page.notifications.disabled = false;
     setEndpointDisabled(false);
     page.connect.textContent = "Connect";
@@ -2728,7 +2789,7 @@ function start() {
     try {
       if (client.rules.extensions) {
         const described = await client.initialize();
-        setServerInstructions(described.instructions);
+        setServerInstructions(described.instructions, (described._meta || {})["io.modelcontextprotocol/serverInfo"]?.icons);
       }
       await loadCatalogue();
     } catch (error) {

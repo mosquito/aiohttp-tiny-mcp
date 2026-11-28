@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
-from typing import Any
+from typing import Any, Literal
 
 from aiohttp_tiny_mcp.protocol.adapter import Adapter
 from aiohttp_tiny_mcp.protocol.core import ClientProfile, InputRequest, Operation
@@ -24,6 +24,7 @@ from aiohttp_tiny_mcp.protocol.models import (
     ListParams,
     ListPromptsResult,
     ListResourcesResult,
+    ListResourceTemplatesResult,
     ListToolsResult,
     MethodFilter,
     Params,
@@ -31,6 +32,7 @@ from aiohttp_tiny_mcp.protocol.models import (
     ReadResourceParams,
     ReadResourceResult,
     ResourceDef,
+    ResourceTemplateDef,
     SetLevelParams,
     SubscribeParams,
     ToolDef,
@@ -39,6 +41,11 @@ from aiohttp_tiny_mcp.protocol.models import (
 log = logging.getLogger(__name__)
 
 Elicitor = Callable[[InputRequest], Awaitable[Mapping[str, Any]]]
+
+CompletionProvider = Callable[[InputRequest], Awaitable[Mapping[str, Any]]]
+"""Provide a model completion for a server request."""
+
+SAMPLING_METHOD = "sampling/createMessage"
 
 ASK_ROUNDS = 8
 
@@ -59,6 +66,7 @@ class BaseClient(ABC):
         *,
         client_info: Implementation | None = None,
         on_ask: Elicitor | None = None,
+        on_completion: CompletionProvider | None = None,
         on_notification: Callable[[Mapping[str, Any]], Any] | None = None,
         log_level: str | None = None,
     ) -> None:
@@ -68,6 +76,9 @@ class BaseClient(ABC):
         )
         self.log_level = log_level
         self.on_ask = on_ask
+        #: Answers `sampling/createMessage` with a completion. `None` declares no
+        #: `sampling` capability, so the server does not ask for one.
+        self.on_completion = on_completion
         self.on_notification = on_notification
         self.next_id_counter = 0
         self.tool_definitions: dict[str, ToolDef] = {}
@@ -75,10 +86,33 @@ class BaseClient(ABC):
 
     @property
     def capabilities(self) -> Mapping[str, Any]:
-        """MRTR can be answered manually; pushed questions require an on_ask callback."""
+        """Declare the wire capabilities that this client can answer."""
+        found: dict[str, Any] = {}
         if self.on_ask is not None or self.adapter.can_ask:
-            return {"elicitation": {}}
-        return {}
+            found["elicitation"] = {}
+        if self.on_completion is not None:
+            found["sampling"] = {}
+        return found
+
+    def answerer(self, method: Any) -> Callable[[InputRequest], Awaitable[Any]] | None:
+        """What answers this method, or `None` where this client cannot answer it."""
+        if method == SAMPLING_METHOD:
+            return self.on_completion
+        if method == "elicitation/create":
+            return self.on_ask
+        return None
+
+    def can_answer(self, requests: Mapping[str, InputRequest]) -> bool:
+        """Whether this client can answer every request of one round."""
+        return all(
+            self.answerer(request.get("method")) is not None for request in requests.values()
+        )
+
+    async def answer_request(self, request: InputRequest) -> Mapping[str, Any]:
+        """Answer one server request with whatever this client has for that method."""
+        answer = self.answerer(request.get("method"))
+        assert answer is not None, request.get("method")
+        return await answer(request)
 
     @property
     def profile(self) -> ClientProfile:
@@ -127,16 +161,23 @@ class BaseClient(ABC):
                 if isinstance(await_me, Awaitable):
                     await await_me
             return
-        if self.on_ask is None or "method" not in frame:
+        pushed: InputRequest = {
+            "method": frame.get("method"),
+            "params": frame.get("params") or {},
+        }
+        if frame.get("method") is None or not self.can_answer({"": pushed}):
             await self.reply(
                 {
                     "jsonrpc": "2.0",
                     "id": frame["id"],
-                    "error": {"code": -32601, "message": f"unsupported: {frame.get('method')}"},
+                    "error": {
+                        "code": -32601,
+                        "message": f"unsupported: {frame.get('method')}",
+                    },
                 }
             )
             return
-        answer = await self.on_ask({"method": frame["method"], "params": frame.get("params") or {}})
+        answer = await self.answer_request(pushed)
         await self.reply({"jsonrpc": "2.0", "id": frame["id"], "result": dict(answer)})
 
     async def request(
@@ -230,26 +271,49 @@ class BaseClient(ABC):
     ) -> CallToolResult | dict[str, Any]:
         if tool_definition is not None:
             self.tool_definitions[name] = tool_definition
+        result, needs_input = await self.request_with_input(
+            Operation.CALL_TOOL,
+            name,
+            arguments,
+            input_responses=input_responses,
+            request_state=request_state,
+        )
+        if needs_input:
+            return result
+        return CallToolResult.model_validate(result)
+
+    async def request_with_input(
+        self,
+        operation: Literal[Operation.CALL_TOOL, Operation.GET_PROMPT],
+        name: str,
+        arguments: dict[str, Any],
+        *,
+        input_responses: dict[str, Any] | None = None,
+        request_state: Any = None,
+    ) -> tuple[dict[str, Any], bool]:
+        """Return a tool or prompt result and whether it needs an answer from the caller."""
         answers = dict(input_responses or {})
         state = request_state
+        params_type = CallToolParams if operation is Operation.CALL_TOOL else GetPromptParams
         for _ in range(ASK_ROUNDS):
-            params = CallToolParams(
+            params = params_type(
                 name=name,
                 arguments=arguments,
                 input_responses=answers or None,
                 request_state=state,
             )
-            result = await self.request(Operation.CALL_TOOL, params, name=name)
+            result = await self.request(operation, params, name=name)
+            if operation is Operation.GET_PROMPT and not self.adapter.can_ask:
+                return result, False
             asked = self.adapter.client_input_requests(result)
             if asked is None:
-                return CallToolResult.model_validate(result)
-            if self.on_ask is None:
-                # Without a callback, return questions for the caller to answer manually.
-                return result
+                return result, False
             requests, state = asked
-            # Resend earlier answers because the handler restarts on each round.
+            if not self.can_answer(requests):
+                return result, True
+            # Send the previous answers again when the handler starts a new round.
             for key, request in requests.items():
-                answers[key] = dict(await self.on_ask(request))
+                answers[key] = dict(await self.answer_request(request))
         raise ClientError(-32000, f"{name} still asking after {ASK_ROUNDS} rounds")
 
     async def listen(
@@ -319,6 +383,17 @@ class BaseClient(ABC):
             found += ListResourcesResult.model_validate(result).resources
         return found
 
+    async def list_resource_templates(self) -> list[ResourceTemplateDef]:
+        """The address templates a server offers, from every page of the listing.
+
+        A template names its variables in RFC 6570 syntax. Fill them in, then
+        read the address with `read_resource`.
+        """
+        found: list[ResourceTemplateDef] = []
+        async for result in self.pages(Operation.LIST_RESOURCE_TEMPLATES):
+            found += ListResourceTemplatesResult.model_validate(result).resource_templates
+        return found
+
     async def read_resource(self, uri: str) -> ReadResourceResult:
         result = await self.request(Operation.READ_RESOURCE, ReadResourceParams(uri=uri), name=uri)
         return ReadResourceResult.model_validate(result)
@@ -330,9 +405,11 @@ class BaseClient(ABC):
         return found
 
     async def get_prompt(self, name: str, arguments: dict[str, str]) -> GetPromptResult:
-        result = await self.request(
-            Operation.GET_PROMPT, GetPromptParams(name=name, arguments=arguments), name=name
-        )
+        result, needs_input = await self.request_with_input(Operation.GET_PROMPT, name, arguments)
+        if needs_input:
+            raise ClientError(
+                -32000, f"Prompt {name!r} requires input with no matching callback", result
+            )
         return GetPromptResult.model_validate(result)
 
     async def complete(self, ref: dict[str, Any], argument: dict[str, str]) -> CompleteResult:

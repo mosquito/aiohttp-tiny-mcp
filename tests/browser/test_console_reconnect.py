@@ -24,6 +24,7 @@ async def test_reload_restores_connection_and_options_but_new_tab_stays_disconne
     await page.locator("#endpoint").fill(endpoint)
     await page.locator("#revision").select_option("2025-11-25")
     await page.locator("#answerable").uncheck()
+    await page.locator("#sampling").check()
     await page.locator("#notifications").uncheck()
     await page.locator("#connect").click()
     await expect(page.locator("#connect")).to_have_text("Disconnect")
@@ -33,6 +34,7 @@ async def test_reload_restores_connection_and_options_but_new_tab_stays_disconne
     await expect(page.locator("#endpoint")).to_have_value(endpoint)
     await expect(page.locator("#revision")).to_have_value("2025-11-25")
     await expect(page.locator("#answerable")).not_to_be_checked()
+    await expect(page.locator("#sampling")).to_be_checked()
     await expect(page.locator("#notifications")).not_to_be_checked()
     initialize = [
         request

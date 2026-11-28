@@ -82,7 +82,7 @@ async def get_skill(args: ReadResourceParams) -> Detail:
     return Detail(skill=entry())
 
 
-@extension.resource(URI, mime_type="text/markdown", cache_ttl_ms=0, cache_scope="private")
+@extension.resource(URI, mime_type="text/markdown", cache_ttl=0, cache_scope="private")
 async def read_skill(args: Nothing, source: Instructions) -> str:
     return f"---\nname: deploy\ndescription: {DESCRIPTION}\n---\n{source.text}\n"
 
@@ -149,6 +149,12 @@ read `mcp-extensions://io.modelcontextprotocol/skills/skills/list` to receive th
 current entries, including `resources: "dynamic"`. This read runs the same handler
 as native `skills/list`. In the viewer, select that URI under **Resources**
 and click **Read**. Older revisions do not have native extension views.
+
+With `resources=tool`, all supported revisions can list and read registered
+`SKILL.md` addresses through the [resource tools](resources.md#access-through-tools).
+This covers snapshot files and files at fixed addresses whose contents change.
+For a live catalogue backed by a URI template, the tools list the template.
+On `2026-07-28`, call `skills/list` to discover the concrete skill addresses.
 
 ## Changing the catalog
 

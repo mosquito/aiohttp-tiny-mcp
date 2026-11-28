@@ -30,7 +30,7 @@ The server's public surface consists of a registry and its handlers:
 
 | Declare | The client receives |
 | --- | --- |
-| `Registry(name, version, ...)` | Server identity and instructions |
+| `Registry(name, version, ...)` | Server identity, instructions, icons and a website |
 | Tool function, model, and docstring | Name, description, input schema, and result |
 | Resource URI and handler | A readable URI or URI template |
 | Prompt function and model | A named prompt and its arguments |
@@ -38,6 +38,29 @@ The server's public surface consists of a registry and its handlers:
 
 `Exchange`, database clients, the store, and the hub are server-side objects.
 They are never tool arguments and are not visible in a tool listing.
+
+## Names and addresses
+
+A tool name has one to 128 characters, each a letter, a digit, `.`, `_` or
+`-`. That is the specification's own rule, and registration refuses anything
+else, including a space, a comma, a `/` and any non-ASCII letter. A leading or
+trailing `-` or `.` is discouraged rather than refused, so it registers and
+logs a warning. The name defaults to the function's own name. Python also allows
+Unicode identifiers; pass an ASCII `name=` for those functions. A prompt name is not constrained: the specification states
+the rule for tools only.
+
+An `icons=` list on a declaration, or on the registry, gives a host something to
+show beside the name. Each entry needs an `http:`, `https:` or `data:` source, and
+`sizes` entries of the form `WxH` or `any`. Icons reach the two newest revisions
+and are dropped on the rest. A `data:` source repeats its bytes in every listing
+that names it, so prefer a URL for larger assets. Use `Icons.MAGNIFYING_GLASS` and the other
+[built-in presets](guide/icons.md) for ready light/dark pairs, or load a custom
+image with `Icon.from_file()` or `Icon.from_bytes()`.
+
+A resource URI is either a fixed address or a template with `{name}`
+variables, each matching one path segment. Registration refuses a malformed
+template, because the alternative is an address no request can reach. See
+[Resources](guide/resources.md).
 
 ## MCP and this library
 
@@ -102,18 +125,12 @@ notifications. A handler keeps the same API on all five revisions, while any
 worker can handle the next request; nothing leaves the server except opaque
 identifiers.
 
-The SDK is also disproportionately slow before application work begins. The
-local benchmark normalizes each HTTP stack against its bare framework and still
-measures about 3–4× the `tools/call` rate here; over stdio, where no web
-framework is involved, it is about 4–5×. Its stateless mode is slower than its
-stateful mode on legacy revisions because it creates and destroys a session for
-each request. These are small-handler measurements, not production capacity
-claims; see [What it costs](reference/benchmarks.md).
+See [What it costs](reference/benchmarks.md) for HTTP and stdio benchmarks.
 
 ### Choose deliberately
 
-Choose the SDK when its sampling or roots APIs are required, or when
-Starlette/ASGI is a fixed constraint. This library supports aiohttp middleware,
+Choose the SDK when Starlette or ASGI is a fixed constraint, or when its MCP
+Apps or Tasks work is required. This library supports aiohttp middleware,
 [custom extensions and skill directories](guide/extensions.md), and extensible
 [authentication policies](guide/auth.md), including Basic and OAuth Bearer.
 Choose it for aiohttp and for legacy session-based MCP behind a load balancer.

@@ -73,12 +73,11 @@ protocol failure, raise `Rejected(Failure(...))` from `aiohttp_tiny_mcp.protocol
 Unexpected exceptions produce `-32603`. Extension methods are requests and require
 an id; extension notification handlers are not supported.
 
-Protocol metadata is available through `Exchange`; `_meta` is removed before
-validating handler arguments. Method fields, including `inputResponses` and
-`requestState`, remain available to the argument model. HTTP authentication, origin
-checks, and required protocol headers still apply. Apply any method-specific
-authorization in the handler using an injected `Principal`; see
-[handler permissions](auth.md#handler-permissions).
+The argument model receives method fields, including `inputResponses` and
+`requestState`. Read protocol metadata through `Exchange` and the restored
+state on a retry through `Exchange.state`.
+
+Use an injected `Principal` for [method-specific authorization](auth.md#handler-permissions).
 
 ## Bundle resources for older clients
 

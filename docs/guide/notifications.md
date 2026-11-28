@@ -48,9 +48,14 @@ assert seen == [0, 1, 2]
 assert result.content[0].text == "did 3"
 ```
 
-A tool without `streaming=True` answers in one piece and has nowhere to report,
-so `ex.progress` is silently ignored there. That is deliberate: a handler may be
-called either way and should not have to check.
+Progress travels on the stdio or legacy HTTP+SSE channel. On Streamable HTTP,
+`ex.progress` is ignored if the call has no response stream.
+
+Progress travels one way here. A client reports progress only against a request
+the server sent it with a progress token, and this server sends no token on a
+question it pushes, so there is nothing for a client to report against. An
+inbound `notifications/progress` is therefore ignored. Completion requests also
+carry no progress token, so their progress cannot be reported to the handler.
 
 ## Logging
 
@@ -203,10 +208,8 @@ The topics are:
 Anything else published to the topic is ignored, so an application may use the
 same hub for its own traffic.
 
-## What a subscription is not
+## Reconnecting
 
-It does not survive a disconnect. A client that reconnects subscribes again,
-and the server keeps nothing waiting for it. On the older revisions the *set*
-of subscribed resources does live in the session, so a reconnecting client with
-the same session id resumes without re-subscribing -- but the stream itself is
-always new.
+On `2026-07-28`, reconnect with a new `subscriptions/listen` request.
+On older revisions, a Streamable HTTP GET keeps the session's resource
+subscriptions and can replay retained events after `Last-Event-ID`.
